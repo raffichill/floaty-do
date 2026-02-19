@@ -1,20 +1,23 @@
 import AppKit
-import SwiftUI
 
 class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private var panel: FloatingPanel!
     private let store = TodoStore()
+    private var todoVC: TodoViewController!
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Hide dock icon
         NSApp.setActivationPolicy(.accessory)
 
         // Create floating panel
-        // 10 rows * 32pt + 16pt vertical padding
-        panel = FloatingPanel(contentRect: NSRect(x: 0, y: 0, width: 260, height: 336))
-        let hostingView = NSHostingView(rootView: TodoListView(store: store))
-        panel.contentView = hostingView
+        let initialRows = min(store.items.count + 3, TodoStore.maxItems)
+        let height = CGFloat(initialRows) * 36.0 + 16.5
+        panel = FloatingPanel(contentRect: NSRect(x: 0, y: 0, width: 260, height: height))
+
+        // AppKit view controller
+        todoVC = TodoViewController(store: store)
+        panel.contentViewController = todoVC
 
         // Menu bar item
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
@@ -34,14 +37,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         guard let event = NSApp.currentEvent else { return }
 
         if event.type == .rightMouseUp {
-            // Show quit menu on right-click
             let menu = NSMenu()
             menu.addItem(NSMenuItem(title: "Quit FloatyDo", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
             statusItem.menu = menu
             statusItem.button?.performClick(nil)
             statusItem.menu = nil
         } else {
-            // Toggle panel on left-click
             if panel.isVisible {
                 panel.orderOut(nil)
             } else {
