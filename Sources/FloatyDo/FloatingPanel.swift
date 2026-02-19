@@ -1,6 +1,8 @@
 import AppKit
 
 final class FloatingPanel: NSPanel {
+    private let customFieldEditor = CaretEndFieldEditor()
+
     init(contentRect: NSRect) {
         super.init(
             contentRect: contentRect,
@@ -22,5 +24,16 @@ final class FloatingPanel: NSPanel {
         isOpaque = false
         backgroundColor = NSColor(red: 0.08, green: 0.08, blue: 0.12, alpha: 1.0)
         hasShadow = true
+
+        // Configure custom field editor
+        customFieldEditor.isFieldEditor = true
+        customFieldEditor.isRichText = false
+    }
+
+    override func fieldEditor(_ createFlag: Bool, for object: Any?) -> NSText? {
+        if object is NSTextField {
+            return customFieldEditor
+        }
+        return super.fieldEditor(createFlag, for: object)
     }
 }
