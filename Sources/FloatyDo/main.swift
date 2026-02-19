@@ -10,10 +10,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Hide dock icon
         NSApp.setActivationPolicy(.accessory)
 
-        // Create floating panel
-        let initialRows = min(store.items.count + 3, TodoStore.maxItems)
-        let height = CGFloat(initialRows) * 36.0 + 16.5
-        panel = FloatingPanel(contentRect: NSRect(x: 0, y: 0, width: 260, height: height))
+        // Create floating panel (400×300 default, 300×200 minimum)
+        panel = FloatingPanel(contentRect: NSRect(x: 0, y: 0, width: 400, height: 300))
+        panel.minSize = NSSize(width: 300, height: 200)
 
         // AppKit view controller
         todoVC = TodoViewController(store: store)

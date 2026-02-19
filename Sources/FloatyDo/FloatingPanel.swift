@@ -19,6 +19,12 @@ final class FloatingPanel: NSPanel {
         isMovableByWindowBackground = true
         isReleasedWhenClosed = false
 
+        // Taller title bar via empty toolbar — matches Things-style traffic light padding
+        let toolbar = NSToolbar(identifier: "main")
+        toolbar.showsBaselineSeparator = false
+        self.toolbar = toolbar
+        toolbarStyle = .unifiedCompact
+
         // Unified dark background — title bar blends with content
         appearance = NSAppearance(named: .darkAqua)
         isOpaque = false
