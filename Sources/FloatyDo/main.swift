@@ -5,6 +5,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var panel: FloatingPanel!
     private let store = TodoStore()
     private var todoVC: TodoViewController!
+    private var appEventMonitor: Any?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Hide dock icon
@@ -25,6 +26,23 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             button.action = #selector(statusItemClicked)
             button.target = self
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
+        }
+
+        // App-level shortcuts: cmd+Q to quit, cmd+W to hide panel
+        appEventMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self else { return event }
+            let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            guard mods == .command else { return event }
+
+            if event.charactersIgnoringModifiers == "q" {
+                NSApp.terminate(nil)
+                return nil
+            }
+            if event.charactersIgnoringModifiers == "w" {
+                self.panel.orderOut(nil)
+                return nil
+            }
+            return event
         }
 
         // Position panel near the status item and show it

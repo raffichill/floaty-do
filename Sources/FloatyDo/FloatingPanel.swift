@@ -36,6 +36,9 @@ final class FloatingPanel: NSPanel {
         customFieldEditor.isRichText = false
     }
 
+    // Allow key events even when the app isn't active (menu bar utility)
+    override var canBecomeKey: Bool { true }
+
     override func fieldEditor(_ createFlag: Bool, for object: Any?) -> NSText? {
         if object is NSTextField {
             return customFieldEditor
