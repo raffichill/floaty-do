@@ -1,4 +1,5 @@
 import AppKit
+import QuartzCore
 
 // MARK: - Controller
 
@@ -13,6 +14,7 @@ final class TodoViewController: NSViewController {
     private var currentTab: Tab = .tasks
     private var tasksTabButton: NSButton!
     private var archiveTabButton: NSButton!
+    private var isAnimating = false
 
     init(store: TodoStore) {
         self.store = store
@@ -95,12 +97,9 @@ final class TodoViewController: NSViewController {
 
             if event.keyCode == 36 { // cmd+return
                 if self.currentTab == .tasks {
+                    fputs("[FloatyDo] cmd+return: sel=\(self.selectedIndex) items=\(self.store.items.count) animating=\(self.isAnimating)\n", stderr)
                     if self.selectedIndex < self.store.items.count {
-                        self.store.archive(self.store.items[self.selectedIndex])
-                        if self.selectedIndex >= self.store.items.count && self.selectedIndex > 0 {
-                            self.selectedIndex = self.store.items.count - 1
-                        }
-                        self.deferredRebuild()
+                        self.animateCompletion(at: self.selectedIndex)
                     }
                 } else {
                     if self.selectedIndex < self.store.archivedItems.count {
@@ -153,10 +152,6 @@ final class TodoViewController: NSViewController {
         button.imagePosition = .imageOnly
         button.translatesAutoresizingMaskIntoConstraints = false
         button.widthAnchor.constraint(equalToConstant: 36).isActive = true
-        // Debug: red border around tap target
-        button.wantsLayer = true
-        button.layer?.borderColor = NSColor.red.cgColor
-        button.layer?.borderWidth = 1
         return button
     }
 
@@ -183,6 +178,72 @@ final class TodoViewController: NSViewController {
         selectedIndex = 0
         updateTabAppearance()
         rebuildRows(resize: false)
+    }
+
+    // MARK: - Completion Animation
+
+    private func animateCompletion(at index: Int) {
+        fputs("[FloatyDo] animateCompletion: idx=\(index) animating=\(isAnimating) items=\(store.items.count)\n", stderr)
+        guard !isAnimating, index < store.items.count else { return }
+        isAnimating = true
+        fputs("[FloatyDo] animation STARTING\n", stderr)
+
+        let row = rowViews[index]
+        let item = store.items[index]
+
+        // Clear focus during animation
+        view.window?.makeFirstResponder(nil)
+
+        // Phase 1: Check bounce + strikethrough (300ms)
+        row.playCompletionAnimation { [weak self] in
+            guard let self else { return }
+
+            // Phase 2: Collapse row + fade out (300ms)
+            self.animateRowCollapse(row: row) {
+                // Post-animation: archive and rebuild
+                self.store.archive(item)
+
+                // selectedIndex stays at same position (now points to next item)
+                if index >= self.store.items.count {
+                    self.selectedIndex = max(0, self.store.items.count - 1)
+                } else {
+                    self.selectedIndex = index
+                }
+
+                self.rebuildRows()
+                self.isAnimating = false
+            }
+        }
+    }
+
+    private func animateRowCollapse(row: TodoRowView, completion: @escaping () -> Void) {
+        row.layer?.masksToBounds = true
+
+        NSAnimationContext.runAnimationGroup({ context in
+            context.duration = 0.3
+            context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            context.allowsImplicitAnimation = true
+
+            row.heightConstraint.animator().constant = 0
+            row.animator().alphaValue = 0.0
+
+            // Animate window frame to match new content height
+            if let window = self.view.window {
+                let newRowCount = max(self.rowCount - 1, 1)
+                let contentHeight = CGFloat(newRowCount) * 36.0 + 16.5
+                let fullHeight = max(contentHeight + window.titlebarHeight, window.minSize.height)
+                let oldFrame = window.frame
+                let newFrame = NSRect(
+                    x: oldFrame.origin.x,
+                    y: oldFrame.maxY - fullHeight,
+                    width: oldFrame.width,
+                    height: fullHeight
+                )
+                window.animator().setFrame(newFrame, display: true)
+            }
+
+            self.stackView.layoutSubtreeIfNeeded()
+        }, completionHandler: completion)
     }
 
     // MARK: - Navigation (called by field delegate via row callbacks)
@@ -303,12 +364,22 @@ final class TodoViewController: NSViewController {
 
     private func rebuildArchiveRows(count: Int) {
         for i in 0..<count {
-            let item = store.archivedItems[i]
-            let row = TodoRowView(
-                text: item.text, isDone: true,
-                circleOpacity: 1.0,
-                isEditable: true
-            )
+            let row: TodoRowView
+            if i < store.archivedItems.count {
+                let item = store.archivedItems[i]
+                row = TodoRowView(
+                    text: item.text, isDone: true,
+                    circleOpacity: 1.0,
+                    isEditable: true
+                )
+            } else {
+                row = TodoRowView(
+                    text: "", isDone: false,
+                    circleOpacity: fadeOpacity(emptyIndex: i - store.archivedItems.count,
+                                               emptyCount: count - store.archivedItems.count),
+                    isEditable: false
+                )
+            }
 
             row.controller = self
             row.translatesAutoresizingMaskIntoConstraints = false
@@ -354,6 +425,7 @@ private extension NSWindow {
 final class TodoRowView: NSView {
     private let circleView: NSImageView
     private(set) var textField: NSTextField?
+    private(set) var heightConstraint: NSLayoutConstraint!
     weak var controller: TodoViewController?
     var onTextChange: ((String) -> Void)?
 
@@ -372,11 +444,14 @@ final class TodoRowView: NSView {
         wantsLayer = true
         translatesAutoresizingMaskIntoConstraints = false
 
+        circleView.wantsLayer = true
         circleView.translatesAutoresizingMaskIntoConstraints = false
         addSubview(circleView)
 
+        heightConstraint = heightAnchor.constraint(equalToConstant: 36)
+
         var constraints: [NSLayoutConstraint] = [
-            heightAnchor.constraint(equalToConstant: 36),
+            heightConstraint,
             circleView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
             circleView.centerYAnchor.constraint(equalTo: centerYAnchor),
             circleView.widthAnchor.constraint(equalToConstant: 18),
@@ -392,6 +467,7 @@ final class TodoRowView: NSView {
             field.focusRingType = .none
             field.lineBreakMode = .byTruncatingTail
             field.cell?.isScrollable = true
+            field.wantsLayer = true
             field.translatesAutoresizingMaskIntoConstraints = false
 
             if isDone {
@@ -426,6 +502,93 @@ final class TodoRowView: NSView {
     required init?(coder: NSCoder) { fatalError() }
 
     func setText(_ text: String) { textField?.stringValue = text }
+
+    // MARK: - Completion Animation (Phase 1)
+
+    func playCompletionAnimation(completion: @escaping () -> Void) {
+        guard let circleLayer = circleView.layer else {
+            completion()
+            return
+        }
+
+        // 1. Spring shrink the circle out
+        let shrink = CASpringAnimation(keyPath: "transform.scale")
+        shrink.fromValue = 1.0
+        shrink.toValue = 0.0
+        shrink.stiffness = 300
+        shrink.damping = 30
+        shrink.duration = shrink.settlingDuration
+        shrink.fillMode = .forwards
+        shrink.isRemovedOnCompletion = false
+        circleLayer.add(shrink, forKey: "shrinkOut")
+
+        // 2. Swap icon mid-shrink, then spring grow the checkmark in
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+            let config = NSImage.SymbolConfiguration(pointSize: 14, weight: .regular)
+            let checkImage = NSImage(systemSymbolName: "checkmark.circle.fill",
+                                      accessibilityDescription: nil)!
+            self.circleView.image = checkImage.withSymbolConfiguration(config)
+            self.circleView.contentTintColor = .systemGreen
+
+            circleLayer.removeAnimation(forKey: "shrinkOut")
+
+            let growIn = CASpringAnimation(keyPath: "transform.scale")
+            growIn.fromValue = 0.0
+            growIn.toValue = 1.0
+            growIn.stiffness = 300
+            growIn.damping = 30
+            growIn.duration = growIn.settlingDuration
+            growIn.fillMode = .forwards
+            growIn.isRemovedOnCompletion = false
+            circleLayer.add(growIn, forKey: "growIn")
+        }
+
+        // 3. Strikethrough line sweeping left to right
+        if let textField = self.textField, !textField.stringValue.isEmpty {
+            let textWidth = (textField.stringValue as NSString).size(
+                withAttributes: [.font: textField.font!]
+            ).width
+
+            let strikeLayer = CAShapeLayer()
+            let textFrame = textField.frame
+            // Convert text field midY to row's layer coordinate space (flipped)
+            let midY = textFrame.origin.y + textFrame.height / 2.0
+            let path = CGMutablePath()
+            path.move(to: CGPoint(x: textFrame.minX, y: midY))
+            path.addLine(to: CGPoint(x: textFrame.minX + textWidth, y: midY))
+            strikeLayer.path = path
+            strikeLayer.strokeColor = NSColor.white.withAlphaComponent(0.5).cgColor
+            strikeLayer.lineWidth = 1.0
+            strikeLayer.strokeEnd = 0.0
+            // Use flipped geometry to match NSView coordinates
+            strikeLayer.isGeometryFlipped = true
+            self.layer?.addSublayer(strikeLayer)
+
+            let strokeAnim = CABasicAnimation(keyPath: "strokeEnd")
+            strokeAnim.fromValue = 0.0
+            strokeAnim.toValue = 1.0
+            strokeAnim.duration = 0.3
+            strokeAnim.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            strokeAnim.fillMode = .forwards
+            strokeAnim.isRemovedOnCompletion = false
+            strikeLayer.add(strokeAnim, forKey: "strikethrough")
+
+            // 4. Fade text to dimmed
+            let fadeText = CABasicAnimation(keyPath: "opacity")
+            fadeText.fromValue = 1.0
+            fadeText.toValue = 0.3
+            fadeText.duration = 0.3
+            fadeText.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            fadeText.fillMode = .forwards
+            fadeText.isRemovedOnCompletion = false
+            textField.layer?.add(fadeText, forKey: "fadeText")
+        }
+
+        // Fire Phase 2 after 300ms
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            completion()
+        }
+    }
 }
 
 // MARK: - Field Delegate (routes everything to controller)
