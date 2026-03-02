@@ -153,6 +153,13 @@ final class TodoViewController: NSViewController {
         rebuildRows()
     }
 
+    override func viewDidAppear() {
+        super.viewDidAppear()
+        // Initial resize — viewDidLoad runs before the view is in the window,
+        // so resizeWindow() silently fails there. Do it here once the window exists.
+        resizeWindow()
+    }
+
     deinit {
         if let monitor = eventMonitor { NSEvent.removeMonitor(monitor) }
     }
@@ -223,6 +230,8 @@ final class TodoViewController: NSViewController {
         let row = rowViews[index]
         let item = store.items[index]
 
+        fputs("[ANIM] start: archiving '\(item.text)' at index \(index), items=\(store.items.count) [\(store.items.map { $0.text })]\n", stderr)
+
         // Clear focus during animation
         view.window?.makeFirstResponder(nil)
 
@@ -235,10 +244,16 @@ final class TodoViewController: NSViewController {
         row.playCompletionAnimation { [weak self] in
             guard let self else { return }
 
+            fputs("[ANIM] phase3 start: items=\(self.store.items.count)\n", stderr)
+
             // Phase 3: Blur + shrink + collapse
             self.animateRowCollapse(row: row) {
+                fputs("[ANIM] collapse done: items=\(self.store.items.count) before archive\n", stderr)
+
                 // Post-animation: archive and rebuild
                 self.store.archive(item)
+
+                fputs("[ANIM] after archive: items=\(self.store.items.count) [\(self.store.items.map { $0.text })]\n", stderr)
 
                 // selectedIndex stays at same position (now points to next item)
                 if index < self.store.items.count {
@@ -248,7 +263,7 @@ final class TodoViewController: NSViewController {
                     self.selectedIndex = self.store.items.count
                 }
 
-                self.rebuildRows()
+                self.rebuildRows(animateResize: false)
                 self.isAnimating = false
             }
         }
@@ -278,6 +293,26 @@ final class TodoViewController: NSViewController {
             rowLayer.add(blurAnim, forKey: "blurOut")
         }
 
+        // Shrink checkmark to 40% from center (use full transform to avoid anchorPoint issues)
+        if let circleLayer = row.circleView.layer {
+            let b = circleLayer.bounds
+            let cx = b.width / 2
+            let cy = b.height / 2
+            let toOrigin = CATransform3DMakeTranslation(-cx, -cy, 0)
+            let scale = CATransform3DMakeScale(0.4, 0.4, 1)
+            let back = CATransform3DMakeTranslation(cx, cy, 0)
+            let target = CATransform3DConcat(CATransform3DConcat(toOrigin, scale), back)
+
+            let shrinkOut = CABasicAnimation(keyPath: "transform")
+            shrinkOut.fromValue = CATransform3DIdentity
+            shrinkOut.toValue = target
+            shrinkOut.duration = 0.35
+            shrinkOut.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            shrinkOut.fillMode = .forwards
+            shrinkOut.isRemovedOnCompletion = false
+            circleLayer.add(shrinkOut, forKey: "shrinkOut")
+        }
+
         // Fade out
         let fadeAnim = CABasicAnimation(keyPath: "opacity")
         fadeAnim.fromValue = 1.0
@@ -289,28 +324,14 @@ final class TodoViewController: NSViewController {
         rowLayer.add(fadeAnim, forKey: "fadeOut")
 
         // Layout collapse + other rows shift (350ms easeOut)
+        // Note: window resize is handled by rebuildRows() after archive, not here,
+        // to avoid conflicts between animator().setFrame() and setFrame(animate:).
         NSAnimationContext.runAnimationGroup({ context in
             context.duration = 0.35
             context.timingFunction = CAMediaTimingFunction(name: .easeOut)
             context.allowsImplicitAnimation = true
 
             row.heightConstraint.animator().constant = 0
-
-            // Animate window frame to match new content height
-            if let window = self.view.window {
-                let newRowCount = max(self.rowCount - 1, 1)
-                let contentHeight = CGFloat(newRowCount) * 36.0 + 16.5
-                let fullHeight = max(contentHeight + window.titlebarHeight, window.minSize.height)
-                let oldFrame = window.frame
-                let newFrame = NSRect(
-                    x: oldFrame.origin.x,
-                    y: oldFrame.maxY - fullHeight,
-                    width: oldFrame.width,
-                    height: fullHeight
-                )
-                window.animator().setFrame(newFrame, display: true)
-            }
-
             self.stackView.layoutSubtreeIfNeeded()
         }, completionHandler: completion)
     }
@@ -365,7 +386,7 @@ final class TodoViewController: NSViewController {
         }
     }
 
-    private func rebuildRows(resize: Bool = true) {
+    private func rebuildRows(resize: Bool = true, animateResize: Bool = true) {
         for row in rowViews {
             stackView.removeArrangedSubview(row)
             row.removeFromSuperview()
@@ -373,6 +394,8 @@ final class TodoViewController: NSViewController {
         rowViews.removeAll()
 
         let count = rowCount
+
+        fputs("[REBUILD] items=\(store.items.count) rowCount=\(count) resize=\(resize)\n", stderr)
 
         if currentTab == .tasks {
             rebuildTaskRows(count: count)
@@ -382,7 +405,7 @@ final class TodoViewController: NSViewController {
 
         if selectedIndex >= count { selectedIndex = max(0, count - 1) }
 
-        if resize { resizeWindow() }
+        if resize { resizeWindow(animate: animateResize) }
 
         // Focus after layout settles
         DispatchQueue.main.async { [weak self] in
@@ -458,19 +481,28 @@ final class TodoViewController: NSViewController {
         }
     }
 
-    private func resizeWindow() {
+    private func resizeWindow(animate: Bool = true) {
         guard let window = view.window else { return }
         let rows = max(rowCount, 1)
         let contentHeight = CGFloat(rows) * 36.0 + 16.5
-        let fullHeight = max(contentHeight + window.titlebarHeight, window.minSize.height)
+        let titlebar = window.titlebarHeight
+        let fullHeight = max(contentHeight + titlebar, window.minSize.height)
         let oldFrame = window.frame
+
+        // Only grow the window, never shrink it automatically
+        if fullHeight <= oldFrame.height {
+            fputs("[RESIZE] SKIP (no shrink): need=\(fullHeight) have=\(oldFrame.height)\n", stderr)
+            return
+        }
+
         let newFrame = NSRect(
             x: oldFrame.origin.x,
             y: oldFrame.maxY - fullHeight,
             width: oldFrame.width,
             height: fullHeight
         )
-        window.setFrame(newFrame, display: true, animate: true)
+        fputs("[RESIZE] GROW: rows=\(rows) titlebar=\(titlebar) \(oldFrame.height) -> \(fullHeight)\n", stderr)
+        window.setFrame(newFrame, display: true, animate: animate)
     }
 
     private func fadeOpacity(emptyIndex: Int, emptyCount: Int) -> Double {
@@ -485,14 +517,15 @@ final class TodoViewController: NSViewController {
 
 private extension NSWindow {
     var titlebarHeight: CGFloat {
-        frame.height - contentRect(forFrameRect: frame).height
+        // With .fullSizeContentView, contentRect == frame, so use safe area instead
+        contentView?.safeAreaInsets.top ?? 0
     }
 }
 
 // MARK: - Row View
 
 final class TodoRowView: NSView {
-    private let circleView: NSImageView
+    private(set) var circleView: NSImageView
     private(set) var textField: NSTextField?
     private(set) var heightConstraint: NSLayoutConstraint!
     weak var controller: TodoViewController?
