@@ -92,14 +92,28 @@ final class TodoViewController: NSViewController {
         // Event monitor ONLY for cmd+key combos (cmd+return, cmd+delete)
         eventMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self else { return event }
+            guard !self.isAnimating else { return event }
             let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
             guard mods == .command else { return event }
 
             if event.keyCode == 36 { // cmd+return
+                self.syncSelectedIndex()
                 if self.currentTab == .tasks {
-                    fputs("[FloatyDo] cmd+return: sel=\(self.selectedIndex) items=\(self.store.items.count) animating=\(self.isAnimating)\n", stderr)
                     if self.selectedIndex < self.store.items.count {
                         self.animateCompletion(at: self.selectedIndex)
+                        return nil
+                    } else if self.selectedIndex == self.inputIndex {
+                        // On input row: add the todo then immediately complete it
+                        let row = self.rowViews[self.selectedIndex]
+                        let text = row.currentText.trimmingCharacters(in: .whitespaces)
+                        guard !text.isEmpty else { return nil }
+                        self.store.add(text)
+                        let newItemIndex = self.store.items.count - 1
+                        self.rebuildRows()
+                        self.animateCompletion(at: newItemIndex)
+                        return nil
+                    } else {
+                        return nil
                     }
                 } else {
                     if self.selectedIndex < self.store.archivedItems.count {
@@ -109,10 +123,11 @@ final class TodoViewController: NSViewController {
                         }
                         self.deferredRebuild()
                     }
+                    return nil
                 }
-                return nil
             }
             if event.keyCode == 51 { // cmd+delete
+                self.syncSelectedIndex()
                 if self.currentTab == .tasks {
                     if self.selectedIndex < self.store.items.count {
                         self.store.delete(self.store.items[self.selectedIndex])
@@ -140,6 +155,25 @@ final class TodoViewController: NSViewController {
 
     deinit {
         if let monitor = eventMonitor { NSEvent.removeMonitor(monitor) }
+    }
+
+    // MARK: - Focus Sync
+
+    /// Sync selectedIndex with whichever text field actually has focus (e.g. after a click)
+    private func syncSelectedIndex() {
+        for (i, row) in rowViews.enumerated() {
+            if let field = row.textField, field.currentEditor() != nil {
+                selectedIndex = i
+                return
+            }
+        }
+    }
+
+    /// Called by RowFieldDelegate when a row's text field begins editing (click or tab into)
+    func rowDidBeginEditing(_ row: TodoRowView) {
+        if let idx = rowViews.firstIndex(where: { $0 === row }) {
+            selectedIndex = idx
+        }
     }
 
     // MARK: - Tabs
@@ -183,16 +217,19 @@ final class TodoViewController: NSViewController {
     // MARK: - Completion Animation
 
     private func animateCompletion(at index: Int) {
-        fputs("[FloatyDo] animateCompletion: idx=\(index) animating=\(isAnimating) items=\(store.items.count)\n", stderr)
-        guard !isAnimating, index < store.items.count else { return }
+        guard !isAnimating, index < store.items.count, index < rowViews.count else { return }
         isAnimating = true
-        fputs("[FloatyDo] animation STARTING\n", stderr)
 
         let row = rowViews[index]
         let item = store.items[index]
 
         // Clear focus during animation
         view.window?.makeFirstResponder(nil)
+
+        // Safety timeout: reset isAnimating if completion chain breaks
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+            self?.isAnimating = false
+        }
 
         // Phase 1: Check bounce + strikethrough (300ms)
         row.playCompletionAnimation { [weak self] in
@@ -204,10 +241,11 @@ final class TodoViewController: NSViewController {
                 self.store.archive(item)
 
                 // selectedIndex stays at same position (now points to next item)
-                if index >= self.store.items.count {
-                    self.selectedIndex = max(0, self.store.items.count - 1)
-                } else {
+                if index < self.store.items.count {
                     self.selectedIndex = index
+                } else {
+                    // Archived the last item — land on the input row
+                    self.selectedIndex = self.store.items.count
                 }
 
                 self.rebuildRows()
@@ -249,19 +287,19 @@ final class TodoViewController: NSViewController {
     // MARK: - Navigation (called by field delegate via row callbacks)
 
     func moveUp() {
-        guard selectedIndex > 0 else { return }
+        guard !isAnimating, selectedIndex > 0 else { return }
         selectedIndex -= 1
         focusRow(selectedIndex)
     }
 
     func moveDown() {
-        guard selectedIndex < rowCount - 1 else { return }
+        guard !isAnimating, selectedIndex < rowCount - 1 else { return }
         selectedIndex += 1
         focusRow(selectedIndex)
     }
 
     func submitRow() {
-        guard currentTab == .tasks else { return }
+        guard !isAnimating, currentTab == .tasks else { return }
 
         if selectedIndex < store.items.count {
             // On a filled row: return moves down
@@ -511,7 +549,17 @@ final class TodoRowView: NSView {
             return
         }
 
-        // 1. Spring shrink the circle out
+        // Fix anchorPoint: macOS layer-backed views default to (0,0), we need (0.5,0.5) for center scaling
+        let oldAnchor = circleLayer.anchorPoint
+        let oldPosition = circleLayer.position
+        let bounds = circleLayer.bounds
+        circleLayer.anchorPoint = CGPoint(x: 0.5, y: 0.5)
+        circleLayer.position = CGPoint(
+            x: oldPosition.x + bounds.width * (0.5 - oldAnchor.x),
+            y: oldPosition.y + bounds.height * (0.5 - oldAnchor.y)
+        )
+
+        // 1. Spring shrink the circle out from center
         let shrink = CASpringAnimation(keyPath: "transform.scale")
         shrink.fromValue = 1.0
         shrink.toValue = 0.0
@@ -528,7 +576,7 @@ final class TodoRowView: NSView {
             let checkImage = NSImage(systemSymbolName: "checkmark.circle.fill",
                                       accessibilityDescription: nil)!
             self.circleView.image = checkImage.withSymbolConfiguration(config)
-            self.circleView.contentTintColor = .systemGreen
+            self.circleView.contentTintColor = .white
 
             circleLayer.removeAnimation(forKey: "shrinkOut")
 
@@ -545,14 +593,17 @@ final class TodoRowView: NSView {
 
         // 3. Strikethrough line sweeping left to right
         if let textField = self.textField, !textField.stringValue.isEmpty {
+            // Force layout so textField.frame is up to date
+            self.layoutSubtreeIfNeeded()
+
             let textWidth = (textField.stringValue as NSString).size(
                 withAttributes: [.font: textField.font!]
             ).width
 
             let strikeLayer = CAShapeLayer()
             let textFrame = textField.frame
-            // Convert text field midY to row's layer coordinate space (flipped)
-            let midY = textFrame.origin.y + textFrame.height / 2.0
+            // NSView and CALayer both use bottom-left origin (non-flipped)
+            let midY = textFrame.midY
             let path = CGMutablePath()
             path.move(to: CGPoint(x: textFrame.minX, y: midY))
             path.addLine(to: CGPoint(x: textFrame.minX + textWidth, y: midY))
@@ -560,8 +611,6 @@ final class TodoRowView: NSView {
             strikeLayer.strokeColor = NSColor.white.withAlphaComponent(0.5).cgColor
             strikeLayer.lineWidth = 1.0
             strikeLayer.strokeEnd = 0.0
-            // Use flipped geometry to match NSView coordinates
-            strikeLayer.isGeometryFlipped = true
             self.layer?.addSublayer(strikeLayer)
 
             let strokeAnim = CABasicAnimation(keyPath: "strokeEnd")
@@ -597,6 +646,11 @@ private class RowFieldDelegate: NSObject, NSTextFieldDelegate {
     weak var row: TodoRowView?
 
     init(row: TodoRowView) { self.row = row }
+
+    func controlTextDidBeginEditing(_ obj: Notification) {
+        guard let row else { return }
+        row.controller?.rowDidBeginEditing(row)
+    }
 
     func controlTextDidChange(_ obj: Notification) {
         guard let field = obj.object as? NSTextField else { return }
@@ -635,6 +689,10 @@ private class CaretEndTextField: NSTextField {
         let result = super.becomeFirstResponder()
         if let editor = currentEditor() as? NSTextView {
             editor.setSelectedRange(NSRange(location: editor.string.count, length: 0))
+        }
+        // Sync selectedIndex when focus changes via click
+        if result, let row = superview as? TodoRowView {
+            row.controller?.rowDidBeginEditing(row)
         }
         return result
     }
