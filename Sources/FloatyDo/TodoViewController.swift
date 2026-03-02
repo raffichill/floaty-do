@@ -227,15 +227,15 @@ final class TodoViewController: NSViewController {
         view.window?.makeFirstResponder(nil)
 
         // Safety timeout: reset isAnimating if completion chain breaks
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
             self?.isAnimating = false
         }
 
-        // Phase 1: Check bounce + strikethrough (300ms)
+        // Phase 1: Strikethrough → Phase 2: Circle swap → Phase 3: Row clear
         row.playCompletionAnimation { [weak self] in
             guard let self else { return }
 
-            // Phase 2: Collapse row + fade out (300ms)
+            // Phase 3: Blur + shrink + collapse
             self.animateRowCollapse(row: row) {
                 // Post-animation: archive and rebuild
                 self.store.archive(item)
@@ -255,15 +255,46 @@ final class TodoViewController: NSViewController {
     }
 
     private func animateRowCollapse(row: TodoRowView, completion: @escaping () -> Void) {
-        row.layer?.masksToBounds = true
+        guard let rowLayer = row.layer else {
+            completion()
+            return
+        }
 
+        rowLayer.masksToBounds = true
+
+        // Blur effect on row content
+        if let blur = CIFilter(name: "CIGaussianBlur") {
+            blur.name = "blur"
+            blur.setValue(0, forKey: "inputRadius")
+            rowLayer.filters = [blur]
+
+            let blurAnim = CABasicAnimation(keyPath: "filters.blur.inputRadius")
+            blurAnim.fromValue = 0
+            blurAnim.toValue = 8
+            blurAnim.duration = 0.35
+            blurAnim.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            blurAnim.fillMode = .forwards
+            blurAnim.isRemovedOnCompletion = false
+            rowLayer.add(blurAnim, forKey: "blurOut")
+        }
+
+        // Fade out
+        let fadeAnim = CABasicAnimation(keyPath: "opacity")
+        fadeAnim.fromValue = 1.0
+        fadeAnim.toValue = 0.0
+        fadeAnim.duration = 0.35
+        fadeAnim.timingFunction = CAMediaTimingFunction(name: .easeOut)
+        fadeAnim.fillMode = .forwards
+        fadeAnim.isRemovedOnCompletion = false
+        rowLayer.add(fadeAnim, forKey: "fadeOut")
+
+        // Layout collapse + other rows shift (350ms easeOut)
         NSAnimationContext.runAnimationGroup({ context in
-            context.duration = 0.3
-            context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            context.duration = 0.35
+            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
             context.allowsImplicitAnimation = true
 
             row.heightConstraint.animator().constant = 0
-            row.animator().alphaValue = 0.0
 
             // Animate window frame to match new content height
             if let window = self.view.window {
@@ -474,9 +505,7 @@ final class TodoRowView: NSView {
         let image = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)!
         let config = NSImage.SymbolConfiguration(pointSize: 14, weight: .regular)
         circleView = NSImageView(image: image.withSymbolConfiguration(config)!)
-        circleView.contentTintColor = isDone
-            ? NSColor.systemGreen.withAlphaComponent(circleOpacity)
-            : NSColor.white.withAlphaComponent(circleOpacity)
+        circleView.contentTintColor = NSColor.white.withAlphaComponent(circleOpacity)
 
         super.init(frame: .zero)
         wantsLayer = true
@@ -549,60 +578,19 @@ final class TodoRowView: NSView {
             return
         }
 
-        // Fix anchorPoint: macOS layer-backed views default to (0,0), we need (0.5,0.5) for center scaling
-        let oldAnchor = circleLayer.anchorPoint
-        let oldPosition = circleLayer.position
-        let bounds = circleLayer.bounds
-        circleLayer.anchorPoint = CGPoint(x: 0.5, y: 0.5)
-        circleLayer.position = CGPoint(
-            x: oldPosition.x + bounds.width * (0.5 - oldAnchor.x),
-            y: oldPosition.y + bounds.height * (0.5 - oldAnchor.y)
-        )
+        self.layoutSubtreeIfNeeded()
 
-        // 1. Spring shrink the circle out from center
-        let shrink = CASpringAnimation(keyPath: "transform.scale")
-        shrink.fromValue = 1.0
-        shrink.toValue = 0.0
-        shrink.stiffness = 300
-        shrink.damping = 30
-        shrink.duration = shrink.settlingDuration
-        shrink.fillMode = .forwards
-        shrink.isRemovedOnCompletion = false
-        circleLayer.add(shrink, forKey: "shrinkOut")
+        // Strikethrough (250ms) and circle swap (400ms bouncy spring) start together
+        // Phase 3 fires at 500ms to let the spring fully settle
 
-        // 2. Swap icon mid-shrink, then spring grow the checkmark in
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
-            let config = NSImage.SymbolConfiguration(pointSize: 14, weight: .regular)
-            let checkImage = NSImage(systemSymbolName: "checkmark.circle.fill",
-                                      accessibilityDescription: nil)!
-            self.circleView.image = checkImage.withSymbolConfiguration(config)
-            self.circleView.contentTintColor = .white
-
-            circleLayer.removeAnimation(forKey: "shrinkOut")
-
-            let growIn = CASpringAnimation(keyPath: "transform.scale")
-            growIn.fromValue = 0.0
-            growIn.toValue = 1.0
-            growIn.stiffness = 300
-            growIn.damping = 30
-            growIn.duration = growIn.settlingDuration
-            growIn.fillMode = .forwards
-            growIn.isRemovedOnCompletion = false
-            circleLayer.add(growIn, forKey: "growIn")
-        }
-
-        // 3. Strikethrough line sweeping left to right
+        // 1. Strikethrough sweeps across text (250ms)
         if let textField = self.textField, !textField.stringValue.isEmpty {
-            // Force layout so textField.frame is up to date
-            self.layoutSubtreeIfNeeded()
-
             let textWidth = (textField.stringValue as NSString).size(
                 withAttributes: [.font: textField.font!]
             ).width
 
             let strikeLayer = CAShapeLayer()
             let textFrame = textField.frame
-            // NSView and CALayer both use bottom-left origin (non-flipped)
             let midY = textFrame.midY
             let path = CGMutablePath()
             path.move(to: CGPoint(x: textFrame.minX, y: midY))
@@ -616,25 +604,78 @@ final class TodoRowView: NSView {
             let strokeAnim = CABasicAnimation(keyPath: "strokeEnd")
             strokeAnim.fromValue = 0.0
             strokeAnim.toValue = 1.0
-            strokeAnim.duration = 0.3
+            strokeAnim.duration = 0.25
             strokeAnim.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
             strokeAnim.fillMode = .forwards
             strokeAnim.isRemovedOnCompletion = false
             strikeLayer.add(strokeAnim, forKey: "strikethrough")
 
-            // 4. Fade text to dimmed
+            // Fade text as strikethrough sweeps
             let fadeText = CABasicAnimation(keyPath: "opacity")
             fadeText.fromValue = 1.0
             fadeText.toValue = 0.3
-            fadeText.duration = 0.3
+            fadeText.duration = 0.25
             fadeText.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
             fadeText.fillMode = .forwards
             fadeText.isRemovedOnCompletion = false
             textField.layer?.add(fadeText, forKey: "fadeText")
         }
 
-        // Fire Phase 2 after 300ms
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+        // Helper: force anchorPoint to center (AppKit resets it on layer-backed views)
+        func centerAnchor() {
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            let pos = circleLayer.position
+            let anc = circleLayer.anchorPoint
+            let b = circleLayer.bounds
+            circleLayer.anchorPoint = CGPoint(x: 0.5, y: 0.5)
+            circleLayer.position = CGPoint(
+                x: pos.x + b.width * (0.5 - anc.x),
+                y: pos.y + b.height * (0.5 - anc.y)
+            )
+            CATransaction.commit()
+        }
+
+        // 2. Circle spring swap (starts at t=0, bouncier spring ~400ms)
+        centerAnchor()
+
+        // Shrink out the empty circle
+        let shrink = CASpringAnimation(keyPath: "transform.scale")
+        shrink.fromValue = 1.0
+        shrink.toValue = 0.0
+        shrink.stiffness = 200
+        shrink.damping = 15
+        shrink.duration = shrink.settlingDuration
+        shrink.fillMode = .forwards
+        shrink.isRemovedOnCompletion = false
+        circleLayer.add(shrink, forKey: "shrinkOut")
+
+        // Swap icon + grow in the checkmark at 100ms
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.10) {
+            let config = NSImage.SymbolConfiguration(pointSize: 14, weight: .regular)
+            let checkImage = NSImage(systemSymbolName: "checkmark.circle.fill",
+                                      accessibilityDescription: nil)!
+            self.circleView.image = checkImage.withSymbolConfiguration(config)
+            self.circleView.contentTintColor = .white
+
+            circleLayer.removeAnimation(forKey: "shrinkOut")
+
+            // Re-apply anchorPoint (AppKit may have reset it between run loop iterations)
+            centerAnchor()
+
+            let growIn = CASpringAnimation(keyPath: "transform.scale")
+            growIn.fromValue = 0.0
+            growIn.toValue = 1.0
+            growIn.stiffness = 200
+            growIn.damping = 15
+            growIn.duration = growIn.settlingDuration
+            growIn.fillMode = .forwards
+            growIn.isRemovedOnCompletion = false
+            circleLayer.add(growIn, forKey: "growIn")
+        }
+
+        // Fire Phase 3 at 600ms from start (spring fully settled)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
             completion()
         }
     }
