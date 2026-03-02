@@ -70,15 +70,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func positionPanel() {
-        guard let button = statusItem.button,
-              let buttonWindow = button.window else { return }
+        guard let screen = panel.screen ?? NSScreen.main ?? NSScreen.screens.first else { return }
 
-        let buttonRect = buttonWindow.frame
+        let padding: CGFloat = 40
+        let visibleFrame = screen.visibleFrame
         let panelWidth = panel.frame.width
         let panelHeight = panel.frame.height
 
-        let x = buttonRect.midX - panelWidth / 2
-        let y = buttonRect.minY - panelHeight - 4
+        let x = visibleFrame.maxX - panelWidth - padding
+        let y = visibleFrame.maxY - panelHeight - padding
 
         panel.setFrameOrigin(NSPoint(x: x, y: y))
     }

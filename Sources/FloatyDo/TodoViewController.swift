@@ -2,12 +2,17 @@ import AppKit
 
 // MARK: - Controller
 
+enum Tab { case tasks, archive }
+
 final class TodoViewController: NSViewController {
     private let store: TodoStore
     private let stackView = NSStackView()
     private var selectedIndex: Int = 0
     private var rowViews: [TodoRowView] = []
     private var eventMonitor: Any?
+    private var currentTab: Tab = .tasks
+    private var tasksTabButton: NSButton!
+    private var archiveTabButton: NSButton!
 
     init(store: TodoStore) {
         self.store = store
@@ -16,12 +21,36 @@ final class TodoViewController: NSViewController {
 
     required init?(coder: NSCoder) { fatalError() }
 
-    private var rowCount: Int { min(store.items.count + 3, TodoStore.maxItems) }
+    private var rowCount: Int {
+        switch currentTab {
+        case .tasks:
+            return min(store.items.count + 3, TodoStore.maxItems)
+        case .archive:
+            return max(store.archivedItems.count, 3)
+        }
+    }
+
     private var inputIndex: Int { store.items.count }
 
     override func loadView() {
         let container = NSView(frame: NSRect(x: 0, y: 0, width: 260, height: 200))
         container.wantsLayer = true
+
+        // Tab bar in the title bar area
+        tasksTabButton = makeTabButton(symbolName: "checklist.unchecked", action: #selector(switchToTasks))
+        archiveTabButton = makeTabButton(symbolName: "archivebox", action: #selector(switchToArchive))
+
+        let tabBar = NSStackView(views: [tasksTabButton, archiveTabButton])
+        tabBar.orientation = .horizontal
+        tabBar.spacing = 0
+        tabBar.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(tabBar)
+
+        // Stretch buttons to fill the full title bar height
+        tasksTabButton.topAnchor.constraint(equalTo: tabBar.topAnchor).isActive = true
+        tasksTabButton.bottomAnchor.constraint(equalTo: tabBar.bottomAnchor).isActive = true
+        archiveTabButton.topAnchor.constraint(equalTo: tabBar.topAnchor).isActive = true
+        archiveTabButton.bottomAnchor.constraint(equalTo: tabBar.bottomAnchor).isActive = true
 
         let divider = NSView()
         divider.wantsLayer = true
@@ -37,6 +66,11 @@ final class TodoViewController: NSViewController {
         container.addSubview(stackView)
 
         NSLayoutConstraint.activate([
+            // Tab bar spans the full title bar height
+            tabBar.topAnchor.constraint(equalTo: container.topAnchor),
+            tabBar.bottomAnchor.constraint(equalTo: container.safeAreaLayoutGuide.topAnchor),
+            tabBar.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -12),
+
             divider.topAnchor.constraint(equalTo: container.safeAreaLayoutGuide.topAnchor),
             divider.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             divider.trailingAnchor.constraint(equalTo: container.trailingAnchor),
@@ -47,6 +81,7 @@ final class TodoViewController: NSViewController {
         ])
 
         self.view = container
+        updateTabAppearance()
     }
 
     override func viewDidLoad() {
@@ -59,16 +94,42 @@ final class TodoViewController: NSViewController {
             guard mods == .command else { return event }
 
             if event.keyCode == 36 { // cmd+return
-                if self.selectedIndex < self.store.items.count {
-                    self.store.toggle(self.store.items[self.selectedIndex])
-                    self.deferredRebuild()
+                if self.currentTab == .tasks {
+                    if self.selectedIndex < self.store.items.count {
+                        self.store.archive(self.store.items[self.selectedIndex])
+                        if self.selectedIndex >= self.store.items.count && self.selectedIndex > 0 {
+                            self.selectedIndex = self.store.items.count - 1
+                        }
+                        self.deferredRebuild()
+                    }
+                } else {
+                    if self.selectedIndex < self.store.archivedItems.count {
+                        self.store.restore(self.store.archivedItems[self.selectedIndex])
+                        if self.selectedIndex >= self.store.archivedItems.count && self.selectedIndex > 0 {
+                            self.selectedIndex = self.store.archivedItems.count - 1
+                        }
+                        self.deferredRebuild()
+                    }
                 }
                 return nil
             }
             if event.keyCode == 51 { // cmd+delete
-                if self.selectedIndex < self.store.items.count {
-                    self.store.delete(self.store.items[self.selectedIndex])
-                    self.deferredRebuild()
+                if self.currentTab == .tasks {
+                    if self.selectedIndex < self.store.items.count {
+                        self.store.delete(self.store.items[self.selectedIndex])
+                        if self.selectedIndex >= self.store.items.count && self.selectedIndex > 0 {
+                            self.selectedIndex = self.store.items.count - 1
+                        }
+                        self.deferredRebuild()
+                    }
+                } else {
+                    if self.selectedIndex < self.store.archivedItems.count {
+                        self.store.deleteArchived(self.store.archivedItems[self.selectedIndex])
+                        if self.selectedIndex >= self.store.archivedItems.count && self.selectedIndex > 0 {
+                            self.selectedIndex = self.store.archivedItems.count - 1
+                        }
+                        self.deferredRebuild()
+                    }
                 }
                 return nil
             }
@@ -80,6 +141,48 @@ final class TodoViewController: NSViewController {
 
     deinit {
         if let monitor = eventMonitor { NSEvent.removeMonitor(monitor) }
+    }
+
+    // MARK: - Tabs
+
+    private func makeTabButton(symbolName: String, action: Selector) -> NSButton {
+        let image = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)!
+        let config = NSImage.SymbolConfiguration(pointSize: 13, weight: .medium)
+        let button = NSButton(image: image.withSymbolConfiguration(config)!, target: self, action: action)
+        button.isBordered = false
+        button.imagePosition = .imageOnly
+        button.translatesAutoresizingMaskIntoConstraints = false
+        button.widthAnchor.constraint(equalToConstant: 36).isActive = true
+        // Debug: red border around tap target
+        button.wantsLayer = true
+        button.layer?.borderColor = NSColor.red.cgColor
+        button.layer?.borderWidth = 1
+        return button
+    }
+
+    private func updateTabAppearance() {
+        tasksTabButton.contentTintColor = currentTab == .tasks
+            ? .white
+            : .white.withAlphaComponent(0.35)
+        archiveTabButton.contentTintColor = currentTab == .archive
+            ? .white
+            : .white.withAlphaComponent(0.35)
+    }
+
+    @objc private func switchToTasks() {
+        guard currentTab != .tasks else { return }
+        currentTab = .tasks
+        selectedIndex = 0
+        updateTabAppearance()
+        rebuildRows(resize: false)
+    }
+
+    @objc private func switchToArchive() {
+        guard currentTab != .archive else { return }
+        currentTab = .archive
+        selectedIndex = 0
+        updateTabAppearance()
+        rebuildRows(resize: false)
     }
 
     // MARK: - Navigation (called by field delegate via row callbacks)
@@ -97,6 +200,8 @@ final class TodoViewController: NSViewController {
     }
 
     func submitRow() {
+        guard currentTab == .tasks else { return }
+
         if selectedIndex < store.items.count {
             // On a filled row: return moves down
             moveDown()
@@ -130,7 +235,7 @@ final class TodoViewController: NSViewController {
         }
     }
 
-    private func rebuildRows() {
+    private func rebuildRows(resize: Bool = true) {
         for row in rowViews {
             stackView.removeArrangedSubview(row)
             row.removeFromSuperview()
@@ -138,6 +243,25 @@ final class TodoViewController: NSViewController {
         rowViews.removeAll()
 
         let count = rowCount
+
+        if currentTab == .tasks {
+            rebuildTaskRows(count: count)
+        } else {
+            rebuildArchiveRows(count: count)
+        }
+
+        if selectedIndex >= count { selectedIndex = max(0, count - 1) }
+
+        if resize { resizeWindow() }
+
+        // Focus after layout settles
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.focusRow(self.selectedIndex)
+        }
+    }
+
+    private func rebuildTaskRows(count: Int) {
         for i in 0..<count {
             let emptyIndex = i - store.items.count
             let emptyCount = count - store.items.count
@@ -146,8 +270,8 @@ final class TodoViewController: NSViewController {
             if i < store.items.count {
                 let item = store.items[i]
                 row = TodoRowView(
-                    text: item.text, isDone: item.isDone,
-                    circleOpacity: item.isDone ? 1.0 : 0.4,
+                    text: item.text, isDone: false,
+                    circleOpacity: 0.4,
                     isEditable: true
                 )
                 let idx = i
@@ -169,30 +293,36 @@ final class TodoViewController: NSViewController {
                 )
             }
 
-            // Wire navigation — every editable row talks to the controller
             row.controller = self
-
             row.translatesAutoresizingMaskIntoConstraints = false
             stackView.addArrangedSubview(row)
             row.widthAnchor.constraint(equalTo: stackView.widthAnchor).isActive = true
             rowViews.append(row)
         }
+    }
 
-        if selectedIndex >= count { selectedIndex = max(0, count - 1) }
+    private func rebuildArchiveRows(count: Int) {
+        for i in 0..<count {
+            let item = store.archivedItems[i]
+            let row = TodoRowView(
+                text: item.text, isDone: true,
+                circleOpacity: 1.0,
+                isEditable: true
+            )
 
-        resizeWindow()
-
-        // Focus after layout settles
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            self.focusRow(self.selectedIndex)
+            row.controller = self
+            row.translatesAutoresizingMaskIntoConstraints = false
+            stackView.addArrangedSubview(row)
+            row.widthAnchor.constraint(equalTo: stackView.widthAnchor).isActive = true
+            rowViews.append(row)
         }
     }
 
     private func resizeWindow() {
         guard let window = view.window else { return }
-        let contentHeight = CGFloat(rowCount) * 36.0 + 16.5
-        let fullHeight = contentHeight + window.titlebarHeight
+        let rows = max(rowCount, 1)
+        let contentHeight = CGFloat(rows) * 36.0 + 16.5
+        let fullHeight = max(contentHeight + window.titlebarHeight, window.minSize.height)
         let oldFrame = window.frame
         let newFrame = NSRect(
             x: oldFrame.origin.x,

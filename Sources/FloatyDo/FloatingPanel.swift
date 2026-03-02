@@ -6,7 +6,7 @@ final class FloatingPanel: NSPanel {
     init(contentRect: NSRect) {
         super.init(
             contentRect: contentRect,
-            styleMask: [.titled, .closable, .resizable, .nonactivatingPanel, .fullSizeContentView],
+            styleMask: [.titled, .closable, .miniaturizable, .resizable, .nonactivatingPanel, .fullSizeContentView],
             backing: .buffered,
             defer: false
         )
