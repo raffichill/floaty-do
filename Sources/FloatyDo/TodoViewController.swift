@@ -751,6 +751,7 @@ fileprivate final class TodoListView: NSView {
 
     override var isFlipped: Bool { true }
     override var acceptsFirstResponder: Bool { true }
+    override var mouseDownCanMoveWindow: Bool { false }
 
     var isDragging: Bool {
         if case .dragging = interactionState { return true }
@@ -840,6 +841,11 @@ fileprivate final class TodoListView: NSView {
     override func layout() {
         super.layout()
         layoutRows(animated: false)
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        guard bounds.contains(point) else { return nil }
+        return self
     }
 
     override func resetCursorRects() {
@@ -1172,7 +1178,9 @@ fileprivate final class TodoRowView: NSView {
 
         let textX = checkboxRect.maxX + LayoutMetrics.textInset
         let textWidth = max(0, bounds.width - textX - LayoutMetrics.rowHorizontalInset)
-        let textFrame = NSRect(x: textX, y: 0, width: textWidth, height: bounds.height)
+        let textHeight = max(textLabel.intrinsicContentSize.height, (fontLineHeight(for: textLabel.font) + 2))
+        let textY = floor((bounds.height - textHeight) / 2)
+        let textFrame = NSRect(x: textX, y: textY, width: textWidth, height: textHeight)
         textLabel.frame = textFrame
         editorHostView.frame = textFrame
     }
@@ -1353,15 +1361,24 @@ fileprivate final class TodoRowView: NSView {
         ]
         return NSAttributedString(string: model.text, attributes: attributes)
     }
+
+    private func fontLineHeight(for font: NSFont?) -> CGFloat {
+        guard let font else { return 16 }
+        return ceil(font.ascender - font.descender + font.leading)
+    }
 }
 
 private final class PassiveEditorHostView: NSView {
+    override var mouseDownCanMoveWindow: Bool { false }
+
     override func hitTest(_ point: NSPoint) -> NSView? {
         nil
     }
 }
 
 private final class KeyboardOnlyTextField: NSTextField {
+    override var mouseDownCanMoveWindow: Bool { false }
+
     override func resetCursorRects() {
         super.resetCursorRects()
         addCursorRect(bounds, cursor: .arrow)
@@ -1377,6 +1394,8 @@ private final class KeyboardOnlyTextField: NSTextField {
 }
 
 public final class CaretEndFieldEditor: NSTextView {
+    public override var mouseDownCanMoveWindow: Bool { false }
+
     public override func resetCursorRects() {
         super.resetCursorRects()
         addCursorRect(visibleRect, cursor: .arrow)
