@@ -1,62 +1,78 @@
 import Foundation
 import Combine
+import os.log
 
-struct TodoItem: Identifiable, Codable, Equatable {
-    let id: UUID
-    var text: String
-    var isDone: Bool
+private let logger = Logger(subsystem: "com.floatydo", category: "TodoStore")
 
-    init(text: String) {
+public struct TodoItem: Identifiable, Codable, Equatable {
+    public let id: UUID
+    public var text: String
+    public var isDone: Bool
+
+    public init(text: String) {
         self.id = UUID()
         self.text = text
         self.isDone = false
     }
 }
 
-final class TodoStore: ObservableObject {
+public final class TodoStore: ObservableObject {
     private static let key = "floatydo.items"
     private static let archiveKey = "floatydo.archived"
-    static let maxItems = 10
+    public static let maxItems = 10
 
-    @Published var items: [TodoItem] = [] {
+    @Published public var items: [TodoItem] = [] {
         didSet { save() }
     }
 
-    @Published var archivedItems: [TodoItem] = [] {
+    @Published public var archivedItems: [TodoItem] = [] {
         didSet { saveArchive() }
     }
 
-    init() {
+    public init() {
         load()
         loadArchive()
         migrateCompletedItems()
     }
 
-    func add(_ text: String) {
+    public func add(_ text: String) {
         let trimmed = text.trimmingCharacters(in: .whitespaces)
-        guard !trimmed.isEmpty, items.count < Self.maxItems else { return }
+        guard !trimmed.isEmpty, items.count < Self.maxItems else {
+            logger.warning("add REJECTED: text=\"\(text)\", items.count=\(self.items.count)")
+            return
+        }
         items.append(TodoItem(text: trimmed))
+        logger.debug("add: \"\(trimmed)\", items.count=\(self.items.count)")
     }
 
-    func archive(_ item: TodoItem) {
-        guard let idx = items.firstIndex(where: { $0.id == item.id }) else { return }
+    public func archive(_ item: TodoItem) {
+        logger.debug("archive CALLED: item=\"\(item.text)\" id=\(item.id), items.count=\(self.items.count)")
+        guard let idx = items.firstIndex(where: { $0.id == item.id }) else {
+            logger.error("archive FAILED: item not found in items! id=\(item.id), text=\"\(item.text)\"")
+            logger.error("  current items: \(self.items.map { "\($0.text) (\($0.id))" })")
+            return
+        }
         var archived = items.remove(at: idx)
         archived.isDone = true
         archivedItems.insert(archived, at: 0)
+        logger.debug("archive DONE: removed at idx=\(idx), items.count=\(self.items.count), archived.count=\(self.archivedItems.count)")
     }
 
-    func restore(_ item: TodoItem) {
+    public func restore(_ item: TodoItem) {
         guard let idx = archivedItems.firstIndex(where: { $0.id == item.id }) else { return }
         var restored = archivedItems.remove(at: idx)
         restored.isDone = false
         items.append(restored)
+        logger.debug("restore: \"\(restored.text)\", items.count=\(self.items.count)")
     }
 
-    func delete(_ item: TodoItem) {
+    public func delete(_ item: TodoItem) {
+        logger.debug("delete: \"\(item.text)\", items before=\(self.items.count)")
         items.removeAll { $0.id == item.id }
+        logger.debug("delete done: items after=\(self.items.count)")
     }
 
-    func deleteArchived(_ item: TodoItem) {
+    public func deleteArchived(_ item: TodoItem) {
         archivedItems.removeAll { $0.id == item.id }
     }
 

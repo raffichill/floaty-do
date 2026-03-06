@@ -1,9 +1,9 @@
 import AppKit
 
-final class FloatingPanel: NSPanel {
+public final class FloatingPanel: NSPanel {
     private let customFieldEditor = CaretEndFieldEditor()
 
-    init(contentRect: NSRect) {
+    public init(contentRect: NSRect) {
         super.init(
             contentRect: contentRect,
             styleMask: [.titled, .closable, .miniaturizable, .resizable, .nonactivatingPanel, .fullSizeContentView],
@@ -37,9 +37,9 @@ final class FloatingPanel: NSPanel {
     }
 
     // Allow key events even when the app isn't active (menu bar utility)
-    override var canBecomeKey: Bool { true }
+    public override var canBecomeKey: Bool { true }
 
-    override func fieldEditor(_ createFlag: Bool, for object: Any?) -> NSText? {
+    public override func fieldEditor(_ createFlag: Bool, for object: Any?) -> NSText? {
         if object is NSTextField {
             return customFieldEditor
         }

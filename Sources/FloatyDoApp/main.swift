@@ -1,6 +1,6 @@
 import AppKit
+import FloatyDoLib
 
-// Bootstrap
 let app = NSApplication.shared
 let delegate = AppDelegate()
 app.delegate = delegate

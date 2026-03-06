@@ -1,11 +1,14 @@
 import AppKit
+import os.log
 import QuartzCore
+
+private let logger = Logger(subsystem: "com.floatydo", category: "TodoVC")
 
 // MARK: - Controller
 
-enum Tab { case tasks, archive }
+public enum Tab { case tasks, archive }
 
-final class TodoViewController: NSViewController {
+public final class TodoViewController: NSViewController {
     private let store: TodoStore
     private let stackView = NSStackView()
     private var selectedIndex: Int = 0
@@ -16,7 +19,7 @@ final class TodoViewController: NSViewController {
     private var archiveTabButton: NSButton!
     private var isAnimating = false
 
-    init(store: TodoStore) {
+    public init(store: TodoStore) {
         self.store = store
         super.init(nibName: nil, bundle: nil)
     }
@@ -34,7 +37,7 @@ final class TodoViewController: NSViewController {
 
     private var inputIndex: Int { store.items.count }
 
-    override func loadView() {
+    public override func loadView() {
         let container = NSView(frame: NSRect(x: 0, y: 0, width: 260, height: 200))
         container.wantsLayer = true
 
@@ -86,7 +89,7 @@ final class TodoViewController: NSViewController {
         updateTabAppearance()
     }
 
-    override func viewDidLoad() {
+    public override func viewDidLoad() {
         super.viewDidLoad()
 
         // Event monitor ONLY for cmd+key combos (cmd+return, cmd+delete)
@@ -98,8 +101,10 @@ final class TodoViewController: NSViewController {
 
             if event.keyCode == 36 { // cmd+return
                 self.syncSelectedIndex()
+                logger.debug("CMD+RETURN: selectedIndex=\(self.selectedIndex), items.count=\(self.store.items.count), rowViews.count=\(self.rowViews.count), rowCount=\(self.rowCount)")
                 if self.currentTab == .tasks {
                     if self.selectedIndex < self.store.items.count {
+                        logger.debug("CMD+RETURN: completing item at \(self.selectedIndex): \"\(self.store.items[self.selectedIndex].text, privacy: .public)\"")
                         self.animateCompletion(at: self.selectedIndex)
                         return nil
                     } else if self.selectedIndex == self.inputIndex {
@@ -153,7 +158,7 @@ final class TodoViewController: NSViewController {
         rebuildRows()
     }
 
-    override func viewDidAppear() {
+    public override func viewDidAppear() {
         super.viewDidAppear()
         // Initial resize — viewDidLoad runs before the view is in the window,
         // so resizeWindow() silently fails there. Do it here once the window exists.
@@ -224,13 +229,15 @@ final class TodoViewController: NSViewController {
     // MARK: - Completion Animation
 
     private func animateCompletion(at index: Int) {
-        guard !isAnimating, index < store.items.count, index < rowViews.count else { return }
+        guard !isAnimating, index < store.items.count, index < rowViews.count else {
+            logger.warning("animateCompletion SKIPPED: isAnimating=\(self.isAnimating), index=\(index), items.count=\(self.store.items.count), rowViews.count=\(self.rowViews.count)")
+            return
+        }
         isAnimating = true
+        logger.debug("animateCompletion START: index=\(index), item=\"\(self.store.items[index].text, privacy: .public)\", items=\(self.store.items.map { $0.text }.description, privacy: .public)")
 
         let row = rowViews[index]
         let item = store.items[index]
-
-        fputs("[ANIM] start: archiving '\(item.text)' at index \(index), items=\(store.items.count) [\(store.items.map { $0.text })]\n", stderr)
 
         // Clear focus during animation
         view.window?.makeFirstResponder(nil)
@@ -244,16 +251,15 @@ final class TodoViewController: NSViewController {
         row.playCompletionAnimation { [weak self] in
             guard let self else { return }
 
-            fputs("[ANIM] phase3 start: items=\(self.store.items.count)\n", stderr)
 
             // Phase 3: Blur + shrink + collapse
+            logger.debug("animateCompletion PHASE3: about to collapse row, items=\(self.store.items.map { $0.text }.description, privacy: .public)")
             self.animateRowCollapse(row: row) {
-                fputs("[ANIM] collapse done: items=\(self.store.items.count) before archive\n", stderr)
 
                 // Post-animation: archive and rebuild
+                logger.debug("animateCompletion POST-COLLAPSE: archiving item=\"\(item.text, privacy: .public)\", items.count=\(self.store.items.count)")
                 self.store.archive(item)
-
-                fputs("[ANIM] after archive: items=\(self.store.items.count) [\(self.store.items.map { $0.text })]\n", stderr)
+                logger.debug("animateCompletion POST-ARCHIVE: items.count=\(self.store.items.count), archived.count=\(self.store.archivedItems.count), items=\(self.store.items.map { $0.text }.description, privacy: .public)")
 
                 // selectedIndex stays at same position (now points to next item)
                 if index < self.store.items.count {
@@ -262,9 +268,11 @@ final class TodoViewController: NSViewController {
                     // Archived the last item — land on the input row
                     self.selectedIndex = self.store.items.count
                 }
+                logger.debug("animateCompletion PRE-REBUILD: selectedIndex=\(self.selectedIndex), rowCount will be=\(self.rowCount)")
 
-                self.rebuildRows(animateResize: false)
+                self.rebuildRows()
                 self.isAnimating = false
+                logger.debug("animateCompletion DONE: isAnimating=false, rowViews.count=\(self.rowViews.count)")
             }
         }
     }
@@ -387,6 +395,7 @@ final class TodoViewController: NSViewController {
     }
 
     private func rebuildRows(resize: Bool = true, animateResize: Bool = true) {
+        logger.debug("rebuildRows START: resize=\(resize), animateResize=\(animateResize), old rowViews.count=\(self.rowViews.count)")
         for row in rowViews {
             stackView.removeArrangedSubview(row)
             row.removeFromSuperview()
@@ -394,8 +403,7 @@ final class TodoViewController: NSViewController {
         rowViews.removeAll()
 
         let count = rowCount
-
-        fputs("[REBUILD] items=\(store.items.count) rowCount=\(count) resize=\(resize)\n", stderr)
+        logger.debug("rebuildRows: rowCount=\(count), items.count=\(self.store.items.count), archived.count=\(self.store.archivedItems.count)")
 
         if currentTab == .tasks {
             rebuildTaskRows(count: count)
@@ -407,10 +415,23 @@ final class TodoViewController: NSViewController {
 
         if resize { resizeWindow(animate: animateResize) }
 
+        logger.debug("rebuildRows END: rowViews.count=\(self.rowViews.count), stackView.arrangedSubviews=\(self.stackView.arrangedSubviews.count), selectedIndex=\(self.selectedIndex)")
+        if let window = view.window {
+            logger.debug("rebuildRows window: frame.height=\(window.frame.height), stackView.frame=\(self.stackView.frame.debugDescription, privacy: .public)")
+        }
+        for (i, row) in rowViews.enumerated() {
+            logger.debug("  row[\(i)]: text=\"\(row.currentText, privacy: .public)\", heightConstraint=\(row.heightConstraint.constant)")
+        }
+
         // Focus after layout settles
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.focusRow(self.selectedIndex)
+            // Log the settled layout state
+            logger.debug("rebuildRows SETTLED: stackView.frame=\(self.stackView.frame.debugDescription, privacy: .public)")
+            for (i, row) in self.rowViews.enumerated() {
+                logger.debug("  settled row[\(i)]: frame=\(row.frame.debugDescription, privacy: .public), isHidden=\(row.isHidden), alphaValue=\(row.alphaValue)")
+            }
         }
     }
 
@@ -482,16 +503,21 @@ final class TodoViewController: NSViewController {
     }
 
     private func resizeWindow(animate: Bool = true) {
-        guard let window = view.window else { return }
+        guard let window = view.window else {
+            logger.warning("resizeWindow: no window!")
+            return
+        }
         let rows = max(rowCount, 1)
         let contentHeight = CGFloat(rows) * 36.0 + 16.5
         let titlebar = window.titlebarHeight
         let fullHeight = max(contentHeight + titlebar, window.minSize.height)
         let oldFrame = window.frame
 
-        // Only grow the window, never shrink it automatically
-        if fullHeight <= oldFrame.height {
-            fputs("[RESIZE] SKIP (no shrink): need=\(fullHeight) have=\(oldFrame.height)\n", stderr)
+        logger.debug("resizeWindow: rows=\(rows), contentHeight=\(contentHeight), titlebar=\(titlebar), fullHeight=\(fullHeight), oldFrame.height=\(oldFrame.height)")
+
+        guard abs(fullHeight - oldFrame.height) > 0.5 else {
+            logger.debug("resizeWindow: SKIPPING (no meaningful change)")
+            view.layoutSubtreeIfNeeded()
             return
         }
 
@@ -501,7 +527,7 @@ final class TodoViewController: NSViewController {
             width: oldFrame.width,
             height: fullHeight
         )
-        fputs("[RESIZE] GROW: rows=\(rows) titlebar=\(titlebar) \(oldFrame.height) -> \(fullHeight)\n", stderr)
+        logger.debug("resizeWindow: resizing from \(oldFrame.height) to \(fullHeight)")
         window.setFrame(newFrame, display: true, animate: animate)
     }
 
@@ -780,8 +806,8 @@ private class CaretEndTextField: NSTextField {
 }
 
 // Custom field editor: intercepts select-all to prevent highlight flash
-class CaretEndFieldEditor: NSTextView {
-    override func setSelectedRange(_ charRange: NSRange, affinity: NSSelectionAffinity, stillSelecting flag: Bool) {
+public class CaretEndFieldEditor: NSTextView {
+    public override func setSelectedRange(_ charRange: NSRange, affinity: NSSelectionAffinity, stillSelecting flag: Bool) {
         if charRange.length == string.count && charRange.length > 0 && !flag {
             super.setSelectedRange(NSRange(location: string.count, length: 0), affinity: affinity, stillSelecting: flag)
         } else {
