@@ -74,15 +74,9 @@ public final class TodoViewController: NSViewController, NSPopoverDelegate, NSTe
         tabBar.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(tabBar)
 
-        let divider = NSView()
-        divider.wantsLayer = true
-        divider.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.30).cgColor
-        divider.translatesAutoresizingMaskIntoConstraints = false
-
         listView.translatesAutoresizingMaskIntoConstraints = false
         listView.delegate = self
 
-        container.addSubview(divider)
         container.addSubview(listView)
 
         NSLayoutConstraint.activate([
@@ -90,12 +84,7 @@ public final class TodoViewController: NSViewController, NSPopoverDelegate, NSTe
             tabBar.bottomAnchor.constraint(equalTo: container.safeAreaLayoutGuide.topAnchor),
             tabBar.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -LayoutMetrics.titlebarTrailingInset),
 
-            divider.topAnchor.constraint(equalTo: container.safeAreaLayoutGuide.topAnchor),
-            divider.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            divider.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            divider.heightAnchor.constraint(equalToConstant: LayoutMetrics.dividerHeight),
-
-            listView.topAnchor.constraint(equalTo: divider.bottomAnchor),
+            listView.topAnchor.constraint(equalTo: container.safeAreaLayoutGuide.topAnchor),
             listView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             listView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
             listView.bottomAnchor.constraint(equalTo: container.bottomAnchor),
@@ -717,6 +706,7 @@ fileprivate final class TodoListView: NSView {
         let zone: HitZone
         let rowWasActive: Bool
         let canDrag: Bool
+        let previousEditingRowID: TodoRowID?
     }
 
     private struct DragSession {
@@ -877,9 +867,13 @@ fileprivate final class TodoListView: NSView {
                 initialPoint: location,
                 zone: zone,
                 rowWasActive: rowID == selectedRowID,
-                canDrag: canDrag
+                canDrag: canDrag,
+                previousEditingRowID: editingRowID
             )
         )
+        selectedRowID = rowID
+        editingRowID = nil
+        refreshRowVisualState()
     }
 
     override func mouseDragged(with event: NSEvent) {
@@ -915,8 +909,6 @@ fileprivate final class TodoListView: NSView {
             return
 
         case .pressed(let press):
-            interactionState = .idle
-
             guard let model = rowModelsByID[press.rowID],
                   model.isSelectable else { return }
 
@@ -925,12 +917,20 @@ fileprivate final class TodoListView: NSView {
                let rowView = rowViews[press.rowID] {
                 let hitPoint = convert(location, to: rowView)
                 if rowView.hitZone(at: hitPoint) == .checkbox {
+                    interactionState = .idle
+                    refreshRowVisualState()
                     delegate?.listView(self, didActivateCheckboxFor: press.rowID)
                     return
                 }
             }
 
-            if !press.rowWasActive {
+            interactionState = .idle
+
+            if press.rowWasActive {
+                editingRowID = press.previousEditingRowID
+                refreshRowVisualState()
+            } else {
+                refreshRowVisualState()
                 delegate?.listView(self, didActivateRow: press.rowID)
             }
 
@@ -967,6 +967,7 @@ fileprivate final class TodoListView: NSView {
             currentTaskIndex: taskIndex
         )
         interactionState = .dragging(drag)
+        refreshRowVisualState(excluding: press.rowID)
         updateDragSession(&drag, pointerLocation: pointerLocation)
         interactionState = .dragging(drag)
     }
@@ -1004,6 +1005,7 @@ fileprivate final class TodoListView: NSView {
 
     private func finishDragSession(_ drag: DragSession) {
         interactionState = .settling
+        refreshRowVisualState(excluding: drag.rowID)
         let targetFrame = frameForRow(at: drag.currentTaskIndex)
 
         NSAnimationContext.runAnimationGroup({ context in
@@ -1016,8 +1018,21 @@ fileprivate final class TodoListView: NSView {
             self.rowViews[drag.rowID]?.alphaValue = 1.0
             self.rowViews[drag.rowID]?.setDragging(false)
             self.interactionState = .idle
+            self.refreshRowVisualState()
             self.delegate?.listView(self, didFinishDraggingRow: drag.rowID, orderedItemIDs: self.currentOrderedTaskItemIDs())
         })
+    }
+
+    private func refreshRowVisualState(excluding draggedRowID: TodoRowID? = nil) {
+        for rowID in displayOrder {
+            guard let rowView = rowViews[rowID] else { continue }
+            rowView.setSelected(rowID == selectedRowID)
+            rowView.setEditing(rowID == editingRowID)
+            if rowID != draggedRowID {
+                rowView.alphaValue = 1.0
+                rowView.setDragging(false)
+            }
+        }
     }
 
     private func layoutRows(animated: Bool) {
