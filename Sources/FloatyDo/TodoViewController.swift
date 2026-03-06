@@ -367,9 +367,8 @@ public final class TodoViewController: NSViewController, NSPopoverDelegate, NSTe
             resizeWindow(animate: animateResize)
         }
 
-        DispatchQueue.main.async { [weak self] in
-            self?.attachEditorIfNeeded(placeCaretAtEnd: placeCaretAtEnd)
-        }
+        listView.layoutSubtreeIfNeeded()
+        attachEditorIfNeeded(placeCaretAtEnd: placeCaretAtEnd)
     }
 
     private func fadeOpacity(emptyIndex: Int, emptyCount: Int) -> Double {
@@ -413,8 +412,87 @@ public final class TodoViewController: NSViewController, NSPopoverDelegate, NSTe
 
     private func activateRow(_ rowID: TodoRowID, placeCaretAtEnd: Bool = true) {
         guard rowModels.contains(where: { $0.id == rowID && $0.isSelectable }) else { return }
+        let previousSelectedRowID = selectedRowID
         selectedRowID = rowID
-        refreshRows(resize: false, animateResize: false, placeCaretAtEnd: placeCaretAtEnd)
+        syncSelectionUI(previousSelectedRowID: previousSelectedRowID, placeCaretAtEnd: placeCaretAtEnd)
+    }
+
+    private func syncSelectionUI(previousSelectedRowID: TodoRowID? = nil, placeCaretAtEnd: Bool) {
+        listView.updateInteractionState(
+            selectedRowID: selectedRowID,
+            editingRowID: currentEditingRowID
+        )
+
+        if let previousSelectedRowID {
+            refreshVisibleModel(for: previousSelectedRowID)
+        }
+        if let selectedRowID, selectedRowID != previousSelectedRowID {
+            refreshVisibleModel(for: selectedRowID)
+        }
+        listView.layoutSubtreeIfNeeded()
+        attachEditorIfNeeded(placeCaretAtEnd: placeCaretAtEnd)
+    }
+
+    private func refreshVisibleModel(for rowID: TodoRowID) {
+        guard let index = rowModels.firstIndex(where: { $0.id == rowID }),
+              let updatedModel = latestVisibleModel(for: rowID) else { return }
+        rowModels[index] = updatedModel
+        listView.updateModel(updatedModel)
+    }
+
+    private func latestVisibleModel(for rowID: TodoRowID) -> TodoRowModel? {
+        switch rowID {
+        case .taskItem(let itemID):
+            guard let item = store.items.first(where: { $0.id == itemID }) else { return nil }
+            return TodoRowModel(
+                id: .taskItem(item.id),
+                kind: .taskItem(item),
+                text: item.text,
+                isDone: false,
+                isEditable: true,
+                isSelectable: true,
+                canComplete: true,
+                canDrag: true,
+                circleOpacity: 0.40,
+                textOpacity: 0.90,
+                showsStrikethrough: false
+            )
+
+        case .archiveItem(let itemID):
+            guard let item = store.archivedItems.first(where: { $0.id == itemID }) else { return nil }
+            return TodoRowModel(
+                id: .archiveItem(item.id),
+                kind: .archiveItem(item),
+                text: item.text,
+                isDone: true,
+                isEditable: false,
+                isSelectable: true,
+                canComplete: false,
+                canDrag: false,
+                circleOpacity: 0.38,
+                textOpacity: 0.38,
+                showsStrikethrough: true
+            )
+
+        case .taskInput:
+            guard let existingModel = rowModels.first(where: { $0.id == .taskInput }) else { return nil }
+            return TodoRowModel(
+                id: .taskInput,
+                kind: .taskInput,
+                text: taskInputDraft,
+                isDone: false,
+                isEditable: true,
+                isSelectable: true,
+                canComplete: false,
+                canDrag: false,
+                circleOpacity: existingModel.circleOpacity,
+                textOpacity: existingModel.textOpacity,
+                showsStrikethrough: false
+            )
+
+        case .taskFiller, .archiveFiller:
+            return rowModels.first(where: { $0.id == rowID })
+        }
     }
 
     private func attachEditorIfNeeded(placeCaretAtEnd: Bool) {
@@ -426,18 +504,27 @@ public final class TodoViewController: NSViewController, NSPopoverDelegate, NSTe
         }
 
         if editorRowID != rowID {
+            let previousEditorRowID = editorRowID
             sharedEditor.removeFromSuperview()
+            if let previousEditorRowID, let previousRowView = listView.rowView(for: previousEditorRowID) {
+                previousRowView.refreshMountedEditorState()
+            }
             sharedEditor.frame = rowView.editorHostView.bounds
             rowView.editorHostView.addSubview(sharedEditor)
             sharedEditor.stringValue = textForRow(rowID)
             editorRowID = rowID
         } else if sharedEditor.superview !== rowView.editorHostView {
+            let previousEditorRowID = editorRowID
             sharedEditor.removeFromSuperview()
+            if let previousEditorRowID, let previousRowView = listView.rowView(for: previousEditorRowID) {
+                previousRowView.refreshMountedEditorState()
+            }
             sharedEditor.frame = rowView.editorHostView.bounds
             rowView.editorHostView.addSubview(sharedEditor)
         }
 
         sharedEditor.frame = rowView.editorHostView.bounds
+        rowView.refreshMountedEditorState()
 
         guard let window = view.window else { return }
         if window.firstResponder !== sharedEditor.currentEditor() {
@@ -456,8 +543,12 @@ public final class TodoViewController: NSViewController, NSPopoverDelegate, NSTe
             return
         }
 
+        let previousEditorRowID = editorRowID
         sharedEditor.removeFromSuperview()
         editorRowID = nil
+        if let previousEditorRowID, let previousRowView = listView.rowView(for: previousEditorRowID) {
+            previousRowView.refreshMountedEditorState()
+        }
         if shouldFocusList {
             makeListFirstResponder()
         }
@@ -793,6 +884,20 @@ fileprivate final class TodoListView: NSView {
         layoutRows(animated: animatedLayout)
     }
 
+    func updateModel(_ model: TodoRowModel) {
+        rowModelsByID[model.id] = model
+        guard let rowView = rowViews[model.id] else { return }
+        rowView.configure(model: model, preferences: preferences)
+        rowView.setSelected(model.id == selectedRowID)
+        rowView.setEditing(model.id == editingRowID)
+    }
+
+    func updateInteractionState(selectedRowID: TodoRowID?, editingRowID: TodoRowID?) {
+        self.selectedRowID = selectedRowID
+        self.editingRowID = editingRowID
+        refreshRowVisualState(excluding: currentDraggedRowID)
+    }
+
     func rowView(for rowID: TodoRowID) -> TodoRowView? {
         rowViews[rowID]
     }
@@ -956,7 +1061,6 @@ fileprivate final class TodoListView: NSView {
         addSubview(snapshotView, positioned: .above, relativeTo: nil)
 
         rowView.setDragging(true)
-        rowView.alphaValue = 0.0
 
         let rowFrame = rowView.frame
         var drag = DragSession(
@@ -1036,12 +1140,7 @@ fileprivate final class TodoListView: NSView {
     }
 
     private func layoutRows(animated: Bool) {
-        let draggedRowID: TodoRowID? = {
-            if case .dragging(let drag) = interactionState {
-                return drag.rowID
-            }
-            return nil
-        }()
+        let draggedRowID = currentDraggedRowID
 
         let updates = {
             for (index, rowID) in self.displayOrder.enumerated() {
@@ -1123,6 +1222,13 @@ fileprivate final class TodoListView: NSView {
             guard case .taskItem(let item) = rowModelsByID[rowID]?.kind else { return nil }
             return item.id
         }
+    }
+
+    private var currentDraggedRowID: TodoRowID? {
+        if case .dragging(let drag) = interactionState {
+            return drag.rowID
+        }
+        return nil
     }
 
     private func frameForRow(at index: Int) -> CGRect {
@@ -1234,6 +1340,10 @@ fileprivate final class TodoRowView: NSView {
         isDraggingRow = dragging
     }
 
+    func refreshMountedEditorState() {
+        updateAppearance()
+    }
+
     func hitZone(at point: NSPoint) -> TodoListView.HitZone {
         if model.canComplete && checkboxRect.contains(point) {
             return .checkbox
@@ -1343,7 +1453,12 @@ fileprivate final class TodoRowView: NSView {
     }
 
     private func updateAppearance() {
-        let backgroundAlpha: CGFloat = model.isSelectable && isRowSelected ? 0.16 : 0.0
+        let activeFillColor = NSColor(
+            srgbRed: 0.22745098,
+            green: 0.22745098,
+            blue: 0.2627451,
+            alpha: 1.0
+        )
         let circleAlpha = isRowSelected && model.isSelectable
             ? max(CGFloat(model.circleOpacity), model.isDone ? CGFloat(model.textOpacity) : 0.86)
             : CGFloat(model.circleOpacity)
@@ -1351,14 +1466,35 @@ fileprivate final class TodoRowView: NSView {
             ? max(CGFloat(model.textOpacity), 0.98)
             : CGFloat(model.textOpacity)
 
-        backgroundView.layer?.backgroundColor = NSColor.white.withAlphaComponent(backgroundAlpha).cgColor
+        let backgroundColor: CGColor
+        let borderColor: CGColor
+        let borderWidth: CGFloat
+        if isDraggingRow {
+            backgroundColor = NSColor.clear.cgColor
+            borderColor = NSColor.white.withAlphaComponent(0.5).cgColor
+            borderWidth = 1.0
+        } else if model.isSelectable && isRowSelected {
+            backgroundColor = activeFillColor.cgColor
+            borderColor = NSColor.clear.cgColor
+            borderWidth = 0.0
+        } else {
+            backgroundColor = NSColor.clear.cgColor
+            borderColor = NSColor.clear.cgColor
+            borderWidth = 0.0
+        }
+
+        backgroundView.layer?.backgroundColor = backgroundColor
+        backgroundView.layer?.borderColor = borderColor
+        backgroundView.layer?.borderWidth = borderWidth
         circleView.contentTintColor = NSColor.white.withAlphaComponent(circleAlpha)
         textLabel.attributedStringValue = attributedText(alpha: textAlpha)
-        textLabel.isHidden = isEditingRow && model.isEditable
-        editorHostView.isHidden = !(isEditingRow && model.isEditable)
+        let showsEditorHost = isEditingRow && model.isEditable
+        let hasMountedEditor = !editorHostView.subviews.isEmpty
+        textLabel.isHidden = showsEditorHost && hasMountedEditor
+        editorHostView.isHidden = !showsEditorHost
 
         if isDraggingRow {
-            backgroundView.alphaValue = 0.0
+            backgroundView.alphaValue = 1.0
             textLabel.alphaValue = 0.0
             circleView.alphaValue = 0.0
         } else {
@@ -1395,7 +1531,6 @@ private final class KeyboardOnlyTextField: NSTextField {
     override var mouseDownCanMoveWindow: Bool { false }
 
     override func resetCursorRects() {
-        super.resetCursorRects()
         addCursorRect(bounds, cursor: .arrow)
     }
 
@@ -1412,7 +1547,6 @@ public final class CaretEndFieldEditor: NSTextView {
     public override var mouseDownCanMoveWindow: Bool { false }
 
     public override func resetCursorRects() {
-        super.resetCursorRects()
         addCursorRect(visibleRect, cursor: .arrow)
     }
 
