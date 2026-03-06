@@ -10,7 +10,6 @@ final class SettingsViewController: NSViewController {
     private var panelWidthValueLabel: NSTextField!
     private var snapPaddingSlider: NSSlider!
     private var snapPaddingValueLabel: NSTextField!
-    private var hoverHighlightsCheckbox: NSButton!
     private var animationPresetButton: NSPopUpButton!
 
     init(preferences: AppPreferences) {
@@ -21,7 +20,7 @@ final class SettingsViewController: NSViewController {
     required init?(coder: NSCoder) { fatalError() }
 
     override func loadView() {
-        let root = NSView(frame: NSRect(x: 0, y: 0, width: 280, height: 250))
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: 280, height: 220))
         root.wantsLayer = true
 
         let stack = NSStackView()
@@ -47,10 +46,6 @@ final class SettingsViewController: NSViewController {
         snapPaddingSlider = NSSlider(value: preferences.snapPadding, minValue: 0, maxValue: 80, target: self, action: #selector(snapPaddingChanged(_:)))
         snapPaddingValueLabel = valueLabel()
         stack.addArrangedSubview(makeSliderRow(title: "Snap padding", slider: snapPaddingSlider, valueLabel: snapPaddingValueLabel))
-
-        hoverHighlightsCheckbox = NSButton(checkboxWithTitle: "Hover highlights", target: self, action: #selector(hoverHighlightsChanged(_:)))
-        hoverHighlightsCheckbox.state = preferences.hoverHighlightsEnabled ? .on : .off
-        stack.addArrangedSubview(hoverHighlightsCheckbox)
 
         let animationRow = NSStackView()
         animationRow.orientation = .horizontal
@@ -146,11 +141,6 @@ final class SettingsViewController: NSViewController {
 
     @objc private func snapPaddingChanged(_ sender: NSSlider) {
         preferences.snapPadding = sender.doubleValue.rounded()
-        pushPreferences()
-    }
-
-    @objc private func hoverHighlightsChanged(_ sender: NSButton) {
-        preferences.hoverHighlightsEnabled = sender.state == .on
         pushPreferences()
     }
 
