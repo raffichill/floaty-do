@@ -8,6 +8,7 @@ final class TodoStoreTests: XCTestCase {
         super.setUp()
         UserDefaults.standard.removeObject(forKey: "floatydo.items")
         UserDefaults.standard.removeObject(forKey: "floatydo.archived")
+        UserDefaults.standard.removeObject(forKey: "floatydo.preferences")
     }
 
     // MARK: - Basic add/archive/restore
@@ -189,6 +190,24 @@ final class TodoStoreTests: XCTestCase {
         XCTAssertEqual(store.archivedItems.count, 0)
     }
 
+    func testRestoreRespectsMaxItems() {
+        let store = TodoStore()
+        store.add("Archived")
+        let archivedItem = store.items[0]
+        store.archive(archivedItem)
+        let archivedID = store.archivedItems[0].id
+
+        for i in 0..<TodoStore.maxItems {
+            store.add("Item \(i)")
+        }
+
+        store.restore(id: archivedID)
+
+        XCTAssertEqual(store.items.count, TodoStore.maxItems)
+        XCTAssertEqual(store.archivedItems.count, 1)
+        XCTAssertEqual(store.archivedItems[0].text, "Archived")
+    }
+
     // MARK: - Delete
 
     func testDelete() {
@@ -209,6 +228,51 @@ final class TodoStoreTests: XCTestCase {
 
         store.deleteArchived(store.archivedItems[0])
         XCTAssertEqual(store.archivedItems.count, 0)
+    }
+
+    func testUpdateTextByID() {
+        let store = TodoStore()
+        store.add("Original")
+
+        let itemID = store.items[0].id
+        store.updateText(for: itemID, to: "Updated")
+
+        XCTAssertEqual(store.items[0].text, "Updated")
+    }
+
+    func testMoveItemToEarlierIndex() {
+        let store = TodoStore()
+        store.add("A")
+        store.add("B")
+        store.add("C")
+
+        store.moveItem(id: store.items[2].id, to: 0)
+
+        XCTAssertEqual(store.items.map(\.text), ["C", "A", "B"])
+    }
+
+    func testMoveItemToLaterIndex() {
+        let store = TodoStore()
+        store.add("A")
+        store.add("B")
+        store.add("C")
+        store.add("D")
+
+        store.moveItem(id: store.items[0].id, to: 2)
+
+        XCTAssertEqual(store.items.map(\.text), ["B", "C", "A", "D"])
+    }
+
+    func testReorderItemsByIDs() {
+        let store = TodoStore()
+        store.add("A")
+        store.add("B")
+        store.add("C")
+
+        let reorderedIDs = [store.items[2].id, store.items[0].id, store.items[1].id]
+        store.reorderItems(by: reorderedIDs)
+
+        XCTAssertEqual(store.items.map(\.text), ["C", "A", "B"])
     }
 
     // MARK: - Simulate cmd+return completion flow
@@ -329,7 +393,7 @@ final class TodoStoreTests: XCTestCase {
         let capturedItem = store.items[0]
 
         // Simulate user editing the text during animation
-        store.items[0].text = "Modified"
+        store.updateText(for: capturedItem.id, to: "Modified")
 
         // The captured item still has the original UUID, so archive should work
         store.archive(capturedItem)
@@ -395,5 +459,20 @@ final class TodoStoreTests: XCTestCase {
         XCTAssertEqual(store2.items.count, 0)
         XCTAssertEqual(store2.archivedItems.count, 1)
         XCTAssertEqual(store2.archivedItems[0].text, "Persistent task")
+    }
+
+    func testPreferencesPersistence() {
+        let store1 = TodoStore()
+        let updatedPreferences = AppPreferences(
+            rowHeight: 44,
+            panelWidth: 460,
+            hoverHighlightsEnabled: false,
+            animationPreset: .snappy,
+            snapPadding: 24
+        )
+        store1.updatePreferences(updatedPreferences)
+
+        let store2 = TodoStore()
+        XCTAssertEqual(store2.preferences, updatedPreferences)
     }
 }

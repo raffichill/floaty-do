@@ -1,23 +1,49 @@
 import AppKit
+import Combine
 import os.log
 import QuartzCore
 
 private let logger = Logger(subsystem: "com.floatydo", category: "TodoVC")
 
-// MARK: - Controller
-
 public enum Tab { case tasks, archive }
 
-public final class TodoViewController: NSViewController {
+fileprivate protocol TodoRowViewDelegate: AnyObject {
+    func rowViewDidRequestSelection(_ row: TodoRowView)
+    func rowViewDidBeginEditing(_ row: TodoRowView)
+    func rowView(_ row: TodoRowView, didChangeText text: String)
+    func rowViewDidActivateCheckbox(_ row: TodoRowView)
+    func rowViewDidRequestMoveUp(_ row: TodoRowView)
+    func rowViewDidRequestMoveDown(_ row: TodoRowView)
+    func rowViewDidRequestSubmit(_ row: TodoRowView)
+    func rowViewDidStartDrag(_ row: TodoRowView, event: NSEvent)
+    func rowViewDidContinueDrag(_ row: TodoRowView, event: NSEvent)
+    func rowViewDidEndDrag(_ row: TodoRowView, event: NSEvent)
+}
+
+public final class TodoViewController: NSViewController, NSPopoverDelegate {
+    private struct DragState {
+        let rowID: TodoRowID
+        let itemID: UUID
+        let ghostView: NSImageView
+        let pointerOffset: CGFloat
+        var currentIndex: Int
+    }
+
     private let store: TodoStore
     private let stackView = NSStackView()
-    private var selectedIndex: Int = 0
+    private var selectedRowID: TodoRowID?
     private var rowViews: [TodoRowView] = []
+    private var rowModels: [TodoRowModel] = []
+    private var taskInputDraft = ""
     private var eventMonitor: Any?
+    private var cancellables = Set<AnyCancellable>()
     private var currentTab: Tab = .tasks
     private var tasksTabButton: NSButton!
     private var archiveTabButton: NSButton!
+    private var settingsButton: NSButton!
+    private var settingsPopover: NSPopover?
     private var isAnimating = false
+    private var dragState: DragState?
 
     public init(store: TodoStore) {
         self.store = store
@@ -26,36 +52,25 @@ public final class TodoViewController: NSViewController {
 
     required init?(coder: NSCoder) { fatalError() }
 
-    private var rowCount: Int {
-        switch currentTab {
-        case .tasks:
-            return min(store.items.count + 3, TodoStore.maxItems)
-        case .archive:
-            return max(store.archivedItems.count, 3)
-        }
-    }
-
+    private var motion: MotionProfile { store.preferences.motion }
+    private var rowHeight: CGFloat { CGFloat(store.preferences.rowHeight) }
+    private var panelWidth: CGFloat { CGFloat(store.preferences.panelWidth) }
+    private var rowCount: Int { rowModels.count }
     private var inputIndex: Int { store.items.count }
 
     public override func loadView() {
-        let container = NSView(frame: NSRect(x: 0, y: 0, width: 260, height: 200))
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: panelWidth, height: 240))
         container.wantsLayer = true
 
-        // Tab bar in the title bar area
         tasksTabButton = makeTabButton(symbolName: "checklist.unchecked", action: #selector(switchToTasks))
         archiveTabButton = makeTabButton(symbolName: "archivebox", action: #selector(switchToArchive))
+        settingsButton = makeTabButton(symbolName: "slider.horizontal.3", action: #selector(toggleSettings(_:)))
 
-        let tabBar = NSStackView(views: [tasksTabButton, archiveTabButton])
+        let tabBar = NSStackView(views: [tasksTabButton, archiveTabButton, settingsButton])
         tabBar.orientation = .horizontal
         tabBar.spacing = 0
         tabBar.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(tabBar)
-
-        // Stretch buttons to fill the full title bar height
-        tasksTabButton.topAnchor.constraint(equalTo: tabBar.topAnchor).isActive = true
-        tasksTabButton.bottomAnchor.constraint(equalTo: tabBar.bottomAnchor).isActive = true
-        archiveTabButton.topAnchor.constraint(equalTo: tabBar.topAnchor).isActive = true
-        archiveTabButton.bottomAnchor.constraint(equalTo: tabBar.bottomAnchor).isActive = true
 
         let divider = NSView()
         divider.wantsLayer = true
@@ -71,15 +86,15 @@ public final class TodoViewController: NSViewController {
         container.addSubview(stackView)
 
         NSLayoutConstraint.activate([
-            // Tab bar spans the full title bar height
             tabBar.topAnchor.constraint(equalTo: container.topAnchor),
             tabBar.bottomAnchor.constraint(equalTo: container.safeAreaLayoutGuide.topAnchor),
-            tabBar.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -12),
+            tabBar.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -LayoutMetrics.titlebarTrailingInset),
 
             divider.topAnchor.constraint(equalTo: container.safeAreaLayoutGuide.topAnchor),
             divider.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             divider.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            divider.heightAnchor.constraint(equalToConstant: 0.5),
+            divider.heightAnchor.constraint(equalToConstant: LayoutMetrics.dividerHeight),
+
             stackView.topAnchor.constraint(equalTo: divider.bottomAnchor),
             stackView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             stackView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
@@ -92,103 +107,52 @@ public final class TodoViewController: NSViewController {
     public override func viewDidLoad() {
         super.viewDidLoad()
 
-        // Event monitor ONLY for cmd+key combos (cmd+return, cmd+delete)
         eventMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self else { return event }
-            guard !self.isAnimating else { return event }
+            guard !self.isAnimating, self.dragState == nil else { return event }
             let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
             guard mods == .command else { return event }
 
-            if event.keyCode == 36 { // cmd+return
-                self.syncSelectedIndex()
-                logger.debug("CMD+RETURN: selectedIndex=\(self.selectedIndex), items.count=\(self.store.items.count), rowViews.count=\(self.rowViews.count), rowCount=\(self.rowCount)")
-                if self.currentTab == .tasks {
-                    if self.selectedIndex < self.store.items.count {
-                        logger.debug("CMD+RETURN: completing item at \(self.selectedIndex): \"\(self.store.items[self.selectedIndex].text, privacy: .public)\"")
-                        self.animateCompletion(at: self.selectedIndex)
-                        return nil
-                    } else if self.selectedIndex == self.inputIndex {
-                        // On input row: add the todo then immediately complete it
-                        let row = self.rowViews[self.selectedIndex]
-                        let text = row.currentText.trimmingCharacters(in: .whitespaces)
-                        guard !text.isEmpty else { return nil }
-                        self.store.add(text)
-                        let newItemIndex = self.store.items.count - 1
-                        self.rebuildRows()
-                        self.animateCompletion(at: newItemIndex)
-                        return nil
-                    } else {
-                        return nil
-                    }
-                } else {
-                    if self.selectedIndex < self.store.archivedItems.count {
-                        self.store.restore(self.store.archivedItems[self.selectedIndex])
-                        if self.selectedIndex >= self.store.archivedItems.count && self.selectedIndex > 0 {
-                            self.selectedIndex = self.store.archivedItems.count - 1
-                        }
-                        self.deferredRebuild()
-                    }
-                    return nil
-                }
-            }
-            if event.keyCode == 51 { // cmd+delete
-                self.syncSelectedIndex()
-                if self.currentTab == .tasks {
-                    if self.selectedIndex < self.store.items.count {
-                        self.store.delete(self.store.items[self.selectedIndex])
-                        if self.selectedIndex >= self.store.items.count && self.selectedIndex > 0 {
-                            self.selectedIndex = self.store.items.count - 1
-                        }
-                        self.deferredRebuild()
-                    }
-                } else {
-                    if self.selectedIndex < self.store.archivedItems.count {
-                        self.store.deleteArchived(self.store.archivedItems[self.selectedIndex])
-                        if self.selectedIndex >= self.store.archivedItems.count && self.selectedIndex > 0 {
-                            self.selectedIndex = self.store.archivedItems.count - 1
-                        }
-                        self.deferredRebuild()
-                    }
-                }
+            switch event.keyCode {
+            case 36:
+                self.handleCommandReturn()
                 return nil
+            case 51:
+                self.handleCommandDelete()
+                return nil
+            default:
+                return event
             }
-            return event
         }
 
-        rebuildRows()
+        store.$preferences
+            .dropFirst()
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                self?.preferencesDidChange()
+            }
+            .store(in: &cancellables)
+
+        rebuildRows(animateResize: false)
     }
 
     public override func viewDidAppear() {
         super.viewDidAppear()
-        // Initial resize — viewDidLoad runs before the view is in the window,
-        // so resizeWindow() silently fails there. Do it here once the window exists.
-        resizeWindow()
+        resizeWindow(animate: false)
     }
 
     deinit {
-        if let monitor = eventMonitor { NSEvent.removeMonitor(monitor) }
-    }
-
-    // MARK: - Focus Sync
-
-    /// Sync selectedIndex with whichever text field actually has focus (e.g. after a click)
-    private func syncSelectedIndex() {
-        for (i, row) in rowViews.enumerated() {
-            if let field = row.textField, field.currentEditor() != nil {
-                selectedIndex = i
-                return
-            }
+        if let monitor = eventMonitor {
+            NSEvent.removeMonitor(monitor)
         }
     }
 
-    /// Called by RowFieldDelegate when a row's text field begins editing (click or tab into)
-    func rowDidBeginEditing(_ row: TodoRowView) {
-        if let idx = rowViews.firstIndex(where: { $0 === row }) {
-            selectedIndex = idx
+    private func preferencesDidChange() {
+        if dragState != nil {
+            finishDrag(commit: true)
         }
+        rebuildRows(animateResize: false)
     }
-
-    // MARK: - Tabs
 
     private func makeTabButton(symbolName: String, action: Selector) -> NSButton {
         let image = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)!
@@ -202,333 +166,185 @@ public final class TodoViewController: NSViewController {
     }
 
     private func updateTabAppearance() {
-        tasksTabButton.contentTintColor = currentTab == .tasks
-            ? .white
-            : .white.withAlphaComponent(0.35)
-        archiveTabButton.contentTintColor = currentTab == .archive
-            ? .white
-            : .white.withAlphaComponent(0.35)
+        tasksTabButton.contentTintColor = currentTab == .tasks ? .white : .white.withAlphaComponent(0.35)
+        archiveTabButton.contentTintColor = currentTab == .archive ? .white : .white.withAlphaComponent(0.35)
+        settingsButton.contentTintColor = settingsPopover?.isShown == true ? .white : .white.withAlphaComponent(0.55)
     }
 
     @objc private func switchToTasks() {
         guard currentTab != .tasks else { return }
         currentTab = .tasks
-        selectedIndex = 0
+        selectedRowID = nil
         updateTabAppearance()
-        rebuildRows(resize: false)
+        rebuildRows(resize: false, animateResize: false)
     }
 
     @objc private func switchToArchive() {
         guard currentTab != .archive else { return }
         currentTab = .archive
-        selectedIndex = 0
+        selectedRowID = nil
         updateTabAppearance()
-        rebuildRows(resize: false)
+        rebuildRows(resize: false, animateResize: false)
     }
 
-    // MARK: - Completion Animation
-
-    private func animateCompletion(at index: Int) {
-        guard !isAnimating, index < store.items.count, index < rowViews.count else {
-            logger.warning("animateCompletion SKIPPED: isAnimating=\(self.isAnimating), index=\(index), items.count=\(self.store.items.count), rowViews.count=\(self.rowViews.count)")
+    @objc private func toggleSettings(_ sender: NSButton) {
+        if let popover = settingsPopover, popover.isShown {
+            popover.performClose(nil)
             return
         }
-        isAnimating = true
-        logger.debug("animateCompletion START: index=\(index), item=\"\(self.store.items[index].text, privacy: .public)\", items=\(self.store.items.map { $0.text }.description, privacy: .public)")
 
-        let row = rowViews[index]
-        let item = store.items[index]
-
-        // Clear focus during animation
-        view.window?.makeFirstResponder(nil)
-
-        // Safety timeout: reset isAnimating if completion chain breaks
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
-            self?.isAnimating = false
+        let settingsController = SettingsViewController(preferences: store.preferences)
+        settingsController.onPreferencesChange = { [weak self] preferences in
+            self?.store.updatePreferences(preferences)
         }
 
-        // Phase 1: Strikethrough → Phase 2: Circle swap → Phase 3: Row clear
-        row.playCompletionAnimation { [weak self] in
-            guard let self else { return }
+        let popover = NSPopover()
+        popover.behavior = .transient
+        popover.animates = true
+        popover.delegate = self
+        popover.contentViewController = settingsController
+        settingsPopover = popover
+        updateTabAppearance()
+        popover.show(relativeTo: sender.bounds, of: sender, preferredEdge: .maxY)
+    }
 
+    public func popoverDidClose(_ notification: Notification) {
+        updateTabAppearance()
+    }
 
-            // Phase 3: Blur + shrink + collapse
-            logger.debug("animateCompletion PHASE3: about to collapse row, items=\(self.store.items.map { $0.text }.description, privacy: .public)")
-            self.animateRowCollapse(row: row) {
+    private func buildRowModels(for tab: Tab? = nil) -> [TodoRowModel] {
+        switch tab ?? currentTab {
+        case .tasks:
+            let visibleRowCount = min(store.items.count + 3, TodoStore.maxItems)
+            let emptyCount = max(visibleRowCount - store.items.count, 1)
 
-                // Post-animation: archive and rebuild
-                logger.debug("animateCompletion POST-COLLAPSE: archiving item=\"\(item.text, privacy: .public)\", items.count=\(self.store.items.count)")
-                self.store.archive(item)
-                logger.debug("animateCompletion POST-ARCHIVE: items.count=\(self.store.items.count), archived.count=\(self.store.archivedItems.count), items=\(self.store.items.map { $0.text }.description, privacy: .public)")
-
-                // selectedIndex stays at same position (now points to next item)
-                if index < self.store.items.count {
-                    self.selectedIndex = index
-                } else {
-                    // Archived the last item — land on the input row
-                    self.selectedIndex = self.store.items.count
-                }
-                logger.debug("animateCompletion PRE-REBUILD: selectedIndex=\(self.selectedIndex), rowCount will be=\(self.rowCount)")
-
-                self.rebuildRows()
-                self.isAnimating = false
-                logger.debug("animateCompletion DONE: isAnimating=false, rowViews.count=\(self.rowViews.count)")
+            var models = store.items.map { item in
+                TodoRowModel(
+                    id: .taskItem(item.id),
+                    kind: .taskItem(item),
+                    text: item.text,
+                    isDone: false,
+                    isEditable: true,
+                    isSelectable: true,
+                    canComplete: true,
+                    canDrag: true,
+                    circleOpacity: 0.40,
+                    textOpacity: 0.90,
+                    showsStrikethrough: false
+                )
             }
-        }
-    }
 
-    private func animateRowCollapse(row: TodoRowView, completion: @escaping () -> Void) {
-        guard let rowLayer = row.layer else {
-            completion()
-            return
-        }
+            models.append(
+                TodoRowModel(
+                    id: .taskInput,
+                    kind: .taskInput,
+                    text: taskInputDraft,
+                    isDone: false,
+                    isEditable: true,
+                    isSelectable: true,
+                    canComplete: false,
+                    canDrag: false,
+                    circleOpacity: fadeOpacity(emptyIndex: 0, emptyCount: emptyCount),
+                    textOpacity: 0.92,
+                    showsStrikethrough: false
+                )
+            )
 
-        rowLayer.masksToBounds = true
+            if emptyCount > 1 {
+                for fillerIndex in 1..<emptyCount {
+                    models.append(
+                        TodoRowModel(
+                            id: .taskFiller(fillerIndex),
+                            kind: .filler,
+                            text: "",
+                            isDone: false,
+                            isEditable: false,
+                            isSelectable: false,
+                            canComplete: false,
+                            canDrag: false,
+                            circleOpacity: fadeOpacity(emptyIndex: fillerIndex, emptyCount: emptyCount),
+                            textOpacity: 0.0,
+                            showsStrikethrough: false
+                        )
+                    )
+                }
+            }
 
-        // Blur effect on row content
-        if let blur = CIFilter(name: "CIGaussianBlur") {
-            blur.name = "blur"
-            blur.setValue(0, forKey: "inputRadius")
-            rowLayer.filters = [blur]
+            return models
 
-            let blurAnim = CABasicAnimation(keyPath: "filters.blur.inputRadius")
-            blurAnim.fromValue = 0
-            blurAnim.toValue = 8
-            blurAnim.duration = 0.35
-            blurAnim.timingFunction = CAMediaTimingFunction(name: .easeOut)
-            blurAnim.fillMode = .forwards
-            blurAnim.isRemovedOnCompletion = false
-            rowLayer.add(blurAnim, forKey: "blurOut")
-        }
+        case .archive:
+            let visibleRowCount = max(store.archivedItems.count, 3)
+            var models = store.archivedItems.map { item in
+                TodoRowModel(
+                    id: .archiveItem(item.id),
+                    kind: .archiveItem(item),
+                    text: item.text,
+                    isDone: true,
+                    isEditable: false,
+                    isSelectable: true,
+                    canComplete: false,
+                    canDrag: false,
+                    circleOpacity: 0.38,
+                    textOpacity: 0.38,
+                    showsStrikethrough: true
+                )
+            }
 
-        // Shrink checkmark to 40% from center (use full transform to avoid anchorPoint issues)
-        if let circleLayer = row.circleView.layer {
-            let b = circleLayer.bounds
-            let cx = b.width / 2
-            let cy = b.height / 2
-            let toOrigin = CATransform3DMakeTranslation(-cx, -cy, 0)
-            let scale = CATransform3DMakeScale(0.4, 0.4, 1)
-            let back = CATransform3DMakeTranslation(cx, cy, 0)
-            let target = CATransform3DConcat(CATransform3DConcat(toOrigin, scale), back)
+            let fillerCount = visibleRowCount - store.archivedItems.count
+            if fillerCount > 0 {
+                for fillerIndex in 0..<fillerCount {
+                    models.append(
+                        TodoRowModel(
+                            id: .archiveFiller(fillerIndex),
+                            kind: .filler,
+                            text: "",
+                            isDone: false,
+                            isEditable: false,
+                            isSelectable: false,
+                            canComplete: false,
+                            canDrag: false,
+                            circleOpacity: fadeOpacity(emptyIndex: fillerIndex, emptyCount: fillerCount),
+                            textOpacity: 0.0,
+                            showsStrikethrough: false
+                        )
+                    )
+                }
+            }
 
-            let shrinkOut = CABasicAnimation(keyPath: "transform")
-            shrinkOut.fromValue = CATransform3DIdentity
-            shrinkOut.toValue = target
-            shrinkOut.duration = 0.35
-            shrinkOut.timingFunction = CAMediaTimingFunction(name: .easeOut)
-            shrinkOut.fillMode = .forwards
-            shrinkOut.isRemovedOnCompletion = false
-            circleLayer.add(shrinkOut, forKey: "shrinkOut")
-        }
-
-        // Fade out
-        let fadeAnim = CABasicAnimation(keyPath: "opacity")
-        fadeAnim.fromValue = 1.0
-        fadeAnim.toValue = 0.0
-        fadeAnim.duration = 0.35
-        fadeAnim.timingFunction = CAMediaTimingFunction(name: .easeOut)
-        fadeAnim.fillMode = .forwards
-        fadeAnim.isRemovedOnCompletion = false
-        rowLayer.add(fadeAnim, forKey: "fadeOut")
-
-        // Layout collapse + other rows shift (350ms easeOut)
-        // Note: window resize is handled by rebuildRows() after archive, not here,
-        // to avoid conflicts between animator().setFrame() and setFrame(animate:).
-        NSAnimationContext.runAnimationGroup({ context in
-            context.duration = 0.35
-            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
-            context.allowsImplicitAnimation = true
-
-            row.heightConstraint.animator().constant = 0
-            self.stackView.layoutSubtreeIfNeeded()
-        }, completionHandler: completion)
-    }
-
-    // MARK: - Navigation (called by field delegate via row callbacks)
-
-    func moveUp() {
-        guard !isAnimating, selectedIndex > 0 else { return }
-        selectedIndex -= 1
-        focusRow(selectedIndex)
-    }
-
-    func moveDown() {
-        guard !isAnimating, selectedIndex < rowCount - 1 else { return }
-        selectedIndex += 1
-        focusRow(selectedIndex)
-    }
-
-    func submitRow() {
-        guard !isAnimating, currentTab == .tasks else { return }
-
-        if selectedIndex < store.items.count {
-            // On a filled row: return moves down
-            moveDown()
-        } else if selectedIndex == inputIndex {
-            // On the input row: add the todo
-            let row = rowViews[selectedIndex]
-            let text = row.currentText
-            guard !text.trimmingCharacters(in: .whitespaces).isEmpty else { return }
-            store.add(text)
-            selectedIndex = inputIndex
-            deferredRebuild()
-        }
-    }
-
-    // MARK: - Focus
-
-    private func focusRow(_ index: Int) {
-        guard index < rowViews.count else { return }
-        let row = rowViews[index]
-        guard let field = row.textField else { return }
-        field.window?.makeFirstResponder(field)
-    }
-
-    // MARK: - Rebuild
-
-    private func deferredRebuild() {
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            self.view.window?.makeFirstResponder(nil)
-            self.rebuildRows()
+            return models
         }
     }
 
     private func rebuildRows(resize: Bool = true, animateResize: Bool = true) {
-        logger.debug("rebuildRows START: resize=\(resize), animateResize=\(animateResize), old rowViews.count=\(self.rowViews.count)")
+        logger.debug("rebuildRows START: resize=\(resize), animateResize=\(animateResize)")
+
         for row in rowViews {
             stackView.removeArrangedSubview(row)
             row.removeFromSuperview()
         }
         rowViews.removeAll()
 
-        let count = rowCount
-        logger.debug("rebuildRows: rowCount=\(count), items.count=\(self.store.items.count), archived.count=\(self.store.archivedItems.count)")
+        rowModels = buildRowModels()
+        ensureSelectedRowExists()
 
-        if currentTab == .tasks {
-            rebuildTaskRows(count: count)
-        } else {
-            rebuildArchiveRows(count: count)
+        for model in rowModels {
+            let row = TodoRowView(model: model, preferences: store.preferences)
+            row.delegate = self
+            row.translatesAutoresizingMaskIntoConstraints = false
+            stackView.addArrangedSubview(row)
+            row.widthAnchor.constraint(equalTo: stackView.widthAnchor).isActive = true
+            rowViews.append(row)
         }
 
-        if selectedIndex >= count { selectedIndex = max(0, count - 1) }
+        updateRowSelectionStates()
 
-        if resize { resizeWindow(animate: animateResize) }
-
-        logger.debug("rebuildRows END: rowViews.count=\(self.rowViews.count), stackView.arrangedSubviews=\(self.stackView.arrangedSubviews.count), selectedIndex=\(self.selectedIndex)")
-        if let window = view.window {
-            logger.debug("rebuildRows window: frame.height=\(window.frame.height), stackView.frame=\(self.stackView.frame.debugDescription, privacy: .public)")
-        }
-        for (i, row) in rowViews.enumerated() {
-            logger.debug("  row[\(i)]: text=\"\(row.currentText, privacy: .public)\", heightConstraint=\(row.heightConstraint.constant)")
+        if resize {
+            resizeWindow(animate: animateResize)
         }
 
-        // Focus after layout settles
         DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            self.focusRow(self.selectedIndex)
-            // Log the settled layout state
-            logger.debug("rebuildRows SETTLED: stackView.frame=\(self.stackView.frame.debugDescription, privacy: .public)")
-            for (i, row) in self.rowViews.enumerated() {
-                logger.debug("  settled row[\(i)]: frame=\(row.frame.debugDescription, privacy: .public), isHidden=\(row.isHidden), alphaValue=\(row.alphaValue)")
-            }
+            self?.focusSelectedRowIfNeeded()
         }
-    }
-
-    private func rebuildTaskRows(count: Int) {
-        for i in 0..<count {
-            let emptyIndex = i - store.items.count
-            let emptyCount = count - store.items.count
-            let row: TodoRowView
-
-            if i < store.items.count {
-                let item = store.items[i]
-                row = TodoRowView(
-                    text: item.text, isDone: false,
-                    circleOpacity: 0.4,
-                    isEditable: true
-                )
-                let idx = i
-                row.onTextChange = { [weak self] newText in
-                    guard let self, idx < self.store.items.count else { return }
-                    self.store.items[idx].text = newText
-                }
-            } else if i == inputIndex {
-                row = TodoRowView(
-                    text: "", isDone: false,
-                    circleOpacity: fadeOpacity(emptyIndex: emptyIndex, emptyCount: emptyCount),
-                    isEditable: true
-                )
-            } else {
-                row = TodoRowView(
-                    text: "", isDone: false,
-                    circleOpacity: fadeOpacity(emptyIndex: emptyIndex, emptyCount: emptyCount),
-                    isEditable: false
-                )
-            }
-
-            row.controller = self
-            row.translatesAutoresizingMaskIntoConstraints = false
-            stackView.addArrangedSubview(row)
-            row.widthAnchor.constraint(equalTo: stackView.widthAnchor).isActive = true
-            rowViews.append(row)
-        }
-    }
-
-    private func rebuildArchiveRows(count: Int) {
-        for i in 0..<count {
-            let row: TodoRowView
-            if i < store.archivedItems.count {
-                let item = store.archivedItems[i]
-                row = TodoRowView(
-                    text: item.text, isDone: true,
-                    circleOpacity: 1.0,
-                    isEditable: true
-                )
-            } else {
-                row = TodoRowView(
-                    text: "", isDone: false,
-                    circleOpacity: fadeOpacity(emptyIndex: i - store.archivedItems.count,
-                                               emptyCount: count - store.archivedItems.count),
-                    isEditable: false
-                )
-            }
-
-            row.controller = self
-            row.translatesAutoresizingMaskIntoConstraints = false
-            stackView.addArrangedSubview(row)
-            row.widthAnchor.constraint(equalTo: stackView.widthAnchor).isActive = true
-            rowViews.append(row)
-        }
-    }
-
-    private func resizeWindow(animate: Bool = true) {
-        guard let window = view.window else {
-            logger.warning("resizeWindow: no window!")
-            return
-        }
-        let rows = max(rowCount, 1)
-        let contentHeight = CGFloat(rows) * 36.0 + 16.5
-        let titlebar = window.titlebarHeight
-        let fullHeight = max(contentHeight + titlebar, window.minSize.height)
-        let oldFrame = window.frame
-
-        logger.debug("resizeWindow: rows=\(rows), contentHeight=\(contentHeight), titlebar=\(titlebar), fullHeight=\(fullHeight), oldFrame.height=\(oldFrame.height)")
-
-        guard abs(fullHeight - oldFrame.height) > 0.5 else {
-            logger.debug("resizeWindow: SKIPPING (no meaningful change)")
-            view.layoutSubtreeIfNeeded()
-            return
-        }
-
-        let newFrame = NSRect(
-            x: oldFrame.origin.x,
-            y: oldFrame.maxY - fullHeight,
-            width: oldFrame.width,
-            height: fullHeight
-        )
-        logger.debug("resizeWindow: resizing from \(oldFrame.height) to \(fullHeight)")
-        window.setFrame(newFrame, display: true, animate: animate)
     }
 
     private func fadeOpacity(emptyIndex: Int, emptyCount: Int) -> Double {
@@ -539,54 +355,611 @@ public final class TodoViewController: NSViewController {
         default: return 0.30
         }
     }
+
+    private func ensureSelectedRowExists() {
+        guard let selectedRowID else {
+            selectedRowID = buildSelectionID(in: rowModels, selectableIndex: 0)
+            return
+        }
+        guard rowModels.contains(where: { $0.id == selectedRowID }) else {
+            self.selectedRowID = buildSelectionID(in: rowModels, selectableIndex: 0)
+            return
+        }
+        guard rowModels.first(where: { $0.id == selectedRowID })?.isSelectable == true else {
+            self.selectedRowID = buildSelectionID(in: rowModels, selectableIndex: 0)
+            return
+        }
+    }
+
+    private func buildSelectionID(in models: [TodoRowModel], selectableIndex: Int) -> TodoRowID? {
+        let selectableRows = models.filter(\.isSelectable)
+        guard !selectableRows.isEmpty else { return nil }
+        let clampedIndex = max(0, min(selectableIndex, selectableRows.count - 1))
+        return selectableRows[clampedIndex].id
+    }
+
+    private func updateRowSelectionStates() {
+        for row in rowViews {
+            row.setSelected(row.model.id == selectedRowID)
+        }
+    }
+
+    private func syncSelectedRow() {
+        for row in rowViews where row.isEditing {
+            selectedRowID = row.model.id
+            return
+        }
+    }
+
+    private var selectedRowIndex: Int? {
+        guard let selectedRowID else { return nil }
+        return rowModels.firstIndex(where: { $0.id == selectedRowID })
+    }
+
+    private var selectedModel: TodoRowModel? {
+        guard let selectedRowIndex else { return nil }
+        return rowModels[selectedRowIndex]
+    }
+
+    private func rowView(for rowID: TodoRowID?) -> TodoRowView? {
+        guard let rowID else { return nil }
+        return rowViews.first(where: { $0.model.id == rowID })
+    }
+
+    private func nextSelectableIndex(from start: Int, step: Int) -> Int? {
+        var index = start + step
+        while rowModels.indices.contains(index) {
+            if rowModels[index].isSelectable {
+                return index
+            }
+            index += step
+        }
+        return nil
+    }
+
+    private func focusSelectedRowIfNeeded() {
+        guard dragState == nil else { return }
+        guard let row = rowView(for: selectedRowID) else { return }
+        if row.model.isEditable, let field = row.textField {
+            field.window?.makeFirstResponder(field)
+        } else {
+            view.window?.makeFirstResponder(view)
+        }
+        updateRowSelectionStates()
+    }
+
+    private func handleCommandReturn() {
+        syncSelectedRow()
+        guard !isAnimating, dragState == nil, let selectedModel else { return }
+
+        switch currentTab {
+        case .tasks:
+            switch selectedModel.kind {
+            case .taskItem(let item):
+                animateCompletion(for: item.id)
+            case .taskInput:
+                let text = taskInputDraft.trimmingCharacters(in: .whitespaces)
+                guard !text.isEmpty else { return }
+                store.add(text)
+                taskInputDraft = ""
+                guard let newItemID = store.items.last?.id else {
+                    rebuildRows()
+                    return
+                }
+                rebuildRows()
+                animateCompletion(for: newItemID)
+            case .archiveItem, .filler:
+                return
+            }
+
+        case .archive:
+            guard case .archiveItem(let item) = selectedModel.kind else { return }
+            let selectionIndex = selectedRowIndex ?? 0
+            store.restore(id: item.id)
+            let updatedModels = buildRowModels(for: .archive)
+            selectedRowID = buildSelectionID(in: updatedModels, selectableIndex: selectionIndex)
+            rebuildRows()
+        }
+    }
+
+    private func handleCommandDelete() {
+        syncSelectedRow()
+        guard !isAnimating, dragState == nil, let selectedModel else { return }
+        let selectionIndex = selectedRowIndex ?? 0
+
+        switch currentTab {
+        case .tasks:
+            guard case .taskItem(let item) = selectedModel.kind else { return }
+            store.deleteItem(id: item.id)
+            let updatedModels = buildRowModels(for: .tasks)
+            selectedRowID = buildSelectionID(in: updatedModels, selectableIndex: selectionIndex)
+            rebuildRows()
+
+        case .archive:
+            guard case .archiveItem(let item) = selectedModel.kind else { return }
+            store.deleteArchived(id: item.id)
+            let updatedModels = buildRowModels(for: .archive)
+            selectedRowID = buildSelectionID(in: updatedModels, selectableIndex: selectionIndex)
+            rebuildRows()
+        }
+    }
+
+    private func animateCompletion(for itemID: UUID) {
+        guard !isAnimating, dragState == nil else { return }
+        guard let index = rowModels.firstIndex(where: { $0.itemID == itemID }),
+              index < store.items.count,
+              let row = rowView(for: .taskItem(itemID)),
+              let item = store.items.first(where: { $0.id == itemID }) else {
+            logger.warning("animateCompletion SKIPPED for itemID=\(itemID)")
+            return
+        }
+
+        isAnimating = true
+        selectedRowID = .taskItem(itemID)
+        view.window?.makeFirstResponder(nil)
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + motion.completionSettle + motion.collapse + 0.4) { [weak self] in
+            self?.isAnimating = false
+        }
+
+        row.playCompletionAnimation(motion: motion) { [weak self] in
+            guard let self else { return }
+            self.animateRowCollapse(row: row, duration: self.motion.collapse) {
+                self.store.archive(id: item.id)
+                let updatedModels = self.buildRowModels(for: .tasks)
+                self.selectedRowID = self.buildSelectionID(in: updatedModels, selectableIndex: index)
+                self.rebuildRows()
+                self.isAnimating = false
+            }
+        }
+    }
+
+    private func animateRowCollapse(row: TodoRowView, duration: TimeInterval, completion: @escaping () -> Void) {
+        guard let rowLayer = row.layer else {
+            completion()
+            return
+        }
+
+        rowLayer.masksToBounds = true
+
+        if let blur = CIFilter(name: "CIGaussianBlur") {
+            blur.name = "blur"
+            blur.setValue(0, forKey: "inputRadius")
+            rowLayer.filters = [blur]
+
+            let blurAnim = CABasicAnimation(keyPath: "filters.blur.inputRadius")
+            blurAnim.fromValue = 0
+            blurAnim.toValue = 8
+            blurAnim.duration = duration
+            blurAnim.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            blurAnim.fillMode = .forwards
+            blurAnim.isRemovedOnCompletion = false
+            rowLayer.add(blurAnim, forKey: "blurOut")
+        }
+
+        if let circleLayer = row.circleView.layer {
+            let bounds = circleLayer.bounds
+            let cx = bounds.width / 2
+            let cy = bounds.height / 2
+            let toOrigin = CATransform3DMakeTranslation(-cx, -cy, 0)
+            let scale = CATransform3DMakeScale(0.4, 0.4, 1)
+            let back = CATransform3DMakeTranslation(cx, cy, 0)
+            let target = CATransform3DConcat(CATransform3DConcat(toOrigin, scale), back)
+
+            let shrinkOut = CABasicAnimation(keyPath: "transform")
+            shrinkOut.fromValue = CATransform3DIdentity
+            shrinkOut.toValue = target
+            shrinkOut.duration = duration
+            shrinkOut.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            shrinkOut.fillMode = .forwards
+            shrinkOut.isRemovedOnCompletion = false
+            circleLayer.add(shrinkOut, forKey: "shrinkOut")
+        }
+
+        let fadeAnim = CABasicAnimation(keyPath: "opacity")
+        fadeAnim.fromValue = 1.0
+        fadeAnim.toValue = 0.0
+        fadeAnim.duration = duration
+        fadeAnim.timingFunction = CAMediaTimingFunction(name: .easeOut)
+        fadeAnim.fillMode = .forwards
+        fadeAnim.isRemovedOnCompletion = false
+        rowLayer.add(fadeAnim, forKey: "fadeOut")
+
+        NSAnimationContext.runAnimationGroup({ context in
+            context.duration = duration
+            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            context.allowsImplicitAnimation = true
+
+            row.heightConstraint.animator().constant = 0
+            self.stackView.layoutSubtreeIfNeeded()
+        }, completionHandler: completion)
+    }
+
+    func moveUp() {
+        guard !isAnimating, dragState == nil else { return }
+        syncSelectedRow()
+        guard let currentIndex = selectedRowIndex,
+              let nextIndex = nextSelectableIndex(from: currentIndex, step: -1) else { return }
+        selectedRowID = rowModels[nextIndex].id
+        focusSelectedRowIfNeeded()
+    }
+
+    func moveDown() {
+        guard !isAnimating, dragState == nil else { return }
+        syncSelectedRow()
+        guard let currentIndex = selectedRowIndex,
+              let nextIndex = nextSelectableIndex(from: currentIndex, step: 1) else { return }
+        selectedRowID = rowModels[nextIndex].id
+        focusSelectedRowIfNeeded()
+    }
+
+    func submitRow() {
+        guard !isAnimating, dragState == nil, currentTab == .tasks else { return }
+        syncSelectedRow()
+        guard let selectedModel, let currentIndex = selectedRowIndex else { return }
+
+        switch selectedModel.kind {
+        case .taskItem:
+            if let nextIndex = nextSelectableIndex(from: currentIndex, step: 1) {
+                selectedRowID = rowModels[nextIndex].id
+                focusSelectedRowIfNeeded()
+            }
+        case .taskInput:
+            let text = taskInputDraft.trimmingCharacters(in: .whitespaces)
+            guard !text.isEmpty else { return }
+            store.add(text)
+            taskInputDraft = ""
+            selectedRowID = .taskInput
+            rebuildRows()
+        case .archiveItem, .filler:
+            return
+        }
+    }
+
+    private func resizeWindow(animate: Bool = true) {
+        guard let window = view.window else { return }
+        let rows = CGFloat(max(rowCount, 1))
+        let contentHeight = rows * rowHeight + LayoutMetrics.contentBottomPadding
+        let titlebarHeight = window.titlebarHeight
+        let fullHeight = max(contentHeight + titlebarHeight, window.minSize.height)
+        let fullWidth = max(panelWidth, window.minSize.width)
+        let oldFrame = window.frame
+        let padding = CGFloat(store.preferences.snapPadding)
+        let visibleFrame = window.screen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? oldFrame
+
+        let unclampedOrigin = NSPoint(
+            x: oldFrame.origin.x,
+            y: oldFrame.maxY - fullHeight
+        )
+
+        let clampedOrigin = NSPoint(
+            x: min(max(unclampedOrigin.x, visibleFrame.minX + padding), visibleFrame.maxX - fullWidth - padding),
+            y: min(max(unclampedOrigin.y, visibleFrame.minY + padding), visibleFrame.maxY - fullHeight - padding)
+        )
+
+        let newFrame = NSRect(origin: clampedOrigin, size: NSSize(width: fullWidth, height: fullHeight))
+        guard abs(newFrame.height - oldFrame.height) > 0.5 || abs(newFrame.width - oldFrame.width) > 0.5 || newFrame.origin != oldFrame.origin else {
+            return
+        }
+
+        window.setFrame(newFrame, display: true, animate: animate)
+    }
+}
+
+extension TodoViewController: TodoRowViewDelegate {
+    fileprivate func rowViewDidRequestSelection(_ row: TodoRowView) {
+        guard row.model.isSelectable else { return }
+        selectedRowID = row.model.id
+        if !row.model.isEditable {
+            view.window?.makeFirstResponder(view)
+        }
+        updateRowSelectionStates()
+    }
+
+    fileprivate func rowViewDidBeginEditing(_ row: TodoRowView) {
+        guard row.model.isSelectable else { return }
+        selectedRowID = row.model.id
+        updateRowSelectionStates()
+    }
+
+    fileprivate func rowView(_ row: TodoRowView, didChangeText text: String) {
+        switch row.model.kind {
+        case .taskItem(let item):
+            store.updateText(for: item.id, to: text)
+        case .taskInput:
+            taskInputDraft = text
+        case .archiveItem, .filler:
+            break
+        }
+    }
+
+    fileprivate func rowViewDidActivateCheckbox(_ row: TodoRowView) {
+        guard case .taskItem(let item) = row.model.kind else { return }
+        animateCompletion(for: item.id)
+    }
+
+    fileprivate func rowViewDidRequestMoveUp(_ row: TodoRowView) {
+        rowViewDidRequestSelection(row)
+        moveUp()
+    }
+
+    fileprivate func rowViewDidRequestMoveDown(_ row: TodoRowView) {
+        rowViewDidRequestSelection(row)
+        moveDown()
+    }
+
+    fileprivate func rowViewDidRequestSubmit(_ row: TodoRowView) {
+        rowViewDidRequestSelection(row)
+        submitRow()
+    }
+
+    fileprivate func rowViewDidStartDrag(_ row: TodoRowView, event: NSEvent) {
+        guard currentTab == .tasks, dragState == nil, !isAnimating else { return }
+        guard case .taskItem(let item) = row.model.kind,
+              let rowIndex = rowViews.firstIndex(where: { $0 === row }),
+              rowIndex < store.items.count,
+              let ghostView = snapshotView(for: row) else { return }
+
+        rowViewDidRequestSelection(row)
+        view.window?.makeFirstResponder(view)
+
+        let rowFrameInView = view.convert(row.bounds, from: row)
+        ghostView.frame = rowFrameInView
+        view.addSubview(ghostView)
+        row.setDragging(true)
+
+        let pointerLocation = view.convert(event.locationInWindow, from: nil)
+        dragState = DragState(
+            rowID: row.model.id,
+            itemID: item.id,
+            ghostView: ghostView,
+            pointerOffset: pointerLocation.y - rowFrameInView.minY,
+            currentIndex: rowIndex
+        )
+        updateGhostPosition(with: pointerLocation)
+    }
+
+    fileprivate func rowViewDidContinueDrag(_ row: TodoRowView, event: NSEvent) {
+        guard var dragState else { return }
+        let pointerLocation = view.convert(event.locationInWindow, from: nil)
+        updateGhostPosition(with: pointerLocation)
+        let targetIndex = proposedDragIndex(for: dragState, ghostMidY: dragState.ghostView.frame.midY)
+        guard targetIndex != dragState.currentIndex else { return }
+
+        moveTaskRow(from: dragState.currentIndex, to: targetIndex)
+        dragState.currentIndex = targetIndex
+        self.dragState = dragState
+        rowView(for: dragState.rowID)?.setDragging(true)
+    }
+
+    fileprivate func rowViewDidEndDrag(_ row: TodoRowView, event: NSEvent) {
+        guard dragState != nil else { return }
+        finishDrag(commit: true)
+    }
+
+    private func snapshotView(for row: TodoRowView) -> NSImageView? {
+        let bounds = row.bounds
+        guard let bitmap = row.bitmapImageRepForCachingDisplay(in: bounds) else { return nil }
+        row.cacheDisplay(in: bounds, to: bitmap)
+        let image = NSImage(size: bounds.size)
+        image.addRepresentation(bitmap)
+
+        let imageView = NSImageView(image: image)
+        imageView.imageScaling = .scaleAxesIndependently
+        imageView.wantsLayer = true
+        imageView.layer?.cornerRadius = CGFloat(LayoutMetrics.rowCornerRadius)
+        imageView.layer?.shadowColor = NSColor.black.cgColor
+        imageView.layer?.shadowOpacity = 0.22
+        imageView.layer?.shadowRadius = 12
+        imageView.layer?.shadowOffset = CGSize(width: 0, height: -2)
+        return imageView
+    }
+
+    private func updateGhostPosition(with pointerLocation: CGPoint) {
+        guard let dragState else { return }
+        var frame = dragState.ghostView.frame
+        frame.origin.y = pointerLocation.y - dragState.pointerOffset
+        dragState.ghostView.frame = frame
+    }
+
+    private func proposedDragIndex(for dragState: DragState, ghostMidY: CGFloat) -> Int {
+        let taskRows = Array(rowViews.prefix(store.items.count))
+        var targetIndex = 0
+
+        for (index, row) in taskRows.enumerated() where index != dragState.currentIndex {
+            let rowFrameInView = view.convert(row.bounds, from: row)
+            if ghostMidY < rowFrameInView.midY {
+                targetIndex += 1
+            } else {
+                break
+            }
+        }
+
+        return max(0, min(targetIndex, max(store.items.count - 1, 0)))
+    }
+
+    private func moveTaskRow(from sourceIndex: Int, to destinationIndex: Int) {
+        guard sourceIndex != destinationIndex else { return }
+        guard sourceIndex < store.items.count, destinationIndex < store.items.count else { return }
+
+        let movedRow = rowViews.remove(at: sourceIndex)
+        rowViews.insert(movedRow, at: destinationIndex)
+
+        let movedModel = rowModels.remove(at: sourceIndex)
+        rowModels.insert(movedModel, at: destinationIndex)
+
+        stackView.removeArrangedSubview(movedRow)
+        movedRow.removeFromSuperview()
+        stackView.insertArrangedSubview(movedRow, at: destinationIndex)
+
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = motion.dragReorder
+            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            context.allowsImplicitAnimation = true
+            stackView.layoutSubtreeIfNeeded()
+        }
+
+        updateRowSelectionStates()
+    }
+
+    private func finishDrag(commit: Bool) {
+        guard let dragState else { return }
+        self.dragState = nil
+
+        dragState.ghostView.removeFromSuperview()
+        rowView(for: dragState.rowID)?.setDragging(false)
+
+        guard commit else {
+            rebuildRows(resize: false, animateResize: false)
+            return
+        }
+
+        let orderedIDs = rowModels.prefix(store.items.count).compactMap(\.itemID)
+        store.reorderItems(by: orderedIDs)
+        selectedRowID = dragState.rowID
+        rebuildRows(resize: false, animateResize: false)
+    }
 }
 
 private extension NSWindow {
     var titlebarHeight: CGFloat {
-        // With .fullSizeContentView, contentRect == frame, so use safe area instead
         contentView?.safeAreaInsets.top ?? 0
     }
 }
 
-// MARK: - Row View
-
 final class TodoRowView: NSView {
+    private let backgroundView = NSView()
+    private let circleHitView = InteractiveRegionView()
+    private let dragHandleView = DragHandleView()
+    private let dragHandleImageView: NSImageView
+    private var displayLabel: NSTextField?
+    private var trackingAreaRef: NSTrackingArea?
+    private var pendingDragLocation: NSPoint?
+    private let preferences: AppPreferences
+
+    private(set) var model: TodoRowModel
     private(set) var circleView: NSImageView
     private(set) var textField: NSTextField?
     private(set) var heightConstraint: NSLayoutConstraint!
-    weak var controller: TodoViewController?
-    var onTextChange: ((String) -> Void)?
 
-    var currentText: String { textField?.stringValue ?? "" }
+    fileprivate weak var delegate: TodoRowViewDelegate?
 
-    init(text: String, isDone: Bool, circleOpacity: Double, isEditable: Bool) {
-        let symbolName = isDone ? "checkmark.circle.fill" : "circle"
-        let image = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)!
-        let config = NSImage.SymbolConfiguration(pointSize: 14, weight: .regular)
-        circleView = NSImageView(image: image.withSymbolConfiguration(config)!)
-        circleView.contentTintColor = NSColor.white.withAlphaComponent(circleOpacity)
+    private var isHovered = false {
+        didSet { updateAppearance(animated: true) }
+    }
+
+    private var isSelected = false {
+        didSet { updateAppearance(animated: true) }
+    }
+
+    private var isDragging = false {
+        didSet { updateAppearance(animated: false) }
+    }
+
+    var currentText: String {
+        textField?.stringValue ?? displayLabel?.stringValue ?? ""
+    }
+
+    var isEditing: Bool {
+        textField?.currentEditor() != nil
+    }
+
+    init(model: TodoRowModel, preferences: AppPreferences) {
+        self.model = model
+        self.preferences = preferences
+
+        let circleImage = NSImage(systemSymbolName: model.isDone ? "checkmark.circle.fill" : "circle", accessibilityDescription: nil)!
+        let circleConfig = NSImage.SymbolConfiguration(pointSize: 14, weight: .regular)
+        circleView = NSImageView(image: circleImage.withSymbolConfiguration(circleConfig)!)
+        circleView.translatesAutoresizingMaskIntoConstraints = false
+        circleView.wantsLayer = true
+
+        let handleImage = NSImage(systemSymbolName: "line.3.horizontal", accessibilityDescription: nil)!
+        let handleConfig = NSImage.SymbolConfiguration(pointSize: 10, weight: .semibold)
+        dragHandleImageView = NSImageView(image: handleImage.withSymbolConfiguration(handleConfig)!)
+        dragHandleImageView.translatesAutoresizingMaskIntoConstraints = false
 
         super.init(frame: .zero)
+
         wantsLayer = true
         translatesAutoresizingMaskIntoConstraints = false
 
-        circleView.wantsLayer = true
-        circleView.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(circleView)
+        backgroundView.wantsLayer = true
+        backgroundView.translatesAutoresizingMaskIntoConstraints = false
+        backgroundView.layer?.cornerRadius = CGFloat(LayoutMetrics.rowCornerRadius)
+        addSubview(backgroundView)
 
-        heightConstraint = heightAnchor.constraint(equalToConstant: 36)
+        circleHitView.translatesAutoresizingMaskIntoConstraints = false
+        circleHitView.onMouseUp = { [weak self] in
+            guard let self, self.model.canComplete else { return }
+            self.delegate?.rowViewDidActivateCheckbox(self)
+        }
+        addSubview(circleHitView)
+        circleHitView.addSubview(circleView)
 
-        var constraints: [NSLayoutConstraint] = [
+        dragHandleView.translatesAutoresizingMaskIntoConstraints = false
+        dragHandleView.onMouseDown = { [weak self] event in
+            guard let self else { return }
+            self.pendingDragLocation = event.locationInWindow
+            self.delegate?.rowViewDidRequestSelection(self)
+        }
+        dragHandleView.onMouseDragged = { [weak self] event in
+            guard let self else { return }
+            if let start = self.pendingDragLocation {
+                let deltaX = event.locationInWindow.x - start.x
+                let deltaY = event.locationInWindow.y - start.y
+                if hypot(deltaX, deltaY) >= 3 {
+                    self.pendingDragLocation = nil
+                    self.delegate?.rowViewDidStartDrag(self, event: event)
+                    self.delegate?.rowViewDidContinueDrag(self, event: event)
+                }
+            } else {
+                self.delegate?.rowViewDidContinueDrag(self, event: event)
+            }
+        }
+        dragHandleView.onMouseUp = { [weak self] event in
+            guard let self else { return }
+            if self.pendingDragLocation != nil {
+                self.pendingDragLocation = nil
+                return
+            }
+            self.delegate?.rowViewDidEndDrag(self, event: event)
+        }
+        addSubview(dragHandleView)
+        dragHandleView.addSubview(dragHandleImageView)
+
+        heightConstraint = heightAnchor.constraint(equalToConstant: CGFloat(preferences.rowHeight))
+
+        NSLayoutConstraint.activate([
             heightConstraint,
-            circleView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
-            circleView.centerYAnchor.constraint(equalTo: centerYAnchor),
-            circleView.widthAnchor.constraint(equalToConstant: 18),
-            circleView.heightAnchor.constraint(equalToConstant: 18),
-        ]
 
-        if isEditable {
+            backgroundView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: LayoutMetrics.rowBackgroundInset),
+            backgroundView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -LayoutMetrics.rowBackgroundInset),
+            backgroundView.topAnchor.constraint(equalTo: topAnchor, constant: LayoutMetrics.rowVerticalInset),
+            backgroundView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -LayoutMetrics.rowVerticalInset),
+
+            circleHitView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: LayoutMetrics.rowHorizontalInset),
+            circleHitView.centerYAnchor.constraint(equalTo: centerYAnchor),
+            circleHitView.widthAnchor.constraint(equalToConstant: LayoutMetrics.circleHitSize),
+            circleHitView.heightAnchor.constraint(equalToConstant: LayoutMetrics.circleHitSize),
+
+            circleView.centerXAnchor.constraint(equalTo: circleHitView.centerXAnchor),
+            circleView.centerYAnchor.constraint(equalTo: circleHitView.centerYAnchor),
+            circleView.widthAnchor.constraint(equalToConstant: LayoutMetrics.circleSize),
+            circleView.heightAnchor.constraint(equalToConstant: LayoutMetrics.circleSize),
+
+            dragHandleView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -LayoutMetrics.rowHorizontalInset),
+            dragHandleView.centerYAnchor.constraint(equalTo: centerYAnchor),
+            dragHandleView.widthAnchor.constraint(equalToConstant: LayoutMetrics.dragHandleSize),
+            dragHandleView.heightAnchor.constraint(equalToConstant: LayoutMetrics.dragHandleSize),
+
+            dragHandleImageView.centerXAnchor.constraint(equalTo: dragHandleView.centerXAnchor),
+            dragHandleImageView.centerYAnchor.constraint(equalTo: dragHandleView.centerYAnchor),
+        ])
+
+        if model.isEditable {
             let field = CaretEndTextField()
-            field.stringValue = text
+            field.stringValue = model.text
             field.isBordered = false
             field.drawsBackground = false
             field.font = .systemFont(ofSize: 13)
@@ -596,58 +969,176 @@ final class TodoRowView: NSView {
             field.wantsLayer = true
             field.translatesAutoresizingMaskIntoConstraints = false
 
-            if isDone {
-                field.textColor = NSColor.white.withAlphaComponent(0.3)
-                let attrs: [NSAttributedString.Key: Any] = [
-                    .strikethroughStyle: NSUnderlineStyle.single.rawValue,
-                    .foregroundColor: NSColor.white.withAlphaComponent(0.3),
-                    .font: NSFont.systemFont(ofSize: 13),
-                ]
-                field.attributedStringValue = NSAttributedString(string: text, attributes: attrs)
-            } else {
-                field.textColor = NSColor.white.withAlphaComponent(0.9)
-            }
-
             let delegate = RowFieldDelegate(row: self)
             field.delegate = delegate
             objc_setAssociatedObject(field, "delegate", delegate, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
 
             addSubview(field)
-            self.textField = field
+            textField = field
 
-            constraints.append(contentsOf: [
-                field.leadingAnchor.constraint(equalTo: circleView.trailingAnchor, constant: 8),
-                field.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
+            NSLayoutConstraint.activate([
+                field.leadingAnchor.constraint(equalTo: circleHitView.trailingAnchor, constant: LayoutMetrics.textInset),
+                field.trailingAnchor.constraint(equalTo: dragHandleView.leadingAnchor, constant: -LayoutMetrics.textInset),
                 field.centerYAnchor.constraint(equalTo: centerYAnchor),
+            ])
+        } else {
+            let label = NSTextField(labelWithString: model.text)
+            label.lineBreakMode = .byTruncatingTail
+            label.font = .systemFont(ofSize: 13)
+            label.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(label)
+            displayLabel = label
+
+            NSLayoutConstraint.activate([
+                label.leadingAnchor.constraint(equalTo: circleHitView.trailingAnchor, constant: LayoutMetrics.textInset),
+                label.trailingAnchor.constraint(equalTo: dragHandleView.leadingAnchor, constant: -LayoutMetrics.textInset),
+                label.centerYAnchor.constraint(equalTo: centerYAnchor),
             ])
         }
 
-        NSLayoutConstraint.activate(constraints)
+        updateAppearance(animated: false)
     }
 
     required init?(coder: NSCoder) { fatalError() }
 
-    func setText(_ text: String) { textField?.stringValue = text }
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let trackingAreaRef {
+            removeTrackingArea(trackingAreaRef)
+        }
 
-    // MARK: - Completion Animation (Phase 1)
+        let trackingArea = NSTrackingArea(
+            rect: .zero,
+            options: [.activeInActiveApp, .mouseEnteredAndExited, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(trackingArea)
+        trackingAreaRef = trackingArea
+    }
 
-    func playCompletionAnimation(completion: @escaping () -> Void) {
+    override func mouseEntered(with event: NSEvent) {
+        isHovered = true
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        isHovered = false
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        guard model.isSelectable else {
+            super.mouseDown(with: event)
+            return
+        }
+
+        delegate?.rowViewDidRequestSelection(self)
+        if model.isEditable, let textField {
+            window?.makeFirstResponder(textField)
+        }
+    }
+
+    override func resetCursorRects() {
+        super.resetCursorRects()
+        if model.canComplete {
+            addCursorRect(circleHitView.frame, cursor: .pointingHand)
+        }
+        if model.canDrag {
+            addCursorRect(dragHandleView.frame, cursor: .openHand)
+        }
+    }
+
+    func setSelected(_ selected: Bool) {
+        isSelected = selected
+    }
+
+    func setDragging(_ dragging: Bool) {
+        isDragging = dragging
+    }
+
+    private func updateAppearance(animated: Bool) {
+        let backgroundAlpha: CGFloat
+        if isDragging {
+            backgroundAlpha = 0.08
+        } else if isSelected && model.isSelectable {
+            backgroundAlpha = 0.16
+        } else if preferences.hoverHighlightsEnabled && isHovered && model.isSelectable {
+            backgroundAlpha = 0.10
+        } else {
+            backgroundAlpha = 0.0
+        }
+
+        var circleAlpha = CGFloat(model.circleOpacity)
+        if model.canComplete && isHovered {
+            circleAlpha = max(circleAlpha, 0.72)
+        }
+        if isSelected && model.isSelectable {
+            circleAlpha = max(circleAlpha, model.isDone ? CGFloat(model.textOpacity) : 0.86)
+        }
+        if isDragging {
+            circleAlpha *= 0.45
+        }
+
+        var textAlpha = CGFloat(model.textOpacity)
+        if !model.showsStrikethrough {
+            if preferences.hoverHighlightsEnabled && isHovered && model.isSelectable {
+                textAlpha = max(textAlpha, 0.96)
+            }
+            if isSelected && model.isSelectable {
+                textAlpha = max(textAlpha, 0.98)
+            }
+        }
+        if isDragging {
+            textAlpha *= 0.45
+        }
+
+        let applyUpdates = {
+            self.backgroundView.layer?.backgroundColor = NSColor.white.withAlphaComponent(backgroundAlpha).cgColor
+            self.circleView.contentTintColor = NSColor.white.withAlphaComponent(circleAlpha)
+            self.dragHandleImageView.contentTintColor = NSColor.white.withAlphaComponent(self.model.canDrag ? 0.55 : 0.0)
+            self.dragHandleView.alphaValue = self.model.canDrag && (self.isSelected || self.isHovered || self.isDragging) ? 1.0 : 0.0
+
+            if let textField = self.textField {
+                textField.textColor = NSColor.white.withAlphaComponent(textAlpha)
+                textField.layer?.opacity = Float(textAlpha)
+            }
+
+            if let displayLabel = self.displayLabel {
+                displayLabel.attributedStringValue = self.makeLabelString(alpha: textAlpha)
+                displayLabel.alphaValue = 1.0
+            }
+        }
+
+        guard animated else {
+            applyUpdates()
+            return
+        }
+
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = preferences.motion.hoverFade
+            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            applyUpdates()
+        }
+    }
+
+    private func makeLabelString(alpha: CGFloat) -> NSAttributedString {
+        let attributes: [NSAttributedString.Key: Any] = [
+            .foregroundColor: NSColor.white.withAlphaComponent(alpha),
+            .font: NSFont.systemFont(ofSize: 13),
+            .strikethroughStyle: model.showsStrikethrough ? NSUnderlineStyle.single.rawValue : 0,
+        ]
+        return NSAttributedString(string: model.text, attributes: attributes)
+    }
+
+    func playCompletionAnimation(motion: MotionProfile, completion: @escaping () -> Void) {
         guard let circleLayer = circleView.layer else {
             completion()
             return
         }
 
-        self.layoutSubtreeIfNeeded()
+        layoutSubtreeIfNeeded()
 
-        // Strikethrough (250ms) and circle swap (400ms bouncy spring) start together
-        // Phase 3 fires at 500ms to let the spring fully settle
-
-        // 1. Strikethrough sweeps across text (250ms)
-        if let textField = self.textField, !textField.stringValue.isEmpty {
-            let textWidth = (textField.stringValue as NSString).size(
-                withAttributes: [.font: textField.font!]
-            ).width
-
+        if let textField, !textField.stringValue.isEmpty {
+            let textWidth = (textField.stringValue as NSString).size(withAttributes: [.font: textField.font!]).width
             let strikeLayer = CAShapeLayer()
             let textFrame = textField.frame
             let midY = textFrame.midY
@@ -658,68 +1149,60 @@ final class TodoRowView: NSView {
             strikeLayer.strokeColor = NSColor.white.withAlphaComponent(0.5).cgColor
             strikeLayer.lineWidth = 1.0
             strikeLayer.strokeEnd = 0.0
-            self.layer?.addSublayer(strikeLayer)
+            layer?.addSublayer(strikeLayer)
 
             let strokeAnim = CABasicAnimation(keyPath: "strokeEnd")
             strokeAnim.fromValue = 0.0
             strokeAnim.toValue = 1.0
-            strokeAnim.duration = 0.25
+            strokeAnim.duration = motion.completionSweep
             strokeAnim.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
             strokeAnim.fillMode = .forwards
             strokeAnim.isRemovedOnCompletion = false
             strikeLayer.add(strokeAnim, forKey: "strikethrough")
 
-            // Fade text as strikethrough sweeps
             let fadeText = CABasicAnimation(keyPath: "opacity")
             fadeText.fromValue = 1.0
             fadeText.toValue = 0.3
-            fadeText.duration = 0.25
+            fadeText.duration = motion.completionSweep
             fadeText.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
             fadeText.fillMode = .forwards
             fadeText.isRemovedOnCompletion = false
             textField.layer?.add(fadeText, forKey: "fadeText")
         }
 
-        // Helper: force anchorPoint to center (AppKit resets it on layer-backed views)
         func centerAnchor() {
             CATransaction.begin()
             CATransaction.setDisableActions(true)
-            let pos = circleLayer.position
-            let anc = circleLayer.anchorPoint
-            let b = circleLayer.bounds
+            let position = circleLayer.position
+            let anchor = circleLayer.anchorPoint
+            let bounds = circleLayer.bounds
             circleLayer.anchorPoint = CGPoint(x: 0.5, y: 0.5)
             circleLayer.position = CGPoint(
-                x: pos.x + b.width * (0.5 - anc.x),
-                y: pos.y + b.height * (0.5 - anc.y)
+                x: position.x + bounds.width * (0.5 - anchor.x),
+                y: position.y + bounds.height * (0.5 - anchor.y)
             )
             CATransaction.commit()
         }
 
-        // 2. Circle spring swap (starts at t=0, bouncier spring ~400ms)
         centerAnchor()
 
-        // Shrink out the empty circle
         let shrink = CASpringAnimation(keyPath: "transform.scale")
         shrink.fromValue = 1.0
         shrink.toValue = 0.0
         shrink.stiffness = 200
         shrink.damping = 15
-        shrink.duration = shrink.settlingDuration
+        shrink.duration = motion.completionSettle
         shrink.fillMode = .forwards
         shrink.isRemovedOnCompletion = false
         circleLayer.add(shrink, forKey: "shrinkOut")
 
-        // Swap icon + grow in the checkmark at 100ms
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.10) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + motion.checkSwapDelay) {
             let config = NSImage.SymbolConfiguration(pointSize: 14, weight: .regular)
-            let checkImage = NSImage(systemSymbolName: "checkmark.circle.fill",
-                                      accessibilityDescription: nil)!
+            let checkImage = NSImage(systemSymbolName: "checkmark.circle.fill", accessibilityDescription: nil)!
             self.circleView.image = checkImage.withSymbolConfiguration(config)
             self.circleView.contentTintColor = .white
 
             circleLayer.removeAnimation(forKey: "shrinkOut")
-
-            // Re-apply anchorPoint (AppKit may have reset it between run loop iterations)
             centerAnchor()
 
             let growIn = CASpringAnimation(keyPath: "transform.scale")
@@ -727,54 +1210,53 @@ final class TodoRowView: NSView {
             growIn.toValue = 1.0
             growIn.stiffness = 200
             growIn.damping = 15
-            growIn.duration = growIn.settlingDuration
+            growIn.duration = motion.completionSettle
             growIn.fillMode = .forwards
             growIn.isRemovedOnCompletion = false
             circleLayer.add(growIn, forKey: "growIn")
         }
 
-        // Fire Phase 3 at 600ms from start (spring fully settled)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + motion.completionSettle) {
             completion()
         }
     }
 }
 
-// MARK: - Field Delegate (routes everything to controller)
-
-private class RowFieldDelegate: NSObject, NSTextFieldDelegate {
+private final class RowFieldDelegate: NSObject, NSTextFieldDelegate {
     weak var row: TodoRowView?
 
-    init(row: TodoRowView) { self.row = row }
+    init(row: TodoRowView) {
+        self.row = row
+    }
 
     func controlTextDidBeginEditing(_ obj: Notification) {
         guard let row else { return }
-        row.controller?.rowDidBeginEditing(row)
+        row.delegate?.rowViewDidBeginEditing(row)
     }
 
     func controlTextDidChange(_ obj: Notification) {
-        guard let field = obj.object as? NSTextField else { return }
-        row?.onTextChange?(field.stringValue)
+        guard let row, let field = obj.object as? NSTextField else { return }
+        row.delegate?.rowView(row, didChangeText: field.stringValue)
     }
 
-    func control(_ control: NSControl, textView: NSTextView, doCommandBy sel: Selector) -> Bool {
-        guard let controller = row?.controller else { return false }
+    func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
+        guard let row, let delegate = row.delegate else { return false }
 
-        switch sel {
+        switch selector {
         case #selector(NSResponder.moveUp(_:)):
-            controller.moveUp()
+            delegate.rowViewDidRequestMoveUp(row)
             return true
         case #selector(NSResponder.moveDown(_:)):
-            controller.moveDown()
+            delegate.rowViewDidRequestMoveDown(row)
             return true
         case #selector(NSResponder.insertNewline(_:)):
-            controller.submitRow()
+            delegate.rowViewDidRequestSubmit(row)
             return true
         case #selector(NSResponder.insertTab(_:)):
-            controller.moveDown()
+            delegate.rowViewDidRequestMoveDown(row)
             return true
         case #selector(NSResponder.insertBacktab(_:)):
-            controller.moveUp()
+            delegate.rowViewDidRequestMoveUp(row)
             return true
         default:
             return false
@@ -782,17 +1264,40 @@ private class RowFieldDelegate: NSObject, NSTextFieldDelegate {
     }
 }
 
-// MARK: - NSTextField: caret at end, no select-all
+private final class InteractiveRegionView: NSView {
+    var onMouseUp: (() -> Void)?
 
-private class CaretEndTextField: NSTextField {
+    override func mouseUp(with event: NSEvent) {
+        onMouseUp?()
+    }
+}
+
+private final class DragHandleView: NSView {
+    var onMouseDown: ((NSEvent) -> Void)?
+    var onMouseDragged: ((NSEvent) -> Void)?
+    var onMouseUp: ((NSEvent) -> Void)?
+
+    override func mouseDown(with event: NSEvent) {
+        onMouseDown?(event)
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        onMouseDragged?(event)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        onMouseUp?(event)
+    }
+}
+
+private final class CaretEndTextField: NSTextField {
     override func becomeFirstResponder() -> Bool {
         let result = super.becomeFirstResponder()
         if let editor = currentEditor() as? NSTextView {
             editor.setSelectedRange(NSRange(location: editor.string.count, length: 0))
         }
-        // Sync selectedIndex when focus changes via click
         if result, let row = superview as? TodoRowView {
-            row.controller?.rowDidBeginEditing(row)
+            row.delegate?.rowViewDidBeginEditing(row)
         }
         return result
     }
@@ -805,8 +1310,7 @@ private class CaretEndTextField: NSTextField {
     }
 }
 
-// Custom field editor: intercepts select-all to prevent highlight flash
-public class CaretEndFieldEditor: NSTextView {
+public final class CaretEndFieldEditor: NSTextView {
     public override func setSelectedRange(_ charRange: NSRange, affinity: NSSelectionAffinity, stillSelecting flag: Bool) {
         if charRange.length == string.count && charRange.length > 0 && !flag {
             super.setSelectedRange(NSRange(location: string.count, length: 0), affinity: affinity, stillSelecting: flag)

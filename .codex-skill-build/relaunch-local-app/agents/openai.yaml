@@ -1,0 +1,4 @@
+interface:
+  display_name: "Relaunch Local App"
+  short_description: "Rebuild and relaunch local apps"
+  default_prompt: "Use $relaunch-local-app to rebuild and relaunch FloatyDo from the current workspace."

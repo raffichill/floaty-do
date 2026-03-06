@@ -1,6 +1,13 @@
 import AppKit
 
 public class AppDelegate: NSObject, NSApplicationDelegate {
+    private enum PanelSnapDirection {
+        case left
+        case right
+        case up
+        case down
+    }
+
     private var statusItem: NSStatusItem!
     private var panel: FloatingPanel!
     private let store = TodoStore()
@@ -11,9 +18,9 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         // Hide dock icon
         NSApp.setActivationPolicy(.accessory)
 
-        // Create floating panel (400×300 default, 300×200 minimum)
-        panel = FloatingPanel(contentRect: NSRect(x: 0, y: 0, width: 400, height: 300))
-        panel.minSize = NSSize(width: 300, height: 200)
+        let initialWidth = max(CGFloat(store.preferences.panelWidth), CGFloat(LayoutMetrics.minPanelWidth))
+        panel = FloatingPanel(contentRect: NSRect(x: 0, y: 0, width: initialWidth, height: 300))
+        panel.minSize = NSSize(width: LayoutMetrics.minPanelWidth, height: 200)
 
         // AppKit view controller
         todoVC = TodoViewController(store: store)
@@ -41,6 +48,22 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
             if event.charactersIgnoringModifiers == "w" {
                 self.panel.orderOut(nil)
                 return nil
+            }
+            switch event.keyCode {
+            case 123:
+                self.pushPanel(.left)
+                return nil
+            case 124:
+                self.pushPanel(.right)
+                return nil
+            case 125:
+                self.pushPanel(.down)
+                return nil
+            case 126:
+                self.pushPanel(.up)
+                return nil
+            default:
+                break
             }
             return event
         }
@@ -72,7 +95,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
     private func positionPanel() {
         guard let screen = panel.screen ?? NSScreen.main ?? NSScreen.screens.first else { return }
 
-        let padding: CGFloat = 40
+        let padding = CGFloat(store.preferences.snapPadding)
         let visibleFrame = screen.visibleFrame
         let panelWidth = panel.frame.width
         let panelHeight = panel.frame.height
@@ -81,5 +104,48 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         let y = visibleFrame.maxY - panelHeight - padding
 
         panel.setFrameOrigin(NSPoint(x: x, y: y))
+    }
+
+    private func pushPanel(_ direction: PanelSnapDirection) {
+        guard let screen = panel.screen ?? NSScreen.main ?? NSScreen.screens.first else { return }
+        if !panel.isVisible {
+            panel.orderFront(nil)
+        }
+
+        let visibleFrame = screen.visibleFrame
+        let padding = CGFloat(store.preferences.snapPadding)
+        let size = panel.frame.size
+
+        let origin: NSPoint
+        switch direction {
+        case .left:
+            origin = NSPoint(
+                x: visibleFrame.minX + padding,
+                y: visibleFrame.midY - (size.height / 2)
+            )
+        case .right:
+            origin = NSPoint(
+                x: visibleFrame.maxX - size.width - padding,
+                y: visibleFrame.midY - (size.height / 2)
+            )
+        case .up:
+            origin = NSPoint(
+                x: visibleFrame.midX - (size.width / 2),
+                y: visibleFrame.maxY - size.height - padding
+            )
+        case .down:
+            origin = NSPoint(
+                x: visibleFrame.midX - (size.width / 2),
+                y: visibleFrame.minY + padding
+            )
+        }
+
+        let clampedOrigin = NSPoint(
+            x: min(max(origin.x, visibleFrame.minX + padding), visibleFrame.maxX - size.width - padding),
+            y: min(max(origin.y, visibleFrame.minY + padding), visibleFrame.maxY - size.height - padding)
+        )
+
+        let targetFrame = NSRect(origin: clampedOrigin, size: size)
+        panel.setFrame(targetFrame, display: true, animate: true)
     }
 }

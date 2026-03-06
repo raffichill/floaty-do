@@ -19,19 +19,25 @@ public struct TodoItem: Identifiable, Codable, Equatable {
 public final class TodoStore: ObservableObject {
     private static let key = "floatydo.items"
     private static let archiveKey = "floatydo.archived"
+    private static let preferencesKey = "floatydo.preferences"
     public static let maxItems = 10
 
-    @Published public var items: [TodoItem] = [] {
+    @Published public private(set) var items: [TodoItem] = [] {
         didSet { save() }
     }
 
-    @Published public var archivedItems: [TodoItem] = [] {
+    @Published public private(set) var archivedItems: [TodoItem] = [] {
         didSet { saveArchive() }
+    }
+
+    @Published public private(set) var preferences: AppPreferences = .default {
+        didSet { savePreferences() }
     }
 
     public init() {
         load()
         loadArchive()
+        loadPreferences()
         migrateCompletedItems()
     }
 
@@ -45,10 +51,19 @@ public final class TodoStore: ObservableObject {
         logger.debug("add: \"\(trimmed)\", items.count=\(self.items.count)")
     }
 
+    public func updateText(for id: UUID, to text: String) {
+        guard let idx = items.firstIndex(where: { $0.id == id }) else { return }
+        items[idx].text = text
+    }
+
     public func archive(_ item: TodoItem) {
-        logger.debug("archive CALLED: item=\"\(item.text)\" id=\(item.id), items.count=\(self.items.count)")
-        guard let idx = items.firstIndex(where: { $0.id == item.id }) else {
-            logger.error("archive FAILED: item not found in items! id=\(item.id), text=\"\(item.text)\"")
+        archive(id: item.id)
+    }
+
+    public func archive(id: UUID) {
+        logger.debug("archive CALLED: id=\(id), items.count=\(self.items.count)")
+        guard let idx = items.firstIndex(where: { $0.id == id }) else {
+            logger.error("archive FAILED: item not found in items! id=\(id)")
             logger.error("  current items: \(self.items.map { "\($0.text) (\($0.id))" })")
             return
         }
@@ -59,7 +74,12 @@ public final class TodoStore: ObservableObject {
     }
 
     public func restore(_ item: TodoItem) {
-        guard let idx = archivedItems.firstIndex(where: { $0.id == item.id }) else { return }
+        restore(id: item.id)
+    }
+
+    public func restore(id: UUID) {
+        guard items.count < Self.maxItems else { return }
+        guard let idx = archivedItems.firstIndex(where: { $0.id == id }) else { return }
         var restored = archivedItems.remove(at: idx)
         restored.isDone = false
         items.append(restored)
@@ -67,13 +87,48 @@ public final class TodoStore: ObservableObject {
     }
 
     public func delete(_ item: TodoItem) {
-        logger.debug("delete: \"\(item.text)\", items before=\(self.items.count)")
-        items.removeAll { $0.id == item.id }
+        deleteItem(id: item.id)
+    }
+
+    public func deleteItem(id: UUID) {
+        logger.debug("delete id=\(id), items before=\(self.items.count)")
+        items.removeAll { $0.id == id }
         logger.debug("delete done: items after=\(self.items.count)")
     }
 
     public func deleteArchived(_ item: TodoItem) {
-        archivedItems.removeAll { $0.id == item.id }
+        deleteArchived(id: item.id)
+    }
+
+    public func deleteArchived(id: UUID) {
+        archivedItems.removeAll { $0.id == id }
+    }
+
+    public func moveItem(id: UUID, to destinationIndex: Int) {
+        guard let sourceIndex = items.firstIndex(where: { $0.id == id }) else { return }
+        let clampedDestination = max(0, min(destinationIndex, items.count - 1))
+        guard sourceIndex != clampedDestination else { return }
+        let item = items.remove(at: sourceIndex)
+        items.insert(item, at: clampedDestination)
+    }
+
+    public func reorderItems(by ids: [UUID]) {
+        guard ids.count == items.count else { return }
+        let currentItemsByID = Dictionary(uniqueKeysWithValues: items.map { ($0.id, $0) })
+        let reordered = ids.compactMap { currentItemsByID[$0] }
+        guard reordered.count == items.count else { return }
+        items = reordered
+    }
+
+    public func updatePreferences(_ newPreferences: AppPreferences) {
+        let clamped = AppPreferences(
+            rowHeight: min(max(newPreferences.rowHeight, LayoutMetrics.minRowHeight), LayoutMetrics.maxRowHeight),
+            panelWidth: min(max(newPreferences.panelWidth, LayoutMetrics.minPanelWidth), LayoutMetrics.maxPanelWidth),
+            hoverHighlightsEnabled: newPreferences.hoverHighlightsEnabled,
+            animationPreset: newPreferences.animationPreset,
+            snapPadding: max(0, newPreferences.snapPadding)
+        )
+        preferences = clamped
     }
 
     // Move any already-completed items into the archive on first launch
@@ -96,6 +151,12 @@ public final class TodoStore: ObservableObject {
         }
     }
 
+    private func savePreferences() {
+        if let data = try? JSONEncoder().encode(preferences) {
+            UserDefaults.standard.set(data, forKey: Self.preferencesKey)
+        }
+    }
+
     private func load() {
         guard let data = UserDefaults.standard.data(forKey: Self.key),
               let decoded = try? JSONDecoder().decode([TodoItem].self, from: data)
@@ -108,5 +169,12 @@ public final class TodoStore: ObservableObject {
               let decoded = try? JSONDecoder().decode([TodoItem].self, from: data)
         else { return }
         archivedItems = decoded
+    }
+
+    private func loadPreferences() {
+        guard let data = UserDefaults.standard.data(forKey: Self.preferencesKey),
+              let decoded = try? JSONDecoder().decode(AppPreferences.self, from: data)
+        else { return }
+        preferences = decoded
     }
 }
