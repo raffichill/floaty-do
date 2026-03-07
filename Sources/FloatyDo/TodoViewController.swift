@@ -1500,8 +1500,9 @@ fileprivate final class TodoRowView: NSView {
         let textHeight = max(textLabel.intrinsicContentSize.height, (fontLineHeight(for: textLabel.font) + 2))
         let textY = floor((bounds.height - textHeight) / 2)
         let textFrame = NSRect(x: textX, y: textY, width: textWidth, height: textHeight)
+        let activeTextFrame = textFrame.offsetBy(dx: 0, dy: 2)
         textLabel.frame = textFrame
-        editingTextView.frame = textFrame
+        editingTextView.frame = activeTextFrame
         editorHostView.frame = textFrame
         cursorShieldView.frame = textFrame
     }
@@ -1749,6 +1750,8 @@ private final class PassiveEditorHostView: NSView {
 }
 
 private final class EditingTextDisplayView: NSView {
+    private let alignmentCell = NSTextFieldCell(textCell: "")
+
     var text: String = "" {
         didSet {
             updateHorizontalOffset()
@@ -1769,18 +1772,35 @@ private final class EditingTextDisplayView: NSView {
 
     var font: NSFont = .systemFont(ofSize: 13) {
         didSet {
+            alignmentCell.font = font
             updateHorizontalOffset()
             needsDisplay = true
         }
     }
 
     var textColor: NSColor = .white {
-        didSet { needsDisplay = true }
+        didSet {
+            alignmentCell.textColor = textColor
+            needsDisplay = true
+        }
     }
 
     private var horizontalOffset: CGFloat = 0
 
     override var mouseDownCanMoveWindow: Bool { false }
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        alignmentCell.font = font
+        alignmentCell.textColor = textColor
+        alignmentCell.lineBreakMode = .byTruncatingTail
+        alignmentCell.isScrollable = true
+        alignmentCell.usesSingleLineMode = true
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError()
+    }
 
     override func addCursorRect(_ rect: NSRect, cursor: NSCursor) {
         super.addCursorRect(rect, cursor: .arrow)
@@ -1806,38 +1826,40 @@ private final class EditingTextDisplayView: NSView {
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
 
-        let attributes: [NSAttributedString.Key: Any] = [
-            .font: font,
-            .foregroundColor: textColor,
-        ]
-
         let nsText = text as NSString
         let clampedLocation = max(0, min(selectionRange.location, nsText.length))
         let clampedLength = max(0, min(selectionRange.length, nsText.length - clampedLocation))
         let selectionEnd = clampedLocation + clampedLength
-        let startX = width(toUTF16Index: clampedLocation)
-        let endX = width(toUTF16Index: selectionEnd)
+        let contentRect = alignedContentRect()
+        let startX = contentRect.minX + width(toUTF16Index: clampedLocation) - horizontalOffset
+        let endX = contentRect.minX + width(toUTF16Index: selectionEnd) - horizontalOffset
 
         NSGraphicsContext.current?.saveGraphicsState()
         NSBezierPath(rect: bounds).addClip()
 
         if clampedLength > 0 {
-            let highlightX = max(0, startX - horizontalOffset)
-            let highlightWidth = min(bounds.width, endX - horizontalOffset) - highlightX
+            let highlightX = max(contentRect.minX, startX)
+            let highlightWidth = min(contentRect.maxX, endX) - highlightX
             if highlightWidth > 0 {
-                let highlightRect = NSRect(x: highlightX, y: 1, width: highlightWidth, height: max(0, bounds.height - 2))
+                let highlightRect = NSRect(x: highlightX, y: contentRect.minY, width: highlightWidth, height: contentRect.height)
                 NSColor.white.withAlphaComponent(0.18).setFill()
                 NSBezierPath(roundedRect: highlightRect, xRadius: 4, yRadius: 4).fill()
             }
         }
 
-        let drawPoint = NSPoint(x: -horizontalOffset, y: floor((bounds.height - fontLineHeight()) / 2))
-        nsText.draw(at: drawPoint, withAttributes: attributes)
+        let drawRect = NSRect(
+            x: floor(contentRect.minX - horizontalOffset),
+            y: floor(contentRect.minY),
+            width: max(contentRect.width + horizontalOffset, 1),
+            height: contentRect.height
+        )
+        alignmentCell.title = text
+        alignmentCell.drawInterior(withFrame: drawRect, in: self)
 
         if showsCaret {
-            let caretX = width(toUTF16Index: clampedLocation) - horizontalOffset
-            if caretX >= -1 && caretX <= bounds.width + 1 {
-                let caretRect = NSRect(x: floor(caretX), y: 1, width: 1.5, height: max(0, bounds.height - 2))
+            let caretX = contentRect.minX + width(toUTF16Index: clampedLocation) - horizontalOffset
+            if caretX >= contentRect.minX - 1 && caretX <= contentRect.maxX + 1 {
+                let caretRect = NSRect(x: floor(caretX), y: contentRect.minY, width: 1.5, height: contentRect.height)
                 NSColor.white.withAlphaComponent(0.95).setFill()
                 NSBezierPath(rect: caretRect).fill()
             }
@@ -1850,7 +1872,8 @@ private final class EditingTextDisplayView: NSView {
         let caretIndex = min((text as NSString).length, selectionRange.location + selectionRange.length)
         let caretX = width(toUTF16Index: caretIndex)
         let padding: CGFloat = 8
-        let availableWidth = max(1, bounds.width - padding)
+        let contentRect = alignedContentRect()
+        let availableWidth = max(1, contentRect.width - padding)
 
         var newOffset = horizontalOffset
         if caretX - newOffset > availableWidth {
@@ -1860,7 +1883,7 @@ private final class EditingTextDisplayView: NSView {
             newOffset = max(0, caretX - padding)
         }
 
-        let maxOffset = max(0, width(toUTF16Index: (text as NSString).length) - bounds.width + padding)
+        let maxOffset = max(0, width(toUTF16Index: (text as NSString).length) - contentRect.width + padding)
         horizontalOffset = min(max(newOffset, 0), maxOffset)
     }
 
@@ -1874,6 +1897,11 @@ private final class EditingTextDisplayView: NSView {
 
     private func fontLineHeight() -> CGFloat {
         ceil(font.ascender - font.descender + font.leading)
+    }
+
+    private func alignedContentRect() -> NSRect {
+        alignmentCell.title = text
+        return alignmentCell.drawingRect(forBounds: bounds)
     }
 }
 
