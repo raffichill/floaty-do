@@ -1118,12 +1118,11 @@ fileprivate final class TodoListView: NSView {
         interactionState = .settling
         refreshRowVisualState(excluding: drag.rowID)
         let targetFrame = frameForRow(at: drag.currentTaskIndex)
-        animateFrame(
-            of: drag.snapshotView,
+        animateDropSettle(
+            drag.snapshotView,
             to: targetFrame,
             duration: InteractionMetrics.dragReorderDuration,
-            timingFunctionName: .easeInEaseOut,
-            animationKeyPrefix: "dropSettle"
+            animationKey: "dropSettle"
         )
 
         DispatchQueue.main.asyncAfter(deadline: .now() + InteractionMetrics.dragReorderDuration) { [weak self] in
@@ -1245,46 +1244,54 @@ fileprivate final class TodoListView: NSView {
         CATransaction.commit()
     }
 
-    private func animateFrame(
-        of view: NSView,
+    private func animateDropSettle(
+        _ view: NSView,
         to targetFrame: CGRect,
         duration: CFTimeInterval,
-        timingFunctionName: CAMediaTimingFunctionName,
-        animationKeyPrefix: String
+        animationKey: String
     ) {
         guard let layer = view.layer else {
             view.frame = targetFrame
             return
         }
 
-        let currentPosition = layer.presentation()?.position ?? layer.position
-        let currentBounds = layer.presentation()?.bounds ?? layer.bounds
-        let targetPosition = CGPoint(x: targetFrame.midX, y: targetFrame.midY)
-        let targetBounds = CGRect(origin: .zero, size: targetFrame.size)
+        let currentVisualFrame = layer.presentation()?.frame ?? view.frame
+        let deltaX = currentVisualFrame.minX - targetFrame.minX
+        let deltaY = currentVisualFrame.minY - targetFrame.minY
 
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         view.frame = targetFrame
         CATransaction.commit()
 
-        layer.removeAnimation(forKey: animationKeyPrefix + ".position")
-        layer.removeAnimation(forKey: animationKeyPrefix + ".bounds")
+        layer.removeAnimation(forKey: animationKey)
 
-        let positionAnimation = CABasicAnimation(keyPath: "position")
-        positionAnimation.fromValue = currentPosition
-        positionAnimation.toValue = targetPosition
-        positionAnimation.duration = duration
-        positionAnimation.timingFunction = CAMediaTimingFunction(name: timingFunctionName)
-        layer.add(positionAnimation, forKey: animationKeyPrefix + ".position")
-
-        if currentBounds.size != targetBounds.size {
-            let boundsAnimation = CABasicAnimation(keyPath: "bounds")
-            boundsAnimation.fromValue = currentBounds
-            boundsAnimation.toValue = targetBounds
-            boundsAnimation.duration = duration
-            boundsAnimation.timingFunction = CAMediaTimingFunction(name: timingFunctionName)
-            layer.add(boundsAnimation, forKey: animationKeyPrefix + ".bounds")
+        guard abs(deltaX) > 0.5 || abs(deltaY) > 0.5 else {
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            layer.transform = CATransform3DIdentity
+            CATransaction.commit()
+            return
         }
+
+        let startTransform = CATransform3DMakeTranslation(deltaX, deltaY, 0)
+
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        layer.transform = startTransform
+        CATransaction.commit()
+
+        let animation = CABasicAnimation(keyPath: "transform")
+        animation.fromValue = startTransform
+        animation.toValue = CATransform3DIdentity
+        animation.duration = duration
+        animation.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        layer.add(animation, forKey: animationKey)
+
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        layer.transform = CATransform3DIdentity
+        CATransaction.commit()
     }
 
     private func makeSnapshot(for rowView: TodoRowView) -> NSImageView? {
