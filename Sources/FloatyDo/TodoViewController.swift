@@ -24,6 +24,8 @@ public final class TodoViewController: NSViewController, NSPopoverDelegate, NSTe
     private var rowModels: [TodoRowModel] = []
     private var taskInputDraft = ""
     private var eventMonitor: Any?
+    private var cursorEventMonitor: Any?
+    private var editorSelectionObserver: Any?
     private var cancellables = Set<AnyCancellable>()
     private var currentTab: Tab = .tasks
     private var tasksTabButton: NSButton!
@@ -76,8 +78,11 @@ public final class TodoViewController: NSViewController, NSPopoverDelegate, NSTe
 
         listView.translatesAutoresizingMaskIntoConstraints = false
         listView.delegate = self
+        sharedEditor.frame = NSRect(x: -1000, y: -1000, width: 1, height: 1)
+        sharedEditor.alphaValue = 0.001
 
         container.addSubview(listView)
+        container.addSubview(sharedEditor)
 
         NSLayoutConstraint.activate([
             tabBar.topAnchor.constraint(equalTo: container.topAnchor),
@@ -147,6 +152,16 @@ public final class TodoViewController: NSViewController, NSPopoverDelegate, NSTe
             return event
         }
 
+        cursorEventMonitor = NSEvent.addLocalMonitorForEvents(matching: [.cursorUpdate, .mouseMoved]) { [weak self] event in
+            guard let self else { return event }
+            guard self.shouldForceArrowCursor(for: event) else { return event }
+            NSCursor.arrow.set()
+            if event.type == .cursorUpdate {
+                return nil
+            }
+            return event
+        }
+
         store.$preferences
             .dropFirst()
             .receive(on: RunLoop.main)
@@ -160,6 +175,7 @@ public final class TodoViewController: NSViewController, NSPopoverDelegate, NSTe
 
     public override func viewDidAppear() {
         super.viewDidAppear()
+        view.window?.acceptsMouseMovedEvents = true
         refreshRows(resize: false, animateResize: false, placeCaretAtEnd: false)
         resizeWindow(animate: false)
     }
@@ -168,6 +184,18 @@ public final class TodoViewController: NSViewController, NSPopoverDelegate, NSTe
         if let monitor = eventMonitor {
             NSEvent.removeMonitor(monitor)
         }
+        if let monitor = cursorEventMonitor {
+            NSEvent.removeMonitor(monitor)
+        }
+        if let observer = editorSelectionObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
+    }
+
+    private func shouldForceArrowCursor(for event: NSEvent) -> Bool {
+        guard let window = view.window, event.window === window else { return false }
+        let locationInList = listView.convert(event.locationInWindow, from: nil)
+        return listView.bounds.contains(locationInList)
     }
 
     private func configureSharedEditor() {
@@ -496,62 +524,95 @@ public final class TodoViewController: NSViewController, NSPopoverDelegate, NSTe
     }
 
     private func attachEditorIfNeeded(placeCaretAtEnd: Bool) {
-        guard let rowID = currentEditingRowID,
-              let rowView = listView.rowView(for: rowID)
-        else {
+        guard let rowID = currentEditingRowID else {
             detachEditor(makeListFirstResponder: true)
             return
         }
 
         if editorRowID != rowID {
-            let previousEditorRowID = editorRowID
-            sharedEditor.removeFromSuperview()
-            if let previousEditorRowID, let previousRowView = listView.rowView(for: previousEditorRowID) {
-                previousRowView.refreshMountedEditorState()
-            }
-            sharedEditor.frame = rowView.editorHostView.bounds
-            rowView.editorHostView.addSubview(sharedEditor)
             sharedEditor.stringValue = textForRow(rowID)
             editorRowID = rowID
-        } else if sharedEditor.superview !== rowView.editorHostView {
-            let previousEditorRowID = editorRowID
-            sharedEditor.removeFromSuperview()
-            if let previousEditorRowID, let previousRowView = listView.rowView(for: previousEditorRowID) {
-                previousRowView.refreshMountedEditorState()
-            }
-            sharedEditor.frame = rowView.editorHostView.bounds
-            rowView.editorHostView.addSubview(sharedEditor)
         }
-
-        sharedEditor.frame = rowView.editorHostView.bounds
-        rowView.refreshMountedEditorState()
 
         guard let window = view.window else { return }
         if window.firstResponder !== sharedEditor.currentEditor() {
             window.makeFirstResponder(sharedEditor)
         }
-        if placeCaretAtEnd {
-            moveCaretToEnd()
-        }
+
+        bindHiddenEditor(placeCaretAtEnd: placeCaretAtEnd)
     }
 
     private func detachEditor(makeListFirstResponder shouldFocusList: Bool) {
-        guard editorRowID != nil || sharedEditor.superview != nil else {
+        guard editorRowID != nil else {
             if shouldFocusList {
                 makeListFirstResponder()
             }
             return
         }
 
-        let previousEditorRowID = editorRowID
-        sharedEditor.removeFromSuperview()
         editorRowID = nil
-        if let previousEditorRowID, let previousRowView = listView.rowView(for: previousEditorRowID) {
-            previousRowView.refreshMountedEditorState()
+        listView.updateEditingPresentation(rowID: nil, text: nil, selectionRange: nil)
+        if let observer = editorSelectionObserver {
+            NotificationCenter.default.removeObserver(observer)
+            editorSelectionObserver = nil
         }
         if shouldFocusList {
             makeListFirstResponder()
         }
+    }
+
+    private func bindHiddenEditor(placeCaretAtEnd: Bool) {
+        if let observer = editorSelectionObserver {
+            NotificationCenter.default.removeObserver(observer)
+            editorSelectionObserver = nil
+        }
+
+        let applyBinding = { [weak self] in
+            guard let self else { return }
+            if let editor = self.sharedEditor.currentEditor() as? NSTextView {
+                self.editorSelectionObserver = NotificationCenter.default.addObserver(
+                    forName: NSTextView.didChangeSelectionNotification,
+                    object: editor,
+                    queue: .main
+                ) { [weak self] _ in
+                    self?.syncVisibleEditorState()
+                }
+
+                if placeCaretAtEnd {
+                    editor.setSelectedRange(NSRange(location: editor.string.count, length: 0))
+                }
+            } else if placeCaretAtEnd {
+                self.moveCaretToEnd()
+            }
+
+            self.syncVisibleEditorState()
+        }
+
+        if sharedEditor.currentEditor() == nil {
+            DispatchQueue.main.async(execute: applyBinding)
+        } else {
+            applyBinding()
+        }
+    }
+
+    private func syncVisibleEditorState() {
+        guard let rowID = editorRowID else {
+            listView.updateEditingPresentation(rowID: nil, text: nil, selectionRange: nil)
+            return
+        }
+
+        let selectionRange: NSRange
+        if let editor = sharedEditor.currentEditor() as? NSTextView {
+            selectionRange = editor.selectedRange()
+        } else {
+            selectionRange = NSRange(location: sharedEditor.stringValue.count, length: 0)
+        }
+
+        listView.updateEditingPresentation(
+            rowID: rowID,
+            text: sharedEditor.stringValue,
+            selectionRange: selectionRange
+        )
     }
 
     private func makeListFirstResponder() {
@@ -726,11 +787,14 @@ public final class TodoViewController: NSViewController, NSPopoverDelegate, NSTe
         switch rowModels.first(where: { $0.id == rowID })?.kind {
         case .taskItem(let item):
             store.updateText(for: item.id, to: sharedEditor.stringValue)
+            refreshVisibleModel(for: rowID)
         case .taskInput:
             taskInputDraft = sharedEditor.stringValue
+            refreshVisibleModel(for: rowID)
         case .archiveItem, .filler, .none:
             break
         }
+        syncVisibleEditorState()
     }
 
     public func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
@@ -897,6 +961,16 @@ fileprivate final class TodoListView: NSView {
         self.selectedRowID = selectedRowID
         self.editingRowID = editingRowID
         refreshRowVisualState(excluding: currentDraggedRowID)
+    }
+
+    func updateEditingPresentation(rowID: TodoRowID?, text: String?, selectionRange: NSRange?) {
+        for (candidateRowID, rowView) in rowViews {
+            if candidateRowID == rowID, let text, let selectionRange {
+                rowView.updateEditingPresentation(text: text, selectionRange: selectionRange)
+            } else {
+                rowView.clearEditingPresentation()
+            }
+        }
     }
 
     func rowView(for rowID: TodoRowID) -> TodoRowView? {
@@ -1365,7 +1439,9 @@ fileprivate final class TodoRowView: NSView {
     private let backgroundView = NSView()
     private let circleView = NSImageView()
     private let textLabel = NSTextField(labelWithString: "")
+    private let editingTextView = EditingTextDisplayView()
     let editorHostView = PassiveEditorHostView()
+    private let cursorShieldView = CursorShieldView()
 
     private var preferences: AppPreferences
     private(set) var model: TodoRowModel
@@ -1401,7 +1477,9 @@ fileprivate final class TodoRowView: NSView {
         textLabel.wantsLayer = true
         addSubview(textLabel)
 
+        addSubview(editingTextView)
         addSubview(editorHostView)
+        addSubview(cursorShieldView)
         configure(model: model, preferences: preferences)
     }
 
@@ -1423,7 +1501,9 @@ fileprivate final class TodoRowView: NSView {
         let textY = floor((bounds.height - textHeight) / 2)
         let textFrame = NSRect(x: textX, y: textY, width: textWidth, height: textHeight)
         textLabel.frame = textFrame
+        editingTextView.frame = textFrame
         editorHostView.frame = textFrame
+        cursorShieldView.frame = textFrame
     }
 
     override func resetCursorRects() {
@@ -1443,6 +1523,7 @@ fileprivate final class TodoRowView: NSView {
         let config = NSImage.SymbolConfiguration(pointSize: 14, weight: .regular)
         let image = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)!
         circleView.image = image.withSymbolConfiguration(config)
+        editingTextView.font = .systemFont(ofSize: 13)
 
         updateAppearance()
         needsLayout = true
@@ -1462,6 +1543,19 @@ fileprivate final class TodoRowView: NSView {
 
     func refreshMountedEditorState() {
         updateAppearance()
+    }
+
+    func updateEditingPresentation(text: String, selectionRange: NSRange) {
+        editingTextView.text = text
+        editingTextView.selectionRange = selectionRange
+        editingTextView.showsCaret = selectionRange.length == 0
+        editingTextView.needsDisplay = true
+    }
+
+    func clearEditingPresentation() {
+        editingTextView.selectionRange = NSRange(location: 0, length: 0)
+        editingTextView.showsCaret = false
+        editingTextView.needsDisplay = true
     }
 
     func hitZone(at point: NSPoint) -> TodoListView.HitZone {
@@ -1608,18 +1702,25 @@ fileprivate final class TodoRowView: NSView {
         backgroundView.layer?.borderWidth = borderWidth
         circleView.contentTintColor = NSColor.white.withAlphaComponent(circleAlpha)
         textLabel.attributedStringValue = attributedText(alpha: textAlpha)
+        editingTextView.textColor = NSColor.white.withAlphaComponent(textAlpha)
         let showsEditorHost = isEditingRow && model.isEditable
-        let hasMountedEditor = !editorHostView.subviews.isEmpty
-        textLabel.isHidden = showsEditorHost && hasMountedEditor
-        editorHostView.isHidden = !showsEditorHost
+        if showsEditorHost {
+            editingTextView.text = model.text
+        }
+        textLabel.isHidden = showsEditorHost
+        editingTextView.isHidden = !showsEditorHost
+        editorHostView.isHidden = true
+        cursorShieldView.isHidden = true
 
         if isDraggingRow {
             backgroundView.alphaValue = 1.0
             textLabel.alphaValue = 0.0
+            editingTextView.alphaValue = 0.0
             circleView.alphaValue = 0.0
         } else {
             backgroundView.alphaValue = 1.0
             textLabel.alphaValue = 1.0
+            editingTextView.alphaValue = 1.0
             circleView.alphaValue = 1.0
         }
     }
@@ -1647,8 +1748,157 @@ private final class PassiveEditorHostView: NSView {
     }
 }
 
+private final class EditingTextDisplayView: NSView {
+    var text: String = "" {
+        didSet {
+            updateHorizontalOffset()
+            needsDisplay = true
+        }
+    }
+
+    var selectionRange: NSRange = NSRange(location: 0, length: 0) {
+        didSet {
+            updateHorizontalOffset()
+            needsDisplay = true
+        }
+    }
+
+    var showsCaret = false {
+        didSet { needsDisplay = true }
+    }
+
+    var font: NSFont = .systemFont(ofSize: 13) {
+        didSet {
+            updateHorizontalOffset()
+            needsDisplay = true
+        }
+    }
+
+    var textColor: NSColor = .white {
+        didSet { needsDisplay = true }
+    }
+
+    private var horizontalOffset: CGFloat = 0
+
+    override var mouseDownCanMoveWindow: Bool { false }
+
+    override func addCursorRect(_ rect: NSRect, cursor: NSCursor) {
+        super.addCursorRect(rect, cursor: .arrow)
+    }
+
+    override func resetCursorRects() {
+        addCursorRect(bounds, cursor: .arrow)
+    }
+
+    override func cursorUpdate(with event: NSEvent) {
+        NSCursor.arrow.set()
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        nil
+    }
+
+    override func layout() {
+        super.layout()
+        updateHorizontalOffset()
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: font,
+            .foregroundColor: textColor,
+        ]
+
+        let nsText = text as NSString
+        let clampedLocation = max(0, min(selectionRange.location, nsText.length))
+        let clampedLength = max(0, min(selectionRange.length, nsText.length - clampedLocation))
+        let selectionEnd = clampedLocation + clampedLength
+        let startX = width(toUTF16Index: clampedLocation)
+        let endX = width(toUTF16Index: selectionEnd)
+
+        NSGraphicsContext.current?.saveGraphicsState()
+        NSBezierPath(rect: bounds).addClip()
+
+        if clampedLength > 0 {
+            let highlightX = max(0, startX - horizontalOffset)
+            let highlightWidth = min(bounds.width, endX - horizontalOffset) - highlightX
+            if highlightWidth > 0 {
+                let highlightRect = NSRect(x: highlightX, y: 1, width: highlightWidth, height: max(0, bounds.height - 2))
+                NSColor.white.withAlphaComponent(0.18).setFill()
+                NSBezierPath(roundedRect: highlightRect, xRadius: 4, yRadius: 4).fill()
+            }
+        }
+
+        let drawPoint = NSPoint(x: -horizontalOffset, y: floor((bounds.height - fontLineHeight()) / 2))
+        nsText.draw(at: drawPoint, withAttributes: attributes)
+
+        if showsCaret {
+            let caretX = width(toUTF16Index: clampedLocation) - horizontalOffset
+            if caretX >= -1 && caretX <= bounds.width + 1 {
+                let caretRect = NSRect(x: floor(caretX), y: 1, width: 1.5, height: max(0, bounds.height - 2))
+                NSColor.white.withAlphaComponent(0.95).setFill()
+                NSBezierPath(rect: caretRect).fill()
+            }
+        }
+
+        NSGraphicsContext.current?.restoreGraphicsState()
+    }
+
+    private func updateHorizontalOffset() {
+        let caretIndex = min((text as NSString).length, selectionRange.location + selectionRange.length)
+        let caretX = width(toUTF16Index: caretIndex)
+        let padding: CGFloat = 8
+        let availableWidth = max(1, bounds.width - padding)
+
+        var newOffset = horizontalOffset
+        if caretX - newOffset > availableWidth {
+            newOffset = caretX - availableWidth
+        }
+        if caretX - newOffset < 0 {
+            newOffset = max(0, caretX - padding)
+        }
+
+        let maxOffset = max(0, width(toUTF16Index: (text as NSString).length) - bounds.width + padding)
+        horizontalOffset = min(max(newOffset, 0), maxOffset)
+    }
+
+    private func width(toUTF16Index index: Int) -> CGFloat {
+        let nsText = text as NSString
+        let safeIndex = max(0, min(index, nsText.length))
+        let prefix = nsText.substring(to: safeIndex) as NSString
+        let width = prefix.size(withAttributes: [.font: font]).width
+        return ceil(width)
+    }
+
+    private func fontLineHeight() -> CGFloat {
+        ceil(font.ascender - font.descender + font.leading)
+    }
+}
+
+private final class CursorShieldView: NSView {
+    override var mouseDownCanMoveWindow: Bool { false }
+
+    override func addCursorRect(_ rect: NSRect, cursor: NSCursor) {
+        super.addCursorRect(rect, cursor: .arrow)
+    }
+
+    override func resetCursorRects() {
+        addCursorRect(bounds, cursor: .arrow)
+    }
+
+    override func cursorUpdate(with event: NSEvent) {
+        NSCursor.arrow.set()
+    }
+}
+
 private final class KeyboardOnlyTextField: NSTextField {
     override var mouseDownCanMoveWindow: Bool { false }
+
+    override func addCursorRect(_ rect: NSRect, cursor: NSCursor) {
+        super.addCursorRect(rect, cursor: .arrow)
+    }
 
     override func resetCursorRects() {
         addCursorRect(bounds, cursor: .arrow)
@@ -1665,6 +1915,10 @@ private final class KeyboardOnlyTextField: NSTextField {
 
 public final class CaretEndFieldEditor: NSTextView {
     public override var mouseDownCanMoveWindow: Bool { false }
+
+    public override func addCursorRect(_ rect: NSRect, cursor: NSCursor) {
+        super.addCursorRect(rect, cursor: .arrow)
+    }
 
     public override func resetCursorRects() {
         addCursorRect(visibleRect, cursor: .arrow)
