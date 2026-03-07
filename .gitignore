@@ -1,3 +1,7 @@
 .build/
 .swiftpm/
 FloatyDo.app/
+.DS_Store
+DerivedData/
+FloatyDo/FloatyDo.xcodeproj/xcuserdata/
+FloatyDo/FloatyDo.xcodeproj/project.xcworkspace/xcuserdata/

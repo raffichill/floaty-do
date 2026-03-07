@@ -3,16 +3,21 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-CONFIG="release"
+CONFIG="Release"
 INSTALL=0
+PROJECT="FloatyDo/FloatyDo.xcodeproj"
+SCHEME="FloatyDo"
+DERIVED_DATA="/tmp/FloatyDoHostDerivedData"
+PACKAGE_CACHE="/tmp/FloatyDoHostSourcePackages"
+APP="FloatyDo.app"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --debug)
-            CONFIG="debug"
+            CONFIG="Debug"
             ;;
         --release)
-            CONFIG="release"
+            CONFIG="Release"
             ;;
         --install)
             INSTALL=1
@@ -25,16 +30,24 @@ while [[ $# -gt 0 ]]; do
     shift
 done
 
-echo "Building FloatyDo ($CONFIG)..."
-swift build -c "$CONFIG"
+echo "Building FloatyDo host app ($CONFIG)..."
+xcodebuild \
+    -project "$PROJECT" \
+    -scheme "$SCHEME" \
+    -configuration "$CONFIG" \
+    -derivedDataPath "$DERIVED_DATA" \
+    -clonedSourcePackagesDirPath "$PACKAGE_CACHE" \
+    build
 
-APP="FloatyDo.app"
+BUILT_APP="$DERIVED_DATA/Build/Products/$CONFIG/$APP"
+
+if [[ ! -d "$BUILT_APP" ]]; then
+    echo "Expected app bundle not found at $BUILT_APP" >&2
+    exit 1
+fi
+
 rm -rf "$APP"
-mkdir -p "$APP/Contents/MacOS"
-mkdir -p "$APP/Contents/Resources"
-cp ".build/$CONFIG/FloatyDo" "$APP/Contents/MacOS/"
-cp Info.plist "$APP/Contents/"
-cp -R "floatydo-icon.icon" "$APP/Contents/Resources/AppIcon.icon"
+ditto "$BUILT_APP" "$APP"
 
 echo "Created $APP"
 echo ""
@@ -46,5 +59,9 @@ if [[ "$INSTALL" -eq 1 ]]; then
     echo "Installed /Applications/FloatyDo.app"
 else
     echo "To install, drag FloatyDo.app to /Applications or run:"
-    echo "  ./scripts/bundle.sh --$CONFIG --install"
+    if [[ "$CONFIG" == "Debug" ]]; then
+        echo "  ./scripts/bundle.sh --debug --install"
+    else
+        echo "  ./scripts/bundle.sh --release --install"
+    fi
 fi
