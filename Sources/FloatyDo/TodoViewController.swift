@@ -10,6 +10,7 @@ public enum Tab { case tasks, archive }
 fileprivate protocol TodoListViewDelegate: AnyObject {
     func listView(_ listView: TodoListView, didActivateRow rowID: TodoRowID)
     func listView(_ listView: TodoListView, didActivateCheckboxFor rowID: TodoRowID)
+    func listViewWillPressRowBody(_ listView: TodoListView, rowID: TodoRowID)
     func listViewWillBeginDragging(_ listView: TodoListView, rowID: TodoRowID)
     func listView(_ listView: TodoListView, didFinishDraggingRow rowID: TodoRowID, orderedItemIDs: [UUID])
 }
@@ -837,13 +838,16 @@ public final class TodoViewController: NSViewController, NSPopoverDelegate, NSTe
 
 extension TodoViewController: TodoListViewDelegate {
     fileprivate func listView(_ listView: TodoListView, didActivateRow rowID: TodoRowID) {
-        guard rowID != selectedRowID else { return }
         activateRow(rowID, placeCaretAtEnd: true)
     }
 
     fileprivate func listView(_ listView: TodoListView, didActivateCheckboxFor rowID: TodoRowID) {
         guard case .taskItem(let item) = rowModels.first(where: { $0.id == rowID })?.kind else { return }
         animateCompletion(for: item.id)
+    }
+
+    fileprivate func listViewWillPressRowBody(_ listView: TodoListView, rowID: TodoRowID) {
+        detachEditor(makeListFirstResponder: true)
     }
 
     fileprivate func listViewWillBeginDragging(_ listView: TodoListView, rowID: TodoRowID) {
@@ -1056,6 +1060,10 @@ fileprivate final class TodoListView: NSView {
 
         let zone = rowView.hitZone(at: convert(location, to: rowView))
         let canDrag = zone == .body && model.canDrag
+        if zone == .body {
+            delegate?.listViewWillPressRowBody(self, rowID: rowID)
+            window?.makeFirstResponder(self)
+        }
         interactionState = .pressed(
             PressState(
                 rowID: rowID,
@@ -1121,12 +1129,14 @@ fileprivate final class TodoListView: NSView {
 
             interactionState = .idle
 
-            if press.rowWasActive {
+            if press.zone == .body {
+                refreshRowVisualState()
+                delegate?.listView(self, didActivateRow: press.rowID)
+            } else if press.rowWasActive {
                 editingRowID = press.previousEditingRowID
                 refreshRowVisualState()
             } else {
                 refreshRowVisualState()
-                delegate?.listView(self, didActivateRow: press.rowID)
             }
 
         case .dragging(let drag):
@@ -1175,9 +1185,8 @@ fileprivate final class TodoListView: NSView {
         var didReorder = false
 
         while drag.currentTaskIndex > 0 {
-            let previousFrame = frameForRow(at: drag.currentTaskIndex - 1)
-            let upwardOverlap = previousFrame.maxY - drag.snapshotView.frame.minY
-            if upwardOverlap > overlapThreshold {
+            let currentSlotMinY = frameForRow(at: drag.currentTaskIndex).minY
+            if drag.snapshotView.frame.minY < currentSlotMinY - overlapThreshold {
                 displayOrder.swapAt(drag.currentTaskIndex, drag.currentTaskIndex - 1)
                 drag.currentTaskIndex -= 1
                 didReorder = true
@@ -1187,9 +1196,8 @@ fileprivate final class TodoListView: NSView {
         }
 
         while drag.currentTaskIndex < max(draggableTaskCount - 1, 0) {
-            let nextFrame = frameForRow(at: drag.currentTaskIndex + 1)
-            let downwardOverlap = drag.snapshotView.frame.maxY - nextFrame.minY
-            if downwardOverlap > overlapThreshold {
+            let currentSlotMinY = frameForRow(at: drag.currentTaskIndex).minY
+            if drag.snapshotView.frame.minY > currentSlotMinY + overlapThreshold {
                 displayOrder.swapAt(drag.currentTaskIndex, drag.currentTaskIndex + 1)
                 drag.currentTaskIndex += 1
                 didReorder = true
