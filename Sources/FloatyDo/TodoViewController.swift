@@ -817,7 +817,8 @@ fileprivate final class TodoListView: NSView {
 
     private enum InteractionMetrics {
         static let dragStartDistance: CGFloat = 3.5
-        static let dragSwapHysteresisFactor: CGFloat = 0.18
+        static let dragSwapCoverageFactor: CGFloat = 0.33
+        static let dragReorderDuration: CFTimeInterval = 0.12
     }
 
     weak var delegate: TodoListViewDelegate?
@@ -1081,15 +1082,16 @@ fileprivate final class TodoListView: NSView {
         snapshotFrame.origin.y = pointerLocation.y - drag.pointerOffset
         drag.snapshotView.frame = snapshotFrame
 
-        let hysteresis = max(4, CGFloat(preferences.rowHeight) * InteractionMetrics.dragSwapHysteresisFactor)
-        let dragMidY = drag.snapshotView.frame.midY
+        let overlapThreshold = CGFloat(preferences.rowHeight) * InteractionMetrics.dragSwapCoverageFactor
+        var didReorder = false
 
         while drag.currentTaskIndex > 0 {
             let previousFrame = frameForRow(at: drag.currentTaskIndex - 1)
-            if dragMidY < previousFrame.midY - hysteresis {
+            let upwardOverlap = previousFrame.maxY - drag.snapshotView.frame.minY
+            if upwardOverlap > overlapThreshold {
                 displayOrder.swapAt(drag.currentTaskIndex, drag.currentTaskIndex - 1)
                 drag.currentTaskIndex -= 1
-                layoutRows(animated: true)
+                didReorder = true
             } else {
                 break
             }
@@ -1097,13 +1099,18 @@ fileprivate final class TodoListView: NSView {
 
         while drag.currentTaskIndex < max(draggableTaskCount - 1, 0) {
             let nextFrame = frameForRow(at: drag.currentTaskIndex + 1)
-            if dragMidY > nextFrame.midY + hysteresis {
+            let downwardOverlap = drag.snapshotView.frame.maxY - nextFrame.minY
+            if downwardOverlap > overlapThreshold {
                 displayOrder.swapAt(drag.currentTaskIndex, drag.currentTaskIndex + 1)
                 drag.currentTaskIndex += 1
-                layoutRows(animated: true)
+                didReorder = true
             } else {
                 break
             }
+        }
+
+        if didReorder {
+            layoutRows(animated: true)
         }
     }
 
@@ -1111,12 +1118,15 @@ fileprivate final class TodoListView: NSView {
         interactionState = .settling
         refreshRowVisualState(excluding: drag.rowID)
         let targetFrame = frameForRow(at: drag.currentTaskIndex)
+        animateFrame(
+            of: drag.snapshotView,
+            to: targetFrame,
+            duration: InteractionMetrics.dragReorderDuration,
+            timingFunctionName: .easeInEaseOut,
+            animationKeyPrefix: "dropSettle"
+        )
 
-        NSAnimationContext.runAnimationGroup({ context in
-            context.duration = preferences.motion.dragReorder
-            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
-            drag.snapshotView.animator().frame = targetFrame
-        }, completionHandler: { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + InteractionMetrics.dragReorderDuration) { [weak self] in
             guard let self else { return }
             drag.snapshotView.removeFromSuperview()
             self.rowViews[drag.rowID]?.alphaValue = 1.0
@@ -1124,7 +1134,7 @@ fileprivate final class TodoListView: NSView {
             self.interactionState = .idle
             self.refreshRowVisualState()
             self.delegate?.listView(self, didFinishDraggingRow: drag.rowID, orderedItemIDs: self.currentOrderedTaskItemIDs())
-        })
+        }
     }
 
     private func refreshRowVisualState(excluding draggedRowID: TodoRowID? = nil) {
@@ -1161,16 +1171,119 @@ fileprivate final class TodoListView: NSView {
             return
         }
 
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = preferences.motion.dragReorder
-            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
-            for (index, rowID) in displayOrder.enumerated() {
-                guard let rowView = rowViews[rowID] else { continue }
-                rowView.setSelected(rowID == selectedRowID)
-                rowView.setEditing(rowID == editingRowID)
-                let targetFrame = frameForRow(at: index)
-                rowView.animator().frame = targetFrame
+        for (index, rowID) in displayOrder.enumerated() {
+            guard let rowView = rowViews[rowID] else { continue }
+            rowView.setSelected(rowID == selectedRowID)
+            rowView.setEditing(rowID == editingRowID)
+            let targetFrame = frameForRow(at: index)
+            if rowID == draggedRowID {
+                CATransaction.begin()
+                CATransaction.setDisableActions(true)
+                rowView.frame = targetFrame
+                rowView.layer?.transform = CATransform3DIdentity
+                CATransaction.commit()
+                continue
             }
+
+            if rowView.frame != targetFrame {
+                animateRowReorder(
+                    rowView,
+                    to: targetFrame,
+                    duration: InteractionMetrics.dragReorderDuration,
+                    animationKey: "dragReorder.\(rowID)"
+                )
+            }
+        }
+    }
+
+    private func animateRowReorder(
+        _ rowView: NSView,
+        to targetFrame: CGRect,
+        duration: CFTimeInterval,
+        animationKey: String
+    ) {
+        guard let layer = rowView.layer else {
+            rowView.frame = targetFrame
+            return
+        }
+
+        let currentVisualFrame = layer.presentation()?.frame ?? rowView.frame
+        let deltaY = currentVisualFrame.minY - targetFrame.minY
+
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        rowView.frame = targetFrame
+        CATransaction.commit()
+
+        layer.removeAnimation(forKey: animationKey)
+
+        guard abs(deltaY) > 0.5 else {
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            layer.transform = CATransform3DIdentity
+            CATransaction.commit()
+            return
+        }
+
+        let startTransform = CATransform3DMakeTranslation(0, deltaY, 0)
+
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        layer.transform = startTransform
+        CATransaction.commit()
+
+        let animation = CABasicAnimation(keyPath: "transform")
+        animation.fromValue = startTransform
+        animation.toValue = CATransform3DIdentity
+        animation.duration = duration
+        animation.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        layer.add(animation, forKey: animationKey)
+
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        layer.transform = CATransform3DIdentity
+        CATransaction.commit()
+    }
+
+    private func animateFrame(
+        of view: NSView,
+        to targetFrame: CGRect,
+        duration: CFTimeInterval,
+        timingFunctionName: CAMediaTimingFunctionName,
+        animationKeyPrefix: String
+    ) {
+        guard let layer = view.layer else {
+            view.frame = targetFrame
+            return
+        }
+
+        let currentPosition = layer.presentation()?.position ?? layer.position
+        let currentBounds = layer.presentation()?.bounds ?? layer.bounds
+        let targetPosition = CGPoint(x: targetFrame.midX, y: targetFrame.midY)
+        let targetBounds = CGRect(origin: .zero, size: targetFrame.size)
+
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        view.frame = targetFrame
+        CATransaction.commit()
+
+        layer.removeAnimation(forKey: animationKeyPrefix + ".position")
+        layer.removeAnimation(forKey: animationKeyPrefix + ".bounds")
+
+        let positionAnimation = CABasicAnimation(keyPath: "position")
+        positionAnimation.fromValue = currentPosition
+        positionAnimation.toValue = targetPosition
+        positionAnimation.duration = duration
+        positionAnimation.timingFunction = CAMediaTimingFunction(name: timingFunctionName)
+        layer.add(positionAnimation, forKey: animationKeyPrefix + ".position")
+
+        if currentBounds.size != targetBounds.size {
+            let boundsAnimation = CABasicAnimation(keyPath: "bounds")
+            boundsAnimation.fromValue = currentBounds
+            boundsAnimation.toValue = targetBounds
+            boundsAnimation.duration = duration
+            boundsAnimation.timingFunction = CAMediaTimingFunction(name: timingFunctionName)
+            layer.add(boundsAnimation, forKey: animationKeyPrefix + ".bounds")
         }
     }
 
@@ -1471,7 +1584,7 @@ fileprivate final class TodoRowView: NSView {
         let borderWidth: CGFloat
         if isDraggingRow {
             backgroundColor = NSColor.clear.cgColor
-            borderColor = NSColor.white.withAlphaComponent(0.5).cgColor
+            borderColor = NSColor.white.withAlphaComponent(0.15).cgColor
             borderWidth = 1.0
         } else if model.isSelectable && isRowSelected {
             backgroundColor = activeFillColor.cgColor
