@@ -12,13 +12,15 @@
     <string>1.0</string>
     <key>CFBundleShortVersionString</key>
     <string>1.0</string>
-    <key>CFBundleExecutable</key>
-    <string>FloatyDo</string>
-    <key>CFBundlePackageType</key>
-    <string>APPL</string>
-    <key>LSUIElement</key>
-    <true/>
-    <key>LSMinimumSystemVersion</key>
-    <string>14.0</string>
-</dict>
+	    <key>CFBundleExecutable</key>
+	    <string>FloatyDo</string>
+	    <key>CFBundleIconFile</key>
+	    <string>AppIcon.icon</string>
+	    <key>CFBundlePackageType</key>
+	    <string>APPL</string>
+	    <key>LSUIElement</key>
+	    <false/>
+	    <key>LSMinimumSystemVersion</key>
+	    <string>14.0</string>
+	</dict>
 </plist>

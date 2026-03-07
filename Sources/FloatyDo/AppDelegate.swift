@@ -15,8 +15,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
     private var appEventMonitor: Any?
 
     public func applicationDidFinishLaunching(_ notification: Notification) {
-        // Hide dock icon
-        NSApp.setActivationPolicy(.accessory)
+        NSApp.setActivationPolicy(.regular)
 
         let initialWidth = max(CGFloat(store.preferences.panelWidth), CGFloat(LayoutMetrics.minPanelWidth))
         panel = FloatingPanel(contentRect: NSRect(x: 0, y: 0, width: initialWidth, height: 300))

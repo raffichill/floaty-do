@@ -34,12 +34,14 @@ mkdir -p "$APP/Contents/MacOS"
 mkdir -p "$APP/Contents/Resources"
 cp ".build/$CONFIG/FloatyDo" "$APP/Contents/MacOS/"
 cp Info.plist "$APP/Contents/"
+cp -R "floatydo-icon.icon" "$APP/Contents/Resources/AppIcon.icon"
 
 echo "Created $APP"
 echo ""
 
 if [[ "$INSTALL" -eq 1 ]]; then
     echo "Installing $APP to /Applications/FloatyDo.app"
+    rm -rf /Applications/FloatyDo.app
     ditto "$APP" /Applications/FloatyDo.app
     echo "Installed /Applications/FloatyDo.app"
 else
