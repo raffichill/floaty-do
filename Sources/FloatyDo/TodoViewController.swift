@@ -529,9 +529,13 @@ public final class TodoViewController: NSViewController, NSPopoverDelegate, NSTe
             return
         }
 
+        let targetText = textForRow(rowID)
         if editorRowID != rowID {
-            sharedEditor.stringValue = textForRow(rowID)
+            sharedEditor.stringValue = targetText
             editorRowID = rowID
+        } else if sharedEditor.stringValue != targetText {
+            logger.debug("attachEditorIfNeeded resetting hidden editor for rowID=\(String(describing: rowID), privacy: .public) from=\"\(self.sharedEditor.stringValue, privacy: .public)\" to=\"\(targetText, privacy: .public)\"")
+            sharedEditor.stringValue = targetText
         }
 
         guard let window = view.window else { return }
@@ -630,6 +634,15 @@ public final class TodoViewController: NSViewController, NSPopoverDelegate, NSTe
             guard let self, let editor = self.sharedEditor.currentEditor() as? NSTextView else { return }
             editor.setSelectedRange(NSRange(location: editor.string.count, length: 0))
         }
+    }
+
+    private func resetHiddenEditorText(to text: String) {
+        sharedEditor.stringValue = text
+        if let editor = sharedEditor.currentEditor() as? NSTextView {
+            editor.string = text
+            editor.setSelectedRange(NSRange(location: editor.string.count, length: 0))
+        }
+        syncVisibleEditorState()
     }
 
     private func textForRow(_ rowID: TodoRowID) -> String {
@@ -745,6 +758,8 @@ public final class TodoViewController: NSViewController, NSPopoverDelegate, NSTe
             guard !text.isEmpty else { return }
             store.add(text)
             taskInputDraft = ""
+            resetHiddenEditorText(to: "")
+            editorRowID = nil
             selectedRowID = .taskInput
             refreshRows()
 
