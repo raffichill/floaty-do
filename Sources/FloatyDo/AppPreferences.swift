@@ -93,7 +93,7 @@ enum LayoutMetrics {
     static let circleSize: Double = 18
     static let circleHitSize: Double = 24
     static let dragHandleSize: Double = 16
-    static let titlebarTrailingInset: Double = 18
+    static let titlebarTrailingInset: Double = 10
     static let contentTopPadding: Double = 4
     static let trafficLightTopInset: Double = 14
     static let trafficLightSpacing: Double = 6

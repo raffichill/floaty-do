@@ -40,6 +40,8 @@ public final class TodoViewController: NSViewController, NSPopoverDelegate, NSTe
     private var eventMonitor: Any?
     private var cursorEventMonitor: Any?
     private var editorSelectionObserver: Any?
+    private var deferredEditorRowID: TodoRowID?
+    private var deferredEditorActivationWorkItem: DispatchWorkItem?
     private var cancellables = Set<AnyCancellable>()
     private var currentTab: Tab = .tasks
     private var tasksTabButton: NSButton!
@@ -85,6 +87,7 @@ public final class TodoViewController: NSViewController, NSPopoverDelegate, NSTe
     private var currentEditingRowID: TodoRowID? {
         guard !isAnimating, !listView.isDragging else { return nil }
         guard let selectedModel else { return nil }
+        guard deferredEditorRowID != selectedModel.id else { return nil }
         return selectedModel.isEditable ? selectedModel.id : nil
     }
 
@@ -259,6 +262,7 @@ public final class TodoViewController: NSViewController, NSPopoverDelegate, NSTe
 
     @objc private func switchToTasks() {
         guard currentTab != .tasks else { return }
+        cancelDeferredEditorActivation()
         currentTab = .tasks
         selectedRowID = nil
         updateTabAppearance()
@@ -267,6 +271,7 @@ public final class TodoViewController: NSViewController, NSPopoverDelegate, NSTe
 
     @objc private func switchToArchive() {
         guard currentTab != .archive else { return }
+        cancelDeferredEditorActivation()
         currentTab = .archive
         selectedRowID = nil
         updateTabAppearance()
@@ -507,6 +512,7 @@ public final class TodoViewController: NSViewController, NSPopoverDelegate, NSTe
         animateResize: Bool = true,
         animatedLayout: Bool = false,
         animatedLayoutDuration: CFTimeInterval? = nil,
+        selectionRevealRowID: TodoRowID? = nil,
         placeCaretAtEnd: Bool = true
     ) {
         rowModels = buildRowModels()
@@ -517,7 +523,8 @@ public final class TodoViewController: NSViewController, NSPopoverDelegate, NSTe
             editingRowID: currentEditingRowID,
             preferences: store.preferences,
             animatedLayout: animatedLayout,
-            animatedLayoutDuration: animatedLayoutDuration
+            animatedLayoutDuration: animatedLayoutDuration,
+            selectionRevealRowID: selectionRevealRowID
         )
 
         if resize {
@@ -569,6 +576,7 @@ public final class TodoViewController: NSViewController, NSPopoverDelegate, NSTe
 
     private func activateRow(_ rowID: TodoRowID, placeCaretAtEnd: Bool = true) {
         guard rowModels.contains(where: { $0.id == rowID && $0.isSelectable }) else { return }
+        cancelDeferredEditorActivation()
         let previousSelectedRowID = selectedRowID
         selectedRowID = rowID
         syncSelectionUI(previousSelectedRowID: previousSelectedRowID, placeCaretAtEnd: placeCaretAtEnd)
@@ -675,6 +683,30 @@ public final class TodoViewController: NSViewController, NSPopoverDelegate, NSTe
         bindHiddenEditor(placeCaretAtEnd: placeCaretAtEnd)
     }
 
+    private func cancelDeferredEditorActivation() {
+        deferredEditorActivationWorkItem?.cancel()
+        deferredEditorActivationWorkItem = nil
+        deferredEditorRowID = nil
+    }
+
+    private func scheduleDeferredEditorActivation(for rowID: TodoRowID?, delay: TimeInterval) {
+        cancelDeferredEditorActivation()
+        guard let rowID else { return }
+
+        deferredEditorRowID = rowID
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            guard self.selectedRowID == rowID, self.deferredEditorRowID == rowID else { return }
+
+            self.deferredEditorRowID = nil
+            self.deferredEditorActivationWorkItem = nil
+            self.syncSelectionUI(placeCaretAtEnd: true)
+        }
+
+        deferredEditorActivationWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: workItem)
+    }
+
     private func detachEditor(makeListFirstResponder shouldFocusList: Bool) {
         guard editorRowID != nil else {
             if shouldFocusList {
@@ -779,6 +811,7 @@ public final class TodoViewController: NSViewController, NSPopoverDelegate, NSTe
     }
 
     private func handleCommandReturn() {
+        cancelDeferredEditorActivation()
         guard let selectedModel else { return }
 
         switch currentTab {
@@ -806,6 +839,7 @@ public final class TodoViewController: NSViewController, NSPopoverDelegate, NSTe
     }
 
     private func handleCommandDelete() {
+        cancelDeferredEditorActivation()
         guard let selectedModel else { return }
         let selectionIndex = selectedRowIndex ?? 0
 
@@ -844,7 +878,13 @@ public final class TodoViewController: NSViewController, NSPopoverDelegate, NSTe
             let updatedModels = self.buildRowModels(for: .tasks)
             self.selectedRowID = self.buildSelectionID(in: updatedModels, selectableIndex: index)
             self.isAnimating = false
-            self.refreshRows(animatedLayout: true, animatedLayoutDuration: self.motion.collapse)
+            self.scheduleDeferredEditorActivation(for: self.selectedRowID, delay: self.motion.collapse * 0.75)
+            self.refreshRows(
+                animatedLayout: true,
+                animatedLayoutDuration: self.motion.collapse,
+                selectionRevealRowID: self.selectedRowID,
+                placeCaretAtEnd: false
+            )
         }
     }
 
@@ -1090,6 +1130,7 @@ fileprivate final class TodoListView: NSView {
     private var editingRowID: TodoRowID?
     private var preferences: AppPreferences = .default
     private var pressedRowID: TodoRowID?
+    private var selectionRevealRowID: TodoRowID?
     private var interactionState: InteractionState = .idle
 
     override var isFlipped: Bool { true }
@@ -1116,11 +1157,13 @@ fileprivate final class TodoListView: NSView {
         editingRowID: TodoRowID?,
         preferences: AppPreferences,
         animatedLayout: Bool,
-        animatedLayoutDuration: CFTimeInterval? = nil
+        animatedLayoutDuration: CFTimeInterval? = nil,
+        selectionRevealRowID: TodoRowID? = nil
     ) {
         self.preferences = preferences
         self.selectedRowID = selectedRowID
         self.editingRowID = editingRowID
+        self.selectionRevealRowID = selectionRevealRowID
         rowModelsByID = Dictionary(uniqueKeysWithValues: models.map { ($0.id, $0) })
 
         let incomingIDs = Set(models.map(\.id))
@@ -1132,7 +1175,10 @@ fileprivate final class TodoListView: NSView {
         for model in models {
             let rowView = rowViews[model.id] ?? TodoRowView(model: model, preferences: preferences)
             rowView.configure(model: model, preferences: preferences)
-            rowView.setSelected(model.id == selectedRowID)
+            rowView.setSelected(
+                model.id == selectedRowID,
+                animateFill: model.id == selectionRevealRowID && model.id == selectedRowID
+            )
             rowView.setEditing(model.id == editingRowID)
             rowView.setPressed(model.id == pressedRowID)
             if rowViews[model.id] == nil {
@@ -1146,13 +1192,17 @@ fileprivate final class TodoListView: NSView {
         }
 
         layoutRows(animated: animatedLayout, duration: animatedLayoutDuration)
+        self.selectionRevealRowID = nil
     }
 
     func updateModel(_ model: TodoRowModel) {
         rowModelsByID[model.id] = model
         guard let rowView = rowViews[model.id] else { return }
         rowView.configure(model: model, preferences: preferences)
-        rowView.setSelected(model.id == selectedRowID)
+        rowView.setSelected(
+            model.id == selectedRowID,
+            animateFill: model.id == selectionRevealRowID && model.id == selectedRowID
+        )
         rowView.setEditing(model.id == editingRowID)
         rowView.setPressed(model.id == pressedRowID)
     }
@@ -1441,7 +1491,10 @@ fileprivate final class TodoListView: NSView {
     private func refreshRowVisualState(excluding draggedRowID: TodoRowID? = nil) {
         for rowID in displayOrder {
             guard let rowView = rowViews[rowID] else { continue }
-            rowView.setSelected(rowID == selectedRowID)
+            rowView.setSelected(
+                rowID == selectedRowID,
+                animateFill: rowID == selectionRevealRowID && rowID == selectedRowID
+            )
             rowView.setEditing(rowID == editingRowID)
             rowView.setPressed(rowID == pressedRowID)
             if rowID != draggedRowID {
@@ -1458,7 +1511,10 @@ fileprivate final class TodoListView: NSView {
         let updates = {
             for (index, rowID) in self.displayOrder.enumerated() {
                 guard let rowView = self.rowViews[rowID] else { continue }
-                rowView.setSelected(rowID == self.selectedRowID)
+                rowView.setSelected(
+                    rowID == self.selectedRowID,
+                    animateFill: rowID == self.selectionRevealRowID && rowID == self.selectedRowID
+                )
                 rowView.setEditing(rowID == self.editingRowID)
                 rowView.setPressed(rowID == self.pressedRowID)
                 let targetFrame = self.frameForRow(at: index)
@@ -1477,7 +1533,10 @@ fileprivate final class TodoListView: NSView {
 
         for (index, rowID) in displayOrder.enumerated() {
             guard let rowView = rowViews[rowID] else { continue }
-            rowView.setSelected(rowID == selectedRowID)
+            rowView.setSelected(
+                rowID == selectedRowID,
+                animateFill: rowID == selectionRevealRowID && rowID == selectedRowID
+            )
             rowView.setEditing(rowID == editingRowID)
             rowView.setPressed(rowID == pressedRowID)
             let targetFrame = frameForRow(at: index)
@@ -1742,6 +1801,8 @@ fileprivate final class TodoRowView: NSView {
         didSet { updateAppearance() }
     }
 
+    private var shouldAnimateNextSelectionFill = false
+
     init(model: TodoRowModel, preferences: AppPreferences) {
         self.model = model
         self.preferences = preferences
@@ -1814,7 +1875,8 @@ fileprivate final class TodoRowView: NSView {
         needsLayout = true
     }
 
-    func setSelected(_ selected: Bool) {
+    func setSelected(_ selected: Bool, animateFill: Bool = false) {
+        shouldAnimateNextSelectionFill = animateFill && selected
         isRowSelected = selected
     }
 
@@ -1972,6 +2034,8 @@ fileprivate final class TodoRowView: NSView {
         let backgroundColor: CGColor
         let borderColor: CGColor
         let borderWidth: CGFloat
+        let animateSelectionFill = shouldAnimateNextSelectionFill && model.isSelectable && isRowSelected
+        shouldAnimateNextSelectionFill = false
         if isDraggingRow {
             backgroundColor = NSColor.clear.cgColor
             borderColor = NSColor.white.withAlphaComponent(0.15).cgColor
@@ -1986,9 +2050,12 @@ fileprivate final class TodoRowView: NSView {
             borderWidth = 0.0
         }
 
-        backgroundView.layer?.backgroundColor = backgroundColor
-        backgroundView.layer?.borderColor = borderColor
-        backgroundView.layer?.borderWidth = borderWidth
+        updateBackgroundAppearance(
+            backgroundColor: backgroundColor,
+            borderColor: borderColor,
+            borderWidth: borderWidth,
+            animate: animateSelectionFill
+        )
         circleView.contentTintColor = NSColor.white.withAlphaComponent(circleAlpha)
         textLabel.attributedStringValue = attributedText(alpha: textAlpha)
         editingTextView.textColor = NSColor.white.withAlphaComponent(textAlpha)
@@ -2014,6 +2081,55 @@ fileprivate final class TodoRowView: NSView {
         }
 
         updateScaleTransform()
+    }
+
+    private func updateBackgroundAppearance(
+        backgroundColor: CGColor,
+        borderColor: CGColor,
+        borderWidth: CGFloat,
+        animate: Bool
+    ) {
+        guard let layer = backgroundView.layer else { return }
+
+        let currentBackground = layer.presentation()?.backgroundColor ?? layer.backgroundColor
+        let currentBorderColor = layer.presentation()?.borderColor ?? layer.borderColor
+        let currentBorderWidth = layer.presentation()?.borderWidth ?? layer.borderWidth
+
+        let shouldAnimate = animate && window != nil && !isDraggingRow
+
+        if shouldAnimate, let currentBackground {
+            let animation = CABasicAnimation(keyPath: "backgroundColor")
+            animation.fromValue = currentBackground
+            animation.toValue = backgroundColor
+            animation.duration = preferences.motion.collapse
+            animation.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            layer.add(animation, forKey: "rowBackgroundColor")
+        }
+
+        if shouldAnimate, let currentBorderColor {
+            let animation = CABasicAnimation(keyPath: "borderColor")
+            animation.fromValue = currentBorderColor
+            animation.toValue = borderColor
+            animation.duration = preferences.motion.collapse
+            animation.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            layer.add(animation, forKey: "rowBorderColor")
+        }
+
+        if shouldAnimate {
+            let animation = CABasicAnimation(keyPath: "borderWidth")
+            animation.fromValue = currentBorderWidth
+            animation.toValue = borderWidth
+            animation.duration = preferences.motion.collapse
+            animation.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            layer.add(animation, forKey: "rowBorderWidth")
+        }
+
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        layer.backgroundColor = backgroundColor
+        layer.borderColor = borderColor
+        layer.borderWidth = borderWidth
+        CATransaction.commit()
     }
 
     private func attributedText(alpha: CGFloat) -> NSAttributedString {
