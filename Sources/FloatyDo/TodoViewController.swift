@@ -506,6 +506,7 @@ public final class TodoViewController: NSViewController, NSPopoverDelegate, NSTe
         resize: Bool = true,
         animateResize: Bool = true,
         animatedLayout: Bool = false,
+        animatedLayoutDuration: CFTimeInterval? = nil,
         placeCaretAtEnd: Bool = true
     ) {
         rowModels = buildRowModels()
@@ -515,7 +516,8 @@ public final class TodoViewController: NSViewController, NSPopoverDelegate, NSTe
             selectedRowID: selectedRowID,
             editingRowID: currentEditingRowID,
             preferences: store.preferences,
-            animatedLayout: animatedLayout
+            animatedLayout: animatedLayout,
+            animatedLayoutDuration: animatedLayoutDuration
         )
 
         if resize {
@@ -842,7 +844,7 @@ public final class TodoViewController: NSViewController, NSPopoverDelegate, NSTe
             let updatedModels = self.buildRowModels(for: .tasks)
             self.selectedRowID = self.buildSelectionID(in: updatedModels, selectableIndex: index)
             self.isAnimating = false
-            self.refreshRows(animatedLayout: true)
+            self.refreshRows(animatedLayout: true, animatedLayoutDuration: self.motion.collapse)
         }
     }
 
@@ -1113,7 +1115,8 @@ fileprivate final class TodoListView: NSView {
         selectedRowID: TodoRowID?,
         editingRowID: TodoRowID?,
         preferences: AppPreferences,
-        animatedLayout: Bool
+        animatedLayout: Bool,
+        animatedLayoutDuration: CFTimeInterval? = nil
     ) {
         self.preferences = preferences
         self.selectedRowID = selectedRowID
@@ -1142,7 +1145,7 @@ fileprivate final class TodoListView: NSView {
             displayOrder = models.map(\.id)
         }
 
-        layoutRows(animated: animatedLayout)
+        layoutRows(animated: animatedLayout, duration: animatedLayoutDuration)
     }
 
     func updateModel(_ model: TodoRowModel) {
@@ -1207,7 +1210,7 @@ fileprivate final class TodoListView: NSView {
 
     override func layout() {
         super.layout()
-        layoutRows(animated: false)
+        layoutRows(animated: false, duration: nil)
     }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
@@ -1407,7 +1410,7 @@ fileprivate final class TodoListView: NSView {
         }
 
         if didReorder {
-            layoutRows(animated: true)
+            layoutRows(animated: true, duration: InteractionMetrics.dragReorderDuration)
         }
     }
 
@@ -1448,8 +1451,9 @@ fileprivate final class TodoListView: NSView {
         }
     }
 
-    private func layoutRows(animated: Bool) {
+    private func layoutRows(animated: Bool, duration: CFTimeInterval?) {
         let draggedRowID = currentDraggedRowID
+        let animationDuration = duration ?? InteractionMetrics.dragReorderDuration
 
         let updates = {
             for (index, rowID) in self.displayOrder.enumerated() {
@@ -1490,7 +1494,7 @@ fileprivate final class TodoListView: NSView {
                 animateRowReorder(
                     rowView,
                     to: targetFrame,
-                    duration: InteractionMetrics.dragReorderDuration,
+                    duration: animationDuration,
                     animationKey: "dragReorder.\(rowID)"
                 )
             }
