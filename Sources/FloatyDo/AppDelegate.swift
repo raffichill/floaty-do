@@ -14,24 +14,50 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
     private var todoVC: TodoViewController!
     private var appEventMonitor: Any?
 
+    private func debugLog(_ message: String) {
+        let line = "[\(Date())] \(message)\n"
+        let url = URL(fileURLWithPath: "/tmp/FloatyDo-launch.log")
+        let data = Data(line.utf8)
+        if FileManager.default.fileExists(atPath: url.path) {
+            if let handle = try? FileHandle(forWritingTo: url) {
+                try? handle.seekToEnd()
+                try? handle.write(contentsOf: data)
+                try? handle.close()
+            }
+        } else {
+            try? data.write(to: url)
+        }
+    }
+
     public func applicationDidFinishLaunching(_ notification: Notification) {
+        debugLog("applicationDidFinishLaunching")
         NSApp.setActivationPolicy(.regular)
 
         let initialWidth = max(CGFloat(store.preferences.panelWidth), CGFloat(LayoutMetrics.minPanelWidth))
         panel = FloatingPanel(contentRect: NSRect(x: 0, y: 0, width: initialWidth, height: 300))
         panel.minSize = NSSize(width: LayoutMetrics.minPanelWidth, height: 200)
+        debugLog("panel created")
 
         // AppKit view controller
         todoVC = TodoViewController(store: store)
         panel.contentViewController = todoVC
+        debugLog("content view controller attached")
 
         // Menu bar item
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         if let button = statusItem.button {
-            button.image = NSImage(systemSymbolName: "checklist", accessibilityDescription: "FloatyDo")
+            if let image = NSImage(systemSymbolName: "checklist", accessibilityDescription: "FloatyDo") {
+                image.isTemplate = true
+                button.image = image
+            } else {
+                button.title = "✓"
+            }
             button.action = #selector(statusItemClicked)
             button.target = self
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
+            debugLog("status item button configured")
+        } else {
+            debugLog("status item button missing")
         }
 
         // App-level shortcuts: cmd+Q to quit, cmd+W to hide panel
@@ -68,8 +94,19 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         // Position panel near the status item and show it
-        positionPanel()
-        panel.orderFront(nil)
+        showPanel(activate: true)
+    }
+
+    public func applicationDidBecomeActive(_ notification: Notification) {
+        debugLog("applicationDidBecomeActive visible=\(panel?.isVisible ?? false)")
+        guard panel != nil, !panel.isVisible else { return }
+        showPanel(activate: true)
+    }
+
+    public func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        debugLog("applicationShouldHandleReopen visible=\(flag)")
+        showPanel(activate: true)
+        return true
     }
 
     @objc private func statusItemClicked() {
@@ -85,10 +122,20 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
             if panel.isVisible {
                 panel.orderOut(nil)
             } else {
-                positionPanel()
-                panel.orderFront(nil)
+                showPanel(activate: true)
             }
         }
+    }
+
+    private func showPanel(activate: Bool) {
+        debugLog("showPanel activate=\(activate)")
+        positionPanel()
+        panel.makeKeyAndOrderFront(nil)
+        panel.orderFrontRegardless()
+        if activate {
+            NSApp.activate(ignoringOtherApps: true)
+        }
+        debugLog("panel visible after show=\(panel.isVisible) frame=\(panel.frame.debugDescription)")
     }
 
     private func positionPanel() {

@@ -199,11 +199,11 @@
 				en,
 				Base,
 			);
+			mainGroup = 96C120E42F5CCB4E001BAB34;
+			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				2CBB50F645DF40E182408DA0 /* XCLocalSwiftPackageReference ".." */,
 			);
-			mainGroup = 96C120E42F5CCB4E001BAB34;
-			minimizedProjectReferenceProxies = 1;
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 96C120EE2F5CCB4E001BAB34 /* Products */;
 			projectDirPath = "";
@@ -544,13 +544,6 @@
 		};
 /* End XCBuildConfiguration section */
 
-/* Begin XCLocalSwiftPackageReference section */
-		2CBB50F645DF40E182408DA0 /* XCLocalSwiftPackageReference ".." */ = {
-			isa = XCLocalSwiftPackageReference;
-			relativePath = ..;
-		};
-/* End XCLocalSwiftPackageReference section */
-
 /* Begin XCConfigurationList section */
 		96C120E82F5CCB4E001BAB34 /* Build configuration list for PBXProject "FloatyDo" */ = {
 			isa = XCConfigurationList;
@@ -589,6 +582,13 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		2CBB50F645DF40E182408DA0 /* XCLocalSwiftPackageReference ".." */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ..;
+		};
+/* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
 		FA3EAE57C7C5454CA111C50E /* FloatyDoLib */ = {
