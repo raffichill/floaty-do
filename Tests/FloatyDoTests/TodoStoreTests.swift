@@ -44,6 +44,29 @@ final class TodoStoreTests: XCTestCase {
         XCTAssertEqual(store.items.count, TodoStore.maxItems, "Should not exceed maxItems")
     }
 
+    func testInsertItemAtSpecificIndex() {
+        let store = TodoStore()
+        store.add("A")
+        store.add("C")
+
+        let inserted = store.insert("B", at: 1)
+
+        XCTAssertNotNil(inserted)
+        XCTAssertEqual(store.items.map(\.text), ["A", "B", "C"])
+    }
+
+    func testInsertClampsOutOfBoundsIndex() {
+        let store = TodoStore()
+        store.add("A")
+        store.add("B")
+
+        _ = store.insert("C", at: 99)
+        XCTAssertEqual(store.items.map(\.text), ["A", "B", "C"])
+
+        _ = store.insert("Start", at: -10)
+        XCTAssertEqual(store.items.map(\.text), ["Start", "A", "B", "C"])
+    }
+
     // MARK: - Archive
 
     func testArchiveMovesItemFromItemsToArchived() {

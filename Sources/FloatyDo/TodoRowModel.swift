@@ -3,7 +3,7 @@ import Foundation
 enum TodoRowID: Hashable {
     case taskItem(UUID)
     case archiveItem(UUID)
-    case taskInput
+    case taskDraft
     case taskFiller(Int)
     case archiveFiller(Int)
 }
@@ -11,7 +11,7 @@ enum TodoRowID: Hashable {
 enum TodoRowKind: Equatable {
     case taskItem(TodoItem)
     case archiveItem(TodoItem)
-    case taskInput
+    case taskDraft
     case filler
 }
 
@@ -32,7 +32,7 @@ struct TodoRowModel: Equatable {
         switch kind {
         case .taskItem(let item), .archiveItem(let item):
             return item.id
-        case .taskInput, .filler:
+        case .taskDraft, .filler:
             return nil
         }
     }

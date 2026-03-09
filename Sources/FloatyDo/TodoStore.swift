@@ -42,13 +42,21 @@ public final class TodoStore: ObservableObject {
     }
 
     public func add(_ text: String) {
+        _ = insert(text, at: items.count)
+    }
+
+    @discardableResult
+    public func insert(_ text: String, at index: Int) -> TodoItem? {
         let trimmed = text.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty, items.count < Self.maxItems else {
             logger.warning("add REJECTED: text=\"\(text)\", items.count=\(self.items.count)")
-            return
+            return nil
         }
-        items.append(TodoItem(text: trimmed))
-        logger.debug("add: \"\(trimmed)\", items.count=\(self.items.count)")
+        let item = TodoItem(text: trimmed)
+        let insertionIndex = max(0, min(index, items.count))
+        items.insert(item, at: insertionIndex)
+        logger.debug("insert: \"\(trimmed)\", at=\(insertionIndex), items.count=\(self.items.count)")
+        return item
     }
 
     public func updateText(for id: UUID, to text: String) {

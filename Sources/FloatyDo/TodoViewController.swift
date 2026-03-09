@@ -7,6 +7,19 @@ private let logger = Logger(subsystem: "com.floatydo", category: "TodoVC")
 
 public enum Tab { case tasks, archive }
 
+private struct TaskDraftState {
+    var insertionIndex: Int
+    var text: String
+
+    var trimmedText: String {
+        text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var isEmpty: Bool {
+        trimmedText.isEmpty
+    }
+}
+
 fileprivate protocol TodoListViewDelegate: AnyObject {
     func listView(_ listView: TodoListView, didActivateRow rowID: TodoRowID)
     func listView(_ listView: TodoListView, didActivateCheckboxFor rowID: TodoRowID)
@@ -23,7 +36,7 @@ public final class TodoViewController: NSViewController, NSPopoverDelegate, NSTe
     private var selectedRowID: TodoRowID?
     private var editorRowID: TodoRowID?
     private var rowModels: [TodoRowModel] = []
-    private var taskInputDraft = ""
+    private var taskDraft: TaskDraftState
     private var eventMonitor: Any?
     private var cursorEventMonitor: Any?
     private var editorSelectionObserver: Any?
@@ -37,6 +50,7 @@ public final class TodoViewController: NSViewController, NSPopoverDelegate, NSTe
 
     public init(store: TodoStore) {
         self.store = store
+        self.taskDraft = TaskDraftState(insertionIndex: store.items.count, text: "")
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -46,7 +60,6 @@ public final class TodoViewController: NSViewController, NSPopoverDelegate, NSTe
     private var rowHeight: CGFloat { CGFloat(store.preferences.rowHeight) }
     private var panelWidth: CGFloat { CGFloat(store.preferences.panelWidth) }
     private var rowCount: Int { rowModels.count }
-    private var inputIndex: Int { store.items.count }
     private var selectedRowIndex: Int? {
         guard let selectedRowID else { return nil }
         return rowModels.firstIndex(where: { $0.id == selectedRowID })
@@ -55,6 +68,18 @@ public final class TodoViewController: NSViewController, NSPopoverDelegate, NSTe
     private var selectedModel: TodoRowModel? {
         guard let selectedRowIndex else { return nil }
         return rowModels[selectedRowIndex]
+    }
+
+    private var defaultDraftInsertionIndex: Int {
+        store.items.count
+    }
+
+    private var canShowDraftRow: Bool {
+        store.items.count < TodoStore.maxItems
+    }
+
+    private var draftIsAtDefaultPosition: Bool {
+        taskDraft.insertionIndex == defaultDraftInsertionIndex
     }
 
     private var currentEditingRowID: TodoRowID? {
@@ -273,11 +298,106 @@ public final class TodoViewController: NSViewController, NSPopoverDelegate, NSTe
         updateTabAppearance()
     }
 
+    private func clampedDraftInsertionIndex(_ index: Int) -> Int {
+        max(0, min(index, defaultDraftInsertionIndex))
+    }
+
+    private func setDraftPosition(_ insertionIndex: Int, text: String? = nil) {
+        taskDraft.insertionIndex = clampedDraftInsertionIndex(insertionIndex)
+        if let text {
+            taskDraft.text = text
+        }
+    }
+
+    private func resetDraftToDefault() {
+        taskDraft = TaskDraftState(insertionIndex: defaultDraftInsertionIndex, text: "")
+    }
+
+    private func rowID(afterRemovingDraftAt insertionIndex: Int) -> TodoRowID? {
+        if store.items.isEmpty {
+            return canShowDraftRow ? .taskDraft : nil
+        }
+
+        let targetIndex = max(0, min(insertionIndex, store.items.count - 1))
+        return .taskItem(store.items[targetIndex].id)
+    }
+
+    private func rowID(beforeRemovingDraftAt insertionIndex: Int) -> TodoRowID? {
+        guard !store.items.isEmpty else {
+            return canShowDraftRow ? .taskDraft : nil
+        }
+
+        let targetIndex = max(0, min(insertionIndex - 1, store.items.count - 1))
+        return .taskItem(store.items[targetIndex].id)
+    }
+
+    private func collapseSelectedDraftForNavigation(step: Int) -> Bool {
+        guard currentTab == .tasks,
+              selectedRowID == .taskDraft,
+              taskDraft.isEmpty,
+              !draftIsAtDefaultPosition else {
+            return false
+        }
+
+        let destinationRowID = step < 0
+            ? rowID(beforeRemovingDraftAt: taskDraft.insertionIndex)
+            : rowID(afterRemovingDraftAt: taskDraft.insertionIndex)
+        resetDraftToDefault()
+        selectedRowID = destinationRowID
+        refreshRows(placeCaretAtEnd: true)
+        return true
+    }
+
+    private func normalizeDraftBeforeStructuralAction() {
+        guard currentTab == .tasks else { return }
+
+        if !taskDraft.isEmpty {
+            _ = promoteDraftToItem(selectInsertedItem: false)
+            return
+        }
+
+        guard selectedRowID != .taskDraft, !draftIsAtDefaultPosition else { return }
+        resetDraftToDefault()
+        refreshRows(placeCaretAtEnd: false)
+    }
+
+    @discardableResult
+    private func promoteDraftToItem(selectInsertedItem: Bool = true) -> TodoItem? {
+        let draftText = taskDraft.trimmedText
+        guard canShowDraftRow, !draftText.isEmpty else { return nil }
+        let insertionIndex = taskDraft.insertionIndex
+        guard let insertedItem = store.insert(draftText, at: insertionIndex) else { return nil }
+
+        resetDraftToDefault()
+        if selectInsertedItem {
+            selectedRowID = .taskItem(insertedItem.id)
+        }
+        refreshRows(placeCaretAtEnd: false)
+        return insertedItem
+    }
+
+    private func activateDraft(at insertionIndex: Int, placeCaretAtEnd: Bool = true) {
+        guard canShowDraftRow else { return }
+        setDraftPosition(insertionIndex, text: "")
+        selectedRowID = .taskDraft
+        refreshRows(placeCaretAtEnd: placeCaretAtEnd)
+    }
+
+    private func convertItemToDraft(_ item: TodoItem, newText: String) {
+        guard let itemIndex = store.items.firstIndex(where: { $0.id == item.id }) else { return }
+        store.deleteItem(id: item.id)
+        setDraftPosition(itemIndex, text: newText)
+        selectedRowID = .taskDraft
+        refreshRows(placeCaretAtEnd: false)
+    }
+
     private func buildRowModels(for tab: Tab? = nil) -> [TodoRowModel] {
         switch tab ?? currentTab {
         case .tasks:
+            let showsDraft = canShowDraftRow
             let visibleRowCount = min(store.items.count + 3, TodoStore.maxItems)
-            let emptyCount = max(visibleRowCount - store.items.count, 1)
+            let baseRowCount = store.items.count + (showsDraft ? 1 : 0)
+            let fillerCount = max(visibleRowCount - baseRowCount, 0)
 
             var models = store.items.map { item in
                 TodoRowModel(
@@ -295,27 +415,29 @@ public final class TodoViewController: NSViewController, NSPopoverDelegate, NSTe
                 )
             }
 
-            models.append(
-                TodoRowModel(
-                    id: .taskInput,
-                    kind: .taskInput,
-                    text: taskInputDraft,
+            if showsDraft {
+                let draftModel = TodoRowModel(
+                    id: .taskDraft,
+                    kind: .taskDraft,
+                    text: taskDraft.text,
                     isDone: false,
                     isEditable: true,
                     isSelectable: true,
                     canComplete: false,
                     canDrag: false,
-                    circleOpacity: fadeOpacity(emptyIndex: 0, emptyCount: emptyCount),
+                    circleOpacity: fillerCount > 0 ? fadeOpacity(emptyIndex: 0, emptyCount: fillerCount + 1) : 0.30,
                     textOpacity: 0.92,
                     showsStrikethrough: false
                 )
-            )
+                let insertionIndex = clampedDraftInsertionIndex(taskDraft.insertionIndex)
+                models.insert(draftModel, at: min(insertionIndex, models.count))
+            }
 
-            if emptyCount > 1 {
-                for fillerIndex in 1..<emptyCount {
+            if fillerCount > 0 {
+                for fillerIndex in 0..<fillerCount {
                     models.append(
                         TodoRowModel(
-                            id: .taskFiller(fillerIndex),
+                            id: .taskFiller(fillerIndex + 1),
                             kind: .filler,
                             text: "",
                             isDone: false,
@@ -323,7 +445,7 @@ public final class TodoViewController: NSViewController, NSPopoverDelegate, NSTe
                             isSelectable: false,
                             canComplete: false,
                             canDrag: false,
-                            circleOpacity: fadeOpacity(emptyIndex: fillerIndex, emptyCount: emptyCount),
+                            circleOpacity: fadeOpacity(emptyIndex: fillerIndex, emptyCount: fillerCount),
                             textOpacity: 0.0,
                             showsStrikethrough: false
                         )
@@ -503,12 +625,12 @@ public final class TodoViewController: NSViewController, NSPopoverDelegate, NSTe
                 showsStrikethrough: true
             )
 
-        case .taskInput:
-            guard let existingModel = rowModels.first(where: { $0.id == .taskInput }) else { return nil }
+        case .taskDraft:
+            guard let existingModel = rowModels.first(where: { $0.id == .taskDraft }) else { return nil }
             return TodoRowModel(
-                id: .taskInput,
-                kind: .taskInput,
-                text: taskInputDraft,
+                id: .taskDraft,
+                kind: .taskDraft,
+                text: taskDraft.text,
                 isDone: false,
                 isEditable: true,
                 isSelectable: true,
@@ -659,17 +781,9 @@ public final class TodoViewController: NSViewController, NSPopoverDelegate, NSTe
             case .taskItem(let item):
                 animateCompletion(for: item.id)
 
-            case .taskInput:
-                let text = taskInputDraft.trimmingCharacters(in: .whitespaces)
-                guard !text.isEmpty else { return }
-                store.add(text)
-                taskInputDraft = ""
-                guard let newItemID = store.items.last?.id else {
-                    refreshRows()
-                    return
-                }
-                refreshRows()
-                animateCompletion(for: newItemID)
+            case .taskDraft:
+                guard let insertedItem = promoteDraftToItem(selectInsertedItem: true) else { return }
+                animateCompletion(for: insertedItem.id)
 
             case .archiveItem, .filler:
                 return
@@ -732,6 +846,20 @@ public final class TodoViewController: NSViewController, NSPopoverDelegate, NSTe
 
     func moveUp() {
         guard !isAnimating, !listView.isBusy else { return }
+        if currentTab == .tasks {
+            if collapseSelectedDraftForNavigation(step: -1) {
+                return
+            }
+
+            if case .taskItem(let item)? = selectedModel?.kind,
+               let itemIndex = store.items.firstIndex(where: { $0.id == item.id }),
+               itemIndex == 0,
+               canShowDraftRow {
+                activateDraft(at: 0)
+                return
+            }
+        }
+
         guard let currentIndex = selectedRowIndex,
               let nextIndex = nextSelectableIndex(from: currentIndex, step: -1) else { return }
         activateRow(rowModels[nextIndex].id, placeCaretAtEnd: true)
@@ -739,6 +867,9 @@ public final class TodoViewController: NSViewController, NSPopoverDelegate, NSTe
 
     func moveDown() {
         guard !isAnimating, !listView.isBusy else { return }
+        if currentTab == .tasks, collapseSelectedDraftForNavigation(step: 1) {
+            return
+        }
         guard let currentIndex = selectedRowIndex,
               let nextIndex = nextSelectableIndex(from: currentIndex, step: 1) else { return }
         activateRow(rowModels[nextIndex].id, placeCaretAtEnd: true)
@@ -746,23 +877,23 @@ public final class TodoViewController: NSViewController, NSPopoverDelegate, NSTe
 
     func submitRow() {
         guard !isAnimating, !listView.isBusy, currentTab == .tasks else { return }
-        guard let selectedModel, let currentIndex = selectedRowIndex else { return }
+        guard let selectedModel else { return }
 
         switch selectedModel.kind {
-        case .taskItem:
-            if let nextIndex = nextSelectableIndex(from: currentIndex, step: 1) {
-                activateRow(rowModels[nextIndex].id, placeCaretAtEnd: true)
-            }
+        case .taskItem(let item):
+            normalizeDraftBeforeStructuralAction()
+            guard let itemIndex = store.items.firstIndex(where: { $0.id == item.id }),
+                  canShowDraftRow else { return }
+            activateDraft(at: itemIndex + 1)
 
-        case .taskInput:
-            let text = taskInputDraft.trimmingCharacters(in: .whitespaces)
-            guard !text.isEmpty else { return }
-            store.add(text)
-            taskInputDraft = ""
-            resetHiddenEditorText(to: "")
-            editorRowID = nil
-            selectedRowID = .taskInput
-            refreshRows()
+        case .taskDraft:
+            if let insertedItem = promoteDraftToItem(selectInsertedItem: true),
+               let insertedIndex = store.items.firstIndex(where: { $0.id == insertedItem.id }),
+               canShowDraftRow {
+                activateDraft(at: insertedIndex + 1)
+            } else if !draftIsAtDefaultPosition {
+                _ = collapseSelectedDraftForNavigation(step: 1)
+            }
 
         case .archiveItem, .filler:
             return
@@ -802,11 +933,20 @@ public final class TodoViewController: NSViewController, NSPopoverDelegate, NSTe
         guard let rowID = editorRowID else { return }
         switch rowModels.first(where: { $0.id == rowID })?.kind {
         case .taskItem(let item):
-            store.updateText(for: item.id, to: sharedEditor.stringValue)
-            refreshVisibleModel(for: rowID)
-        case .taskInput:
-            taskInputDraft = sharedEditor.stringValue
-            refreshVisibleModel(for: rowID)
+            let updatedText = sharedEditor.stringValue
+            if updatedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                convertItemToDraft(item, newText: updatedText)
+            } else {
+                store.updateText(for: item.id, to: updatedText)
+                refreshVisibleModel(for: rowID)
+            }
+        case .taskDraft:
+            taskDraft.text = sharedEditor.stringValue
+            if !taskDraft.trimmedText.isEmpty {
+                _ = promoteDraftToItem(selectInsertedItem: true)
+            } else {
+                refreshVisibleModel(for: rowID)
+            }
         case .archiveItem, .filler, .none:
             break
         }
@@ -830,6 +970,18 @@ public final class TodoViewController: NSViewController, NSPopoverDelegate, NSTe
         case #selector(NSResponder.insertBacktab(_:)):
             moveUp()
             return true
+        case #selector(NSResponder.cancelOperation(_:)):
+            if currentTab == .tasks, selectedRowID == .taskDraft, taskDraft.isEmpty, !draftIsAtDefaultPosition {
+                _ = collapseSelectedDraftForNavigation(step: -1)
+                return true
+            }
+            return false
+        case #selector(NSResponder.deleteBackward(_:)):
+            if currentTab == .tasks, sharedEditor.stringValue.isEmpty, selectedRowID == .taskDraft, !draftIsAtDefaultPosition {
+                _ = collapseSelectedDraftForNavigation(step: -1)
+                return true
+            }
+            return false
         default:
             return false
         }
@@ -839,6 +991,9 @@ public final class TodoViewController: NSViewController, NSPopoverDelegate, NSTe
 extension TodoViewController: TodoListViewDelegate {
     fileprivate func listView(_ listView: TodoListView, didActivateRow rowID: TodoRowID) {
         activateRow(rowID, placeCaretAtEnd: true)
+        if currentTab == .tasks, rowID != .taskDraft {
+            normalizeDraftBeforeStructuralAction()
+        }
     }
 
     fileprivate func listView(_ listView: TodoListView, didActivateCheckboxFor rowID: TodoRowID) {
@@ -888,7 +1043,7 @@ fileprivate final class TodoListView: NSView {
         let itemID: UUID
         let snapshotView: NSImageView
         let pointerOffset: CGFloat
-        var currentTaskIndex: Int
+        var currentTaskOrdinal: Int
     }
 
     private enum InteractionState {
@@ -1150,7 +1305,7 @@ fileprivate final class TodoListView: NSView {
     private func beginDrag(from press: PressState, itemID: UUID, pointerLocation: CGPoint) {
         guard let rowView = rowViews[press.rowID],
               let snapshotView = makeSnapshot(for: rowView),
-              let taskIndex = taskIndex(for: press.rowID) else {
+              let taskOrdinal = taskOrdinal(for: press.rowID) else {
             interactionState = .idle
             return
         }
@@ -1168,7 +1323,7 @@ fileprivate final class TodoListView: NSView {
             itemID: itemID,
             snapshotView: snapshotView,
             pointerOffset: pointerLocation.y - rowFrame.origin.y,
-            currentTaskIndex: taskIndex
+            currentTaskOrdinal: taskOrdinal
         )
         interactionState = .dragging(drag)
         refreshRowVisualState(excluding: press.rowID)
@@ -1184,22 +1339,28 @@ fileprivate final class TodoListView: NSView {
         let overlapThreshold = CGFloat(preferences.rowHeight) * InteractionMetrics.dragSwapCoverageFactor
         var didReorder = false
 
-        while drag.currentTaskIndex > 0 {
-            let currentSlotMinY = frameForRow(at: drag.currentTaskIndex).minY
-            if drag.snapshotView.frame.minY < currentSlotMinY - overlapThreshold {
-                displayOrder.swapAt(drag.currentTaskIndex, drag.currentTaskIndex - 1)
-                drag.currentTaskIndex -= 1
+        while drag.currentTaskOrdinal > 0 {
+            let taskIDs = taskRowIDsInDisplayOrder()
+            let previousTaskID = taskIDs[drag.currentTaskOrdinal - 1]
+            guard let previousFrame = frameForRow(withID: previousTaskID) else { break }
+
+            if drag.snapshotView.frame.minY < previousFrame.minY + overlapThreshold {
+                swapTaskRows(at: drag.currentTaskOrdinal, and: drag.currentTaskOrdinal - 1)
+                drag.currentTaskOrdinal -= 1
                 didReorder = true
             } else {
                 break
             }
         }
 
-        while drag.currentTaskIndex < max(draggableTaskCount - 1, 0) {
-            let currentSlotMinY = frameForRow(at: drag.currentTaskIndex).minY
-            if drag.snapshotView.frame.minY > currentSlotMinY + overlapThreshold {
-                displayOrder.swapAt(drag.currentTaskIndex, drag.currentTaskIndex + 1)
-                drag.currentTaskIndex += 1
+        while drag.currentTaskOrdinal < max(taskRowIDsInDisplayOrder().count - 1, 0) {
+            let taskIDs = taskRowIDsInDisplayOrder()
+            let nextTaskID = taskIDs[drag.currentTaskOrdinal + 1]
+            guard let nextFrame = frameForRow(withID: nextTaskID) else { break }
+
+            if drag.snapshotView.frame.maxY > nextFrame.maxY - overlapThreshold {
+                swapTaskRows(at: drag.currentTaskOrdinal, and: drag.currentTaskOrdinal + 1)
+                drag.currentTaskOrdinal += 1
                 didReorder = true
             } else {
                 break
@@ -1214,7 +1375,7 @@ fileprivate final class TodoListView: NSView {
     private func finishDragSession(_ drag: DragSession) {
         interactionState = .settling
         refreshRowVisualState(excluding: drag.rowID)
-        let targetFrame = frameForRow(at: drag.currentTaskIndex)
+        let targetFrame = frameForRow(withID: drag.rowID) ?? drag.snapshotView.frame
         animateDropSettle(
             drag.snapshotView,
             to: targetFrame,
@@ -1420,18 +1581,29 @@ fileprivate final class TodoListView: NSView {
         return nil
     }
 
-    private var draggableTaskCount: Int {
-        displayOrder.reduce(into: 0) { count, rowID in
+    private func taskRowIDsInDisplayOrder() -> [TodoRowID] {
+        displayOrder.filter { rowID in
             if case .taskItem = rowModelsByID[rowID]?.kind {
-                count += 1
+                return true
             }
+            return false
         }
     }
 
-    private func taskIndex(for rowID: TodoRowID) -> Int? {
+    private func taskOrdinal(for rowID: TodoRowID) -> Int? {
         guard case .taskItem = rowModelsByID[rowID]?.kind else { return nil }
-        guard let index = displayOrder.firstIndex(of: rowID), index < draggableTaskCount else { return nil }
-        return index
+        return taskRowIDsInDisplayOrder().firstIndex(of: rowID)
+    }
+
+    private func swapTaskRows(at lhsOrdinal: Int, and rhsOrdinal: Int) {
+        let taskIDs = taskRowIDsInDisplayOrder()
+        guard taskIDs.indices.contains(lhsOrdinal),
+              taskIDs.indices.contains(rhsOrdinal),
+              let lhsDisplayIndex = displayOrder.firstIndex(of: taskIDs[lhsOrdinal]),
+              let rhsDisplayIndex = displayOrder.firstIndex(of: taskIDs[rhsOrdinal]) else {
+            return
+        }
+        displayOrder.swapAt(lhsDisplayIndex, rhsDisplayIndex)
     }
 
     private func currentOrderedTaskItemIDs() -> [UUID] {
@@ -1455,6 +1627,11 @@ fileprivate final class TodoListView: NSView {
             width: bounds.width,
             height: CGFloat(preferences.rowHeight)
         )
+    }
+
+    private func frameForRow(withID rowID: TodoRowID) -> CGRect? {
+        guard let index = displayOrder.firstIndex(of: rowID) else { return nil }
+        return frameForRow(at: index)
     }
 }
 
