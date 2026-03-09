@@ -67,6 +67,19 @@ final class TodoStoreTests: XCTestCase {
         XCTAssertEqual(store.items.map(\.text), ["Start", "A", "B", "C"])
     }
 
+    func testInitPrunesWhitespaceOnlyPersistedItems() throws {
+        let storedItems = [TodoItem(text: "Keep"), TodoItem(text: "   ")]
+        let storedArchivedItems = [TodoItem(text: "\n\t"), TodoItem(text: "Archived")]
+        let encoder = JSONEncoder()
+        UserDefaults.standard.set(try encoder.encode(storedItems), forKey: "floatydo.items")
+        UserDefaults.standard.set(try encoder.encode(storedArchivedItems), forKey: "floatydo.archived")
+
+        let store = TodoStore()
+
+        XCTAssertEqual(store.items.map(\.text), ["Keep"])
+        XCTAssertEqual(store.archivedItems.map(\.text), ["Archived"])
+    }
+
     // MARK: - Archive
 
     func testArchiveMovesItemFromItemsToArchived() {

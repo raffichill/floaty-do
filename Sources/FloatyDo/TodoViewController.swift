@@ -339,6 +339,10 @@ public final class TodoViewController: NSViewController, NSPopoverDelegate, NSTe
             return false
         }
 
+        if step < 0, taskDraft.insertionIndex == 0 {
+            return false
+        }
+
         let destinationRowID = step < 0
             ? rowID(beforeRemovingDraftAt: taskDraft.insertionIndex)
             : rowID(afterRemovingDraftAt: taskDraft.insertionIndex)
@@ -935,13 +939,18 @@ public final class TodoViewController: NSViewController, NSPopoverDelegate, NSTe
         case .taskItem(let item):
             let updatedText = sharedEditor.stringValue
             if updatedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                convertItemToDraft(item, newText: updatedText)
+                convertItemToDraft(item, newText: "")
             } else {
                 store.updateText(for: item.id, to: updatedText)
                 refreshVisibleModel(for: rowID)
             }
         case .taskDraft:
-            taskDraft.text = sharedEditor.stringValue
+            let updatedText = sharedEditor.stringValue
+            let normalizedText = updatedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "" : updatedText
+            if normalizedText != updatedText {
+                resetHiddenEditorText(to: normalizedText)
+            }
+            taskDraft.text = normalizedText
             if !taskDraft.trimmedText.isEmpty {
                 _ = promoteDraftToItem(selectInsertedItem: true)
             } else {

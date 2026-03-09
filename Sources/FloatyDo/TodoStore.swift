@@ -39,6 +39,7 @@ public final class TodoStore: ObservableObject {
         loadArchive()
         loadPreferences()
         migrateCompletedItems()
+        pruneWhitespaceOnlyItems()
     }
 
     public func add(_ text: String) {
@@ -145,6 +146,11 @@ public final class TodoStore: ObservableObject {
         guard !completed.isEmpty else { return }
         items.removeAll { $0.isDone }
         archivedItems.insert(contentsOf: completed, at: 0)
+    }
+
+    private func pruneWhitespaceOnlyItems() {
+        items.removeAll { $0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        archivedItems.removeAll { $0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     }
 
     private func save() {
