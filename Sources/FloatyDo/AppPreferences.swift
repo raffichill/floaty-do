@@ -87,13 +87,16 @@ enum LayoutMetrics {
     static let maxRowHeight: Double = 48
     static let rowHorizontalInset: Double = 12
     static let textInset: Double = 8
-    static let rowBackgroundInset: Double = 6
+    static let rowBackgroundInset: Double = 10
     static let rowVerticalInset: Double = 2
     static let rowCornerRadius: Double = 10
     static let circleSize: Double = 18
     static let circleHitSize: Double = 24
     static let dragHandleSize: Double = 16
-    static let titlebarTrailingInset: Double = 12
+    static let titlebarTrailingInset: Double = 18
+    static let contentTopPadding: Double = 4
+    static let trafficLightTopInset: Double = 14
+    static let trafficLightSpacing: Double = 6
     static let dividerHeight: Double = 0.5
     static let contentBottomPadding: Double = 16.5
 }
