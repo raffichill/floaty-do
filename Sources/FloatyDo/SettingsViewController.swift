@@ -91,8 +91,9 @@ final class SettingsViewController: NSViewController {
             divider.trailingAnchor.constraint(equalTo: root.trailingAnchor),
 
             contentStack.topAnchor.constraint(equalTo: divider.bottomAnchor, constant: 24),
-            contentStack.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 48),
-            contentStack.trailingAnchor.constraint(lessThanOrEqualTo: root.trailingAnchor, constant: -48),
+            contentStack.centerXAnchor.constraint(equalTo: root.centerXAnchor),
+            contentStack.leadingAnchor.constraint(greaterThanOrEqualTo: root.leadingAnchor, constant: 24),
+            contentStack.trailingAnchor.constraint(lessThanOrEqualTo: root.trailingAnchor, constant: -24),
             contentStack.bottomAnchor.constraint(lessThanOrEqualTo: root.bottomAnchor, constant: -28),
         ])
 

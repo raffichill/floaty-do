@@ -309,6 +309,18 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
             return
         }
 
+        openSettingsWindow()
+    }
+
+    func closeSettingsWindowIfVisible() -> Bool {
+        guard let window = settingsWindowController?.window, window.isVisible else {
+            return false
+        }
+        window.close()
+        return true
+    }
+
+    func openSettingsWindow() {
         let controller = settingsWindowController ?? SettingsWindowController(preferences: store.preferences)
         controller.onPreferencesChange = { [weak self] preferences in
             self?.store.updatePreferences(preferences)

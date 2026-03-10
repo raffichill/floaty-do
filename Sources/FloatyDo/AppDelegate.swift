@@ -61,10 +61,15 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
             debugLog("status item button missing")
         }
 
-        // App-level shortcuts: cmd+Q to quit, cmd+W to hide panel
+        // App-level shortcuts: cmd+Q to quit, cmd+W to hide panel, cmd+, for theme
         appEventMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self else { return event }
             let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+
+            if mods.isEmpty, event.keyCode == 53, self.todoVC.closeSettingsWindowIfVisible() {
+                return nil
+            }
+
             guard mods == .command else { return event }
 
             if event.charactersIgnoringModifiers == "q" {
@@ -72,7 +77,14 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
                 return nil
             }
             if event.charactersIgnoringModifiers == "w" {
+                if self.todoVC.closeSettingsWindowIfVisible() {
+                    return nil
+                }
                 self.panel.orderOut(nil)
+                return nil
+            }
+            if event.charactersIgnoringModifiers == "," {
+                self.todoVC.openSettingsWindow()
                 return nil
             }
             switch event.keyCode {
