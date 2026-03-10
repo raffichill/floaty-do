@@ -29,7 +29,7 @@ public final class FloatingPanel: NSPanel {
         // Unified dark background — title bar blends with content
         appearance = NSAppearance(named: .darkAqua)
         isOpaque = false
-        backgroundColor = NSColor(red: 0.08, green: 0.08, blue: 0.12, alpha: 1.0)
+        backgroundColor = AppPreferences.default.panelBackgroundColor
         hasShadow = true
 
         // Configure custom field editor
@@ -66,6 +66,13 @@ public final class FloatingPanel: NSPanel {
             return customFieldEditor
         }
         return super.fieldEditor(createFlag, for: object)
+    }
+
+    public func applyTheme(preferences: AppPreferences) {
+        appearance = NSAppearance(named: preferences.usesLightText ? .darkAqua : .aqua)
+        backgroundColor = preferences.panelBackgroundColor
+        invalidateShadow()
+        contentView?.needsDisplay = true
     }
 
     private func applyWindowChromeLayout() {

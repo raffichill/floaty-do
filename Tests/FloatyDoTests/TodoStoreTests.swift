@@ -516,6 +516,26 @@ final class TodoStoreTests: XCTestCase {
         XCTAssertEqual(store2.preferences, updatedPreferences)
     }
 
+    func testPreferencesClampToDiscreteFontSizeAndVisibleRowRadius() {
+        let store = TodoStore()
+        let updatedPreferences = AppPreferences(
+            rowHeight: 36,
+            panelWidth: 400,
+            hoverHighlightsEnabled: true,
+            animationPreset: .balanced,
+            snapPadding: 40,
+            themeColor: .default,
+            fontStyle: .system,
+            fontSize: 13.6,
+            cornerRadius: 99
+        )
+
+        store.updatePreferences(updatedPreferences)
+
+        XCTAssertEqual(store.preferences.fontSize, 14)
+        XCTAssertEqual(store.preferences.cornerRadius, 16)
+    }
+
     func testLegacyPreferencesDecodeUsesNewFieldDefaults() throws {
         let legacyPreferences: [String: Any] = [
             "rowHeight": 42.0,
@@ -536,7 +556,7 @@ final class TodoStoreTests: XCTestCase {
         XCTAssertEqual(store.preferences.snapPadding, 18.0)
         XCTAssertEqual(store.preferences.themeColor, .default)
         XCTAssertEqual(store.preferences.fontStyle, .system)
-        XCTAssertEqual(store.preferences.fontSize, 13.0)
+        XCTAssertEqual(store.preferences.fontSize, 14.0)
         XCTAssertEqual(store.preferences.cornerRadius, 10.0)
     }
 }

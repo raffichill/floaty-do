@@ -46,7 +46,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
     private var currentTab: Tab = .tasks
     private var tasksTabButton: NSButton!
     private var archiveTabButton: NSButton!
-    private var settingsButton: NSButton!
+    private var settingsButton: HoverTrackingButton!
     private var settingsWindowController: SettingsWindowController?
     private var isAnimating = false
 
@@ -97,7 +97,10 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
 
         tasksTabButton = makeTabButton(symbolName: "checklist.unchecked", action: #selector(switchToTasks))
         archiveTabButton = makeTabButton(symbolName: "archivebox", action: #selector(switchToArchive))
-        settingsButton = makeTabButton(symbolName: "gearshape", action: #selector(toggleSettings(_:)))
+        settingsButton = makeHoverTabButton(symbolName: "paintpalette", action: #selector(toggleSettings(_:)))
+        settingsButton.onHoverChange = { [weak self] _ in
+            self?.updateTabAppearance()
+        }
 
         let tabBar = NSStackView(views: [tasksTabButton, archiveTabButton, settingsButton])
         tabBar.orientation = .horizontal
@@ -205,6 +208,9 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
     public override func viewDidAppear() {
         super.viewDidAppear()
         view.window?.acceptsMouseMovedEvents = true
+        if let panel = view.window as? FloatingPanel {
+            panel.applyTheme(preferences: store.preferences)
+        }
         refreshRows(resize: false, animateResize: false, placeCaretAtEnd: false)
         resizeWindow(animate: false)
     }
@@ -242,6 +248,9 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
     private func preferencesDidChange() {
         sharedEditor.font = store.preferences.appFont()
         settingsWindowController?.updatePreferences(store.preferences)
+        if let panel = view.window as? FloatingPanel {
+            panel.applyTheme(preferences: store.preferences)
+        }
         updateTabAppearance()
         refreshRows(animateResize: false)
     }
@@ -257,10 +266,23 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         return button
     }
 
+    private func makeHoverTabButton(symbolName: String, action: Selector) -> HoverTrackingButton {
+        let image = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)!
+        let config = NSImage.SymbolConfiguration(pointSize: 13, weight: .medium)
+        let button = HoverTrackingButton(image: image.withSymbolConfiguration(config)!, target: self, action: action)
+        button.isBordered = false
+        button.imagePosition = .imageOnly
+        button.translatesAutoresizingMaskIntoConstraints = false
+        button.widthAnchor.constraint(equalToConstant: 36).isActive = true
+        return button
+    }
+
     private func updateTabAppearance() {
-        tasksTabButton.contentTintColor = currentTab == .tasks ? .white : .white.withAlphaComponent(0.35)
-        archiveTabButton.contentTintColor = currentTab == .archive ? .white : .white.withAlphaComponent(0.35)
-        settingsButton.contentTintColor = settingsWindowController?.window?.isVisible == true ? .white : .white.withAlphaComponent(0.55)
+        let primary = store.preferences.primaryTextColor
+        tasksTabButton.contentTintColor = currentTab == .tasks ? primary : primary.withAlphaComponent(0.35)
+        archiveTabButton.contentTintColor = currentTab == .archive ? primary : primary.withAlphaComponent(0.35)
+        let settingsIsEmphasized = settingsWindowController?.window?.isVisible == true || settingsButton.isHovered
+        settingsButton.contentTintColor = settingsIsEmphasized ? primary : primary.withAlphaComponent(0.42)
     }
 
     @objc private func switchToTasks() {
@@ -1932,7 +1954,7 @@ fileprivate final class TodoRowView: NSView {
             path.move(to: CGPoint(x: textLabel.frame.minX, y: midY))
             path.addLine(to: CGPoint(x: textLabel.frame.minX + textWidth, y: midY))
             strikeLayer.path = path
-            strikeLayer.strokeColor = NSColor.white.withAlphaComponent(0.5).cgColor
+            strikeLayer.strokeColor = preferences.strikethroughColor.cgColor
             strikeLayer.lineWidth = 1.0
             strikeLayer.strokeEnd = 0.0
             layer?.addSublayer(strikeLayer)
@@ -1986,7 +2008,7 @@ fileprivate final class TodoRowView: NSView {
             let config = NSImage.SymbolConfiguration(pointSize: 14, weight: .regular)
             let checkImage = NSImage(systemSymbolName: "checkmark.circle.fill", accessibilityDescription: nil)!
             self.circleView.image = checkImage.withSymbolConfiguration(config)
-            self.circleView.contentTintColor = .white
+            self.circleView.contentTintColor = self.preferences.primaryTextColor
 
             circleLayer.removeAnimation(forKey: "shrinkOut")
             centerAnchor()
@@ -2018,6 +2040,7 @@ fileprivate final class TodoRowView: NSView {
 
     private func updateAppearance() {
         let activeFillColor = preferences.activeFillColor
+        let baseTextColor = preferences.primaryTextColor
         let circleAlpha = isRowSelected && model.isSelectable
             ? max(CGFloat(model.circleOpacity), model.isDone ? CGFloat(model.textOpacity) : 0.86)
             : CGFloat(model.circleOpacity)
@@ -2032,7 +2055,7 @@ fileprivate final class TodoRowView: NSView {
         shouldAnimateNextSelectionFill = false
         if isDraggingRow {
             backgroundColor = NSColor.clear.cgColor
-            borderColor = NSColor.white.withAlphaComponent(0.15).cgColor
+            borderColor = preferences.subtleStrokeColor.cgColor
             borderWidth = 1.0
         } else if model.isSelectable && isRowSelected {
             backgroundColor = activeFillColor.cgColor
@@ -2050,9 +2073,11 @@ fileprivate final class TodoRowView: NSView {
             borderWidth: borderWidth,
             animate: animateSelectionFill
         )
-        circleView.contentTintColor = NSColor.white.withAlphaComponent(circleAlpha)
+        circleView.contentTintColor = baseTextColor.withAlphaComponent(circleAlpha)
         textLabel.attributedStringValue = attributedText(alpha: textAlpha)
-        editingTextView.textColor = NSColor.white.withAlphaComponent(textAlpha)
+        editingTextView.textColor = baseTextColor.withAlphaComponent(textAlpha)
+        editingTextView.selectionColor = preferences.selectionOverlayColor
+        editingTextView.caretColor = preferences.caretColor
         let showsEditorHost = isEditingRow && model.isEditable
         if showsEditorHost {
             editingTextView.text = model.text
@@ -2128,7 +2153,7 @@ fileprivate final class TodoRowView: NSView {
 
     private func attributedText(alpha: CGFloat) -> NSAttributedString {
         let attributes: [NSAttributedString.Key: Any] = [
-            .foregroundColor: NSColor.white.withAlphaComponent(alpha),
+            .foregroundColor: preferences.primaryTextColor.withAlphaComponent(alpha),
             .font: preferences.appFont(),
             .strikethroughStyle: model.showsStrikethrough ? NSUnderlineStyle.single.rawValue : 0,
         ]
@@ -2224,6 +2249,14 @@ private final class EditingTextDisplayView: NSView {
         }
     }
 
+    var selectionColor: NSColor = NSColor.white.withAlphaComponent(0.18) {
+        didSet { needsDisplay = true }
+    }
+
+    var caretColor: NSColor = NSColor.white.withAlphaComponent(0.95) {
+        didSet { needsDisplay = true }
+    }
+
     private var horizontalOffset: CGFloat = 0
 
     override var mouseDownCanMoveWindow: Bool { false }
@@ -2281,7 +2314,7 @@ private final class EditingTextDisplayView: NSView {
             let highlightWidth = min(contentRect.maxX, endX) - highlightX
             if highlightWidth > 0 {
                 let highlightRect = NSRect(x: highlightX, y: contentRect.minY, width: highlightWidth, height: contentRect.height)
-                NSColor.white.withAlphaComponent(0.18).setFill()
+                selectionColor.setFill()
                 NSBezierPath(roundedRect: highlightRect, xRadius: 4, yRadius: 4).fill()
             }
         }
@@ -2299,7 +2332,7 @@ private final class EditingTextDisplayView: NSView {
             let caretX = contentRect.minX + width(toUTF16Index: clampedLocation) - horizontalOffset
             if caretX >= contentRect.minX - 1 && caretX <= contentRect.maxX + 1 {
                 let caretRect = NSRect(x: floor(caretX), y: contentRect.minY, width: 1.5, height: contentRect.height)
-                NSColor.white.withAlphaComponent(0.95).setFill()
+                caretColor.setFill()
                 NSBezierPath(rect: caretRect).fill()
             }
         }
@@ -2378,6 +2411,46 @@ private final class KeyboardOnlyTextField: NSTextField {
     override func mouseDown(with event: NSEvent) {}
     override func mouseDragged(with event: NSEvent) {}
     override func mouseUp(with event: NSEvent) {}
+}
+
+final class HoverTrackingButton: NSButton {
+    var onHoverChange: ((Bool) -> Void)?
+
+    private(set) var isHovered = false {
+        didSet {
+            guard oldValue != isHovered else { return }
+            onHoverChange?(isHovered)
+        }
+    }
+
+    private var hoverTrackingArea: NSTrackingArea?
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+
+        if let hoverTrackingArea {
+            removeTrackingArea(hoverTrackingArea)
+        }
+
+        let trackingArea = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(trackingArea)
+        hoverTrackingArea = trackingArea
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        super.mouseEntered(with: event)
+        isHovered = true
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        super.mouseExited(with: event)
+        isHovered = false
+    }
 }
 
 public final class CaretEndFieldEditor: NSTextView {

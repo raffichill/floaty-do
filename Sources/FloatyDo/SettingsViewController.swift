@@ -1,77 +1,53 @@
 import AppKit
 
-final class SettingsViewController: NSTabViewController {
+final class SettingsViewController: NSViewController {
+    private enum Metrics {
+        static let labelWidth: CGFloat = 112
+        static let controlWidth: CGFloat = 360
+        static let rowHeight: CGFloat = 58
+        static let rowSpacing: CGFloat = 2
+        static let sliderGroupWidth: CGFloat = 200
+        static let sliderWidth: CGFloat = 148
+        static let popupWidth: CGFloat = 200
+        static let valueWidth: CGFloat = 44
+        static let sliderValueSpacing: CGFloat = 8
+    }
+
+    private struct ThemePreset {
+        let hex: String
+
+        var color: ThemeColor {
+            ThemeColor(hex: hex)
+        }
+    }
+
+    private static let themePresets: [ThemePreset] = [
+        ThemePreset(hex: "#14141F"),
+        ThemePreset(hex: "#1B2130"),
+        ThemePreset(hex: "#1F2724"),
+        ThemePreset(hex: "#2A1E28"),
+        ThemePreset(hex: "#E6E0D6"),
+    ]
+
     var onPreferencesChange: ((AppPreferences) -> Void)?
 
     private var preferences: AppPreferences
+    private var isUpdatingControls = false
 
-    private lazy var themePane = ThemeSettingsPaneViewController(preferences: preferences)
-    private lazy var fontPane = FontSettingsPaneViewController(preferences: preferences)
-    private lazy var shapePane = ShapeSettingsPaneViewController(preferences: preferences)
+    private let titleLabel = NSTextField(labelWithString: "Theme")
+    private let divider = NSBox()
 
-    init(preferences: AppPreferences) {
-        self.preferences = preferences
-        super.init(nibName: nil, bundle: nil)
-    }
+    private let resetThemeButton = NSButton(title: "Reset", target: nil, action: nil)
+    private var themeButtons: [ThemePresetButton] = []
+    private let fontPopup = NSPopUpButton()
+    private let resetFontButton = NSButton(title: "Reset", target: nil, action: nil)
+    private let fontSizeSlider = NSSlider()
+    private let fontSizeDetailLabel = NSTextField(labelWithString: "")
+    private let resetFontSizeButton = NSButton(title: "Reset", target: nil, action: nil)
+    private let borderRadiusSlider = NSSlider()
+    private let borderRadiusValueLabel = NSTextField(labelWithString: "")
+    private let resetRadiusButton = NSButton(title: "Reset", target: nil, action: nil)
 
-    @available(*, unavailable)
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
-
-    override func viewDidLoad() {
-        super.viewDidLoad()
-
-        tabStyle = .toolbar
-        transitionOptions = []
-        preferredContentSize = NSSize(width: 820, height: 560)
-
-        configurePanes()
-        addTabViewItem(makeTabItem(for: themePane, label: "Theme", symbolName: "paintpalette"))
-        addTabViewItem(makeTabItem(for: fontPane, label: "Font", symbolName: "textformat.size"))
-        addTabViewItem(makeTabItem(for: shapePane, label: "Shape", symbolName: "square.on.square"))
-    }
-
-    func updatePreferences(_ preferences: AppPreferences) {
-        self.preferences = preferences
-        guard isViewLoaded else { return }
-        themePane.updatePreferences(preferences)
-        fontPane.updatePreferences(preferences)
-        shapePane.updatePreferences(preferences)
-    }
-
-    private func configurePanes() {
-        let panes: [SettingsPaneViewController] = [themePane, fontPane, shapePane]
-        panes.forEach { pane in
-            pane.onPreferencesChange = { [weak self] updatedPreferences in
-                self?.handlePreferencesChange(updatedPreferences)
-            }
-        }
-
-    }
-
-    private func handlePreferencesChange(_ preferences: AppPreferences) {
-        self.preferences = preferences
-        updatePreferences(preferences)
-        onPreferencesChange?(preferences)
-    }
-
-    private func makeTabItem(for viewController: NSViewController, label: String, symbolName: String) -> NSTabViewItem {
-        let item = NSTabViewItem(viewController: viewController)
-        item.label = label
-        if let image = NSImage(systemSymbolName: symbolName, accessibilityDescription: label) {
-            image.isTemplate = true
-            item.image = image
-        }
-        return item
-    }
-}
-
-private class SettingsPaneViewController: NSViewController {
-    var onPreferencesChange: ((AppPreferences) -> Void)?
-
-    private(set) var preferences: AppPreferences
-    private let previewCardView = SettingsPreviewCardView()
     private let contentStack = NSStackView()
 
     init(preferences: AppPreferences) {
@@ -89,54 +65,35 @@ private class SettingsPaneViewController: NSViewController {
         root.wantsLayer = true
         root.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
 
-        let content = NSStackView()
-        content.orientation = .horizontal
-        content.alignment = .top
-        content.spacing = 28
-        content.translatesAutoresizingMaskIntoConstraints = false
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+        titleLabel.font = .systemFont(ofSize: 13, weight: .semibold)
+        titleLabel.textColor = .labelColor
+        titleLabel.alignment = .center
 
-        let previewSection = NSStackView()
-        previewSection.orientation = .vertical
-        previewSection.alignment = .leading
-        previewSection.spacing = 14
-        previewSection.translatesAutoresizingMaskIntoConstraints = false
-
-        let previewLabel = NSTextField(labelWithString: "Live Preview")
-        previewLabel.font = .systemFont(ofSize: 12, weight: .semibold)
-        previewLabel.textColor = .secondaryLabelColor
-        previewSection.addArrangedSubview(previewLabel)
-
-        previewCardView.translatesAutoresizingMaskIntoConstraints = false
-        previewSection.addArrangedSubview(previewCardView)
-        previewCardView.widthAnchor.constraint(equalToConstant: 280).isActive = true
-        previewCardView.heightAnchor.constraint(equalToConstant: 360).isActive = true
+        divider.boxType = .separator
+        divider.translatesAutoresizingMaskIntoConstraints = false
 
         contentStack.orientation = .vertical
         contentStack.alignment = .leading
-        contentStack.spacing = 18
+        contentStack.spacing = Metrics.rowSpacing
         contentStack.translatesAutoresizingMaskIntoConstraints = false
 
-        let controlsSection = NSView()
-        controlsSection.translatesAutoresizingMaskIntoConstraints = false
-        controlsSection.addSubview(contentStack)
+        root.addSubview(titleLabel)
+        root.addSubview(divider)
+        root.addSubview(contentStack)
 
         NSLayoutConstraint.activate([
-            contentStack.topAnchor.constraint(equalTo: controlsSection.topAnchor),
-            contentStack.leadingAnchor.constraint(equalTo: controlsSection.leadingAnchor),
-            contentStack.trailingAnchor.constraint(equalTo: controlsSection.trailingAnchor),
-            contentStack.bottomAnchor.constraint(lessThanOrEqualTo: controlsSection.bottomAnchor),
-            controlsSection.widthAnchor.constraint(greaterThanOrEqualToConstant: 380),
-        ])
+            titleLabel.topAnchor.constraint(equalTo: root.topAnchor, constant: 14),
+            titleLabel.centerXAnchor.constraint(equalTo: root.centerXAnchor),
 
-        content.addArrangedSubview(previewSection)
-        content.addArrangedSubview(controlsSection)
-        root.addSubview(content)
+            divider.topAnchor.constraint(equalTo: root.topAnchor, constant: 45),
+            divider.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            divider.trailingAnchor.constraint(equalTo: root.trailingAnchor),
 
-        NSLayoutConstraint.activate([
-            content.topAnchor.constraint(equalTo: root.topAnchor, constant: 30),
-            content.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 30),
-            content.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -30),
-            content.bottomAnchor.constraint(lessThanOrEqualTo: root.bottomAnchor, constant: -30),
+            contentStack.topAnchor.constraint(equalTo: divider.bottomAnchor, constant: 24),
+            contentStack.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 48),
+            contentStack.trailingAnchor.constraint(lessThanOrEqualTo: root.trailingAnchor, constant: -48),
+            contentStack.bottomAnchor.constraint(lessThanOrEqualTo: root.bottomAnchor, constant: -28),
         ])
 
         self.view = root
@@ -144,479 +101,346 @@ private class SettingsPaneViewController: NSViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        buildControls(into: contentStack)
+        buildControls()
         applyPreferencesToControls()
-        previewCardView.update(preferences: preferences)
     }
 
     func updatePreferences(_ preferences: AppPreferences) {
         self.preferences = preferences
         guard isViewLoaded else { return }
         applyPreferencesToControls()
-        previewCardView.update(preferences: preferences)
     }
 
-    func buildControls(into stack: NSStackView) {
-        fatalError("Subclasses must implement buildControls(into:)")
-    }
-
-    func applyPreferencesToControls() {
-        fatalError("Subclasses must implement applyPreferencesToControls()")
-    }
-
-    func updatePreferences(mutating mutation: (inout AppPreferences) -> Void) {
-        var updated = preferences
-        mutation(&updated)
-        preferences = updated
-        previewCardView.update(preferences: updated)
-        onPreferencesChange?(updated)
-    }
-
-    func makeCard(title: String, subtitle: String? = nil, content: NSView) -> NSView {
-        let card = NSView()
-        card.wantsLayer = true
-        card.translatesAutoresizingMaskIntoConstraints = false
-        card.layer?.cornerRadius = 18
-        card.layer?.backgroundColor = NSColor(
-            red: 0.965,
-            green: 0.969,
-            blue: 0.978,
-            alpha: 1.0
-        ).cgColor
-        card.layer?.borderWidth = 1
-        card.layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.55).cgColor
-
-        let stack = NSStackView()
-        stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.spacing = 10
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        card.addSubview(stack)
-
-        let titleLabel = NSTextField(labelWithString: title)
-        titleLabel.font = .systemFont(ofSize: 15, weight: .semibold)
-        titleLabel.textColor = .labelColor
-        stack.addArrangedSubview(titleLabel)
-
-        if let subtitle {
-            let subtitleLabel = NSTextField(wrappingLabelWithString: subtitle)
-            subtitleLabel.font = .systemFont(ofSize: 12)
-            subtitleLabel.textColor = .secondaryLabelColor
-            stack.addArrangedSubview(subtitleLabel)
+    private func buildControls() {
+        contentStack.arrangedSubviews.forEach { subview in
+            contentStack.removeArrangedSubview(subview)
+            subview.removeFromSuperview()
         }
 
-        stack.addArrangedSubview(content)
+        configureThemeButtons()
+        configureFontPopup()
+        configureFontSizeSlider()
+        configureBorderRadiusSlider()
 
-        NSLayoutConstraint.activate([
-            stack.topAnchor.constraint(equalTo: card.topAnchor, constant: 18),
-            stack.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 18),
-            stack.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -18),
-            stack.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -18),
-            card.widthAnchor.constraint(equalToConstant: 420),
-        ])
-
-        return card
+        contentStack.addArrangedSubview(makeFormRow(title: "Background", control: makeThemeControl()))
+        contentStack.addArrangedSubview(makeFormRow(title: "Font", control: makeFontControl()))
+        contentStack.addArrangedSubview(makeFormRow(title: "Font Size", control: makeFontSizeControl()))
+        contentStack.addArrangedSubview(makeFormRow(title: "Radius", control: makeBorderRadiusControl()))
     }
 
-    func makeSliderRow(
-        title: String,
-        minValue: Double,
-        maxValue: Double,
-        target: AnyObject,
-        action: Selector
-    ) -> (view: NSView, slider: NSSlider, valueLabel: NSTextField) {
-        let container = NSStackView()
-        container.orientation = .vertical
-        container.alignment = .leading
-        container.spacing = 8
-        container.translatesAutoresizingMaskIntoConstraints = false
-
-        let header = NSStackView()
-        header.orientation = .horizontal
-        header.alignment = .centerY
-        header.translatesAutoresizingMaskIntoConstraints = false
-
-        let titleLabel = NSTextField(labelWithString: title)
-        titleLabel.font = .systemFont(ofSize: 13, weight: .medium)
-        titleLabel.textColor = .labelColor
-
-        let valueLabel = NSTextField(labelWithString: "")
-        valueLabel.font = .monospacedDigitSystemFont(ofSize: 12, weight: .medium)
-        valueLabel.textColor = .secondaryLabelColor
-
-        let spacer = NSView()
-        spacer.translatesAutoresizingMaskIntoConstraints = false
-        spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
-
-        header.addArrangedSubview(titleLabel)
-        header.addArrangedSubview(spacer)
-        header.addArrangedSubview(valueLabel)
-
-        let slider = NSSlider(value: minValue, minValue: minValue, maxValue: maxValue, target: target, action: action)
-        slider.isContinuous = true
-        slider.translatesAutoresizingMaskIntoConstraints = false
-
-        container.addArrangedSubview(header)
-        container.addArrangedSubview(slider)
-        container.widthAnchor.constraint(equalToConstant: 380).isActive = true
-
-        return (container, slider, valueLabel)
-    }
-
-    func makeLabeledPopup(
-        title: String,
-        items: [String],
-        target: AnyObject,
-        action: Selector
-    ) -> (view: NSView, popup: NSPopUpButton) {
-        let container = NSStackView()
-        container.orientation = .vertical
-        container.alignment = .leading
-        container.spacing = 8
-        container.translatesAutoresizingMaskIntoConstraints = false
-
-        let titleLabel = NSTextField(labelWithString: title)
-        titleLabel.font = .systemFont(ofSize: 13, weight: .medium)
-        titleLabel.textColor = .labelColor
-
-        let popup = NSPopUpButton()
-        popup.addItems(withTitles: items)
-        popup.target = target
-        popup.action = action
-        popup.translatesAutoresizingMaskIntoConstraints = false
-        popup.widthAnchor.constraint(equalToConstant: 220).isActive = true
-
-        container.addArrangedSubview(titleLabel)
-        container.addArrangedSubview(popup)
-
-        return (container, popup)
-    }
-}
-
-private final class ThemeSettingsPaneViewController: SettingsPaneViewController {
-    private let colorWell = NSColorWell()
-    private var motionPopup: NSPopUpButton!
-
-    override func buildControls(into stack: NSStackView) {
-        let colorContent = NSStackView()
-        colorContent.orientation = .vertical
-        colorContent.alignment = .leading
-        colorContent.spacing = 12
-        colorContent.translatesAutoresizingMaskIntoConstraints = false
-
-        let colorLabel = NSTextField(labelWithString: "Accent color")
-        colorLabel.font = .systemFont(ofSize: 13, weight: .medium)
-        colorLabel.textColor = .labelColor
-
-        colorWell.target = self
-        colorWell.action = #selector(colorChanged(_:))
-        colorWell.translatesAutoresizingMaskIntoConstraints = false
-        colorWell.widthAnchor.constraint(equalToConstant: 96).isActive = true
-        colorWell.heightAnchor.constraint(equalToConstant: 34).isActive = true
-
-        colorContent.addArrangedSubview(colorLabel)
-        colorContent.addArrangedSubview(colorWell)
-
-        let motionContent = makeLabeledPopup(
-            title: "Animation feel",
-            items: AnimationPreset.allCases.map(\.displayName),
-            target: self,
-            action: #selector(motionChanged(_:))
-        )
-        motionPopup = motionContent.popup
-
-        stack.addArrangedSubview(
-            makeCard(
-                title: "Color",
-                subtitle: "Set the active row theme color for the live app surface.",
-                content: colorContent
-            )
-        )
-        stack.addArrangedSubview(
-            makeCard(
-                title: "Motion",
-                subtitle: "Tune the overall timing preset for list motion and window movement.",
-                content: motionContent.view
-            )
-        )
-    }
-
-    override func applyPreferencesToControls() {
-        colorWell.color = preferences.themeColor.nsColor
-        motionPopup.removeAllItems()
-        motionPopup.addItems(withTitles: AnimationPreset.allCases.map(\.displayName))
-        if let index = AnimationPreset.allCases.firstIndex(of: preferences.animationPreset) {
-            motionPopup.selectItem(at: index)
+    private func configureThemeButtons() {
+        themeButtons = Self.themePresets.enumerated().map { index, preset in
+            let button = ThemePresetButton(color: preset.color.nsColor)
+            button.tag = index
+            button.target = self
+            button.action = #selector(themePresetSelected(_:))
+            return button
         }
+
+        resetThemeButton.target = self
+        resetThemeButton.action = #selector(resetThemeColor(_:))
+        resetThemeButton.bezelStyle = .rounded
+        resetThemeButton.controlSize = .small
     }
 
-    @objc private func colorChanged(_ sender: NSColorWell) {
-        updatePreferences { preferences in
-            preferences.themeColor = ThemeColor(nsColor: sender.color)
-        }
-    }
-
-    @objc private func motionChanged(_ sender: NSPopUpButton) {
-        guard sender.indexOfSelectedItem >= 0 else { return }
-        let preset = AnimationPreset.allCases[sender.indexOfSelectedItem]
-        updatePreferences { preferences in
-            preferences.animationPreset = preset
-        }
-    }
-}
-
-private final class FontSettingsPaneViewController: SettingsPaneViewController {
-    private var fontPopup: NSPopUpButton!
-    private var fontSizeSlider: NSSlider!
-    private var fontSizeValueLabel: NSTextField!
-    private var rowHeightSlider: NSSlider!
-    private var rowHeightValueLabel: NSTextField!
-
-    override func buildControls(into stack: NSStackView) {
-        let fontPicker = makeLabeledPopup(
-            title: "Font family",
-            items: FontStylePreset.allCases.map(\.displayName),
-            target: self,
-            action: #selector(fontStyleChanged(_:))
-        )
-        fontPopup = fontPicker.popup
-
-        let fontSizeRow = makeSliderRow(
-            title: "Font size",
-            minValue: LayoutMetrics.minFontSize,
-            maxValue: LayoutMetrics.maxFontSize,
-            target: self,
-            action: #selector(fontSizeChanged(_:))
-        )
-        fontSizeSlider = fontSizeRow.slider
-        fontSizeValueLabel = fontSizeRow.valueLabel
-
-        let rowHeightRow = makeSliderRow(
-            title: "Row height",
-            minValue: LayoutMetrics.minRowHeight,
-            maxValue: LayoutMetrics.maxRowHeight,
-            target: self,
-            action: #selector(rowHeightChanged(_:))
-        )
-        rowHeightSlider = rowHeightRow.slider
-        rowHeightValueLabel = rowHeightRow.valueLabel
-
-        stack.addArrangedSubview(
-            makeCard(
-                title: "Typography",
-                subtitle: "Choose the face and optical size used across tasks, drafts, and selection states.",
-                content: {
-                    let content = NSStackView(views: [fontPicker.view, fontSizeRow.view])
-                    content.orientation = .vertical
-                    content.alignment = .leading
-                    content.spacing = 14
-                    return content
-                }()
-            )
-        )
-        stack.addArrangedSubview(
-            makeCard(
-                title: "Density",
-                subtitle: "Adjust how spacious each row feels without changing the overall panel structure.",
-                content: rowHeightRow.view
-            )
-        )
-    }
-
-    override func applyPreferencesToControls() {
+    private func configureFontPopup() {
         fontPopup.removeAllItems()
         fontPopup.addItems(withTitles: FontStylePreset.allCases.map(\.displayName))
+        fontPopup.target = self
+        fontPopup.action = #selector(fontChanged(_:))
+        fontPopup.controlSize = .small
+        fontPopup.font = .systemFont(ofSize: 12)
+        fontPopup.translatesAutoresizingMaskIntoConstraints = false
+        fontPopup.widthAnchor.constraint(equalToConstant: Metrics.popupWidth).isActive = true
+
+        resetFontButton.target = self
+        resetFontButton.action = #selector(resetFont(_:))
+        resetFontButton.bezelStyle = .rounded
+        resetFontButton.controlSize = .small
+    }
+
+    private func configureFontSizeSlider() {
+        fontSizeSlider.minValue = 0
+        fontSizeSlider.maxValue = Double(LayoutMetrics.fontSizeOptions.count - 1)
+        fontSizeSlider.numberOfTickMarks = LayoutMetrics.fontSizeOptions.count
+        fontSizeSlider.allowsTickMarkValuesOnly = true
+        fontSizeSlider.isContinuous = true
+        fontSizeSlider.target = self
+        fontSizeSlider.action = #selector(fontSizeChanged(_:))
+        fontSizeSlider.translatesAutoresizingMaskIntoConstraints = false
+        fontSizeSlider.widthAnchor.constraint(equalToConstant: Metrics.sliderWidth).isActive = true
+
+        fontSizeDetailLabel.font = .monospacedDigitSystemFont(ofSize: 11, weight: .medium)
+        fontSizeDetailLabel.textColor = .secondaryLabelColor
+        fontSizeDetailLabel.alignment = .right
+        fontSizeDetailLabel.translatesAutoresizingMaskIntoConstraints = false
+        fontSizeDetailLabel.widthAnchor.constraint(equalToConstant: Metrics.valueWidth).isActive = true
+
+        resetFontSizeButton.target = self
+        resetFontSizeButton.action = #selector(resetFontSize(_:))
+        resetFontSizeButton.bezelStyle = .rounded
+        resetFontSizeButton.controlSize = .small
+    }
+
+    private func configureBorderRadiusSlider() {
+        borderRadiusSlider.minValue = LayoutMetrics.minCornerRadius
+        borderRadiusSlider.isContinuous = true
+        borderRadiusSlider.target = self
+        borderRadiusSlider.action = #selector(borderRadiusChanged(_:))
+        borderRadiusSlider.translatesAutoresizingMaskIntoConstraints = false
+        borderRadiusSlider.widthAnchor.constraint(equalToConstant: Metrics.sliderWidth).isActive = true
+
+        borderRadiusValueLabel.font = .monospacedDigitSystemFont(ofSize: 11, weight: .medium)
+        borderRadiusValueLabel.textColor = .secondaryLabelColor
+        borderRadiusValueLabel.alignment = .right
+        borderRadiusValueLabel.translatesAutoresizingMaskIntoConstraints = false
+        borderRadiusValueLabel.widthAnchor.constraint(equalToConstant: Metrics.valueWidth).isActive = true
+
+        resetRadiusButton.target = self
+        resetRadiusButton.action = #selector(resetRadius(_:))
+        resetRadiusButton.bezelStyle = .rounded
+        resetRadiusButton.controlSize = .small
+    }
+
+    private func makeThemeControl() -> NSView {
+        let swatchRow = NSStackView(views: themeButtons)
+        swatchRow.orientation = .horizontal
+        swatchRow.alignment = .centerY
+        swatchRow.spacing = 14
+
+        let stack = NSStackView(views: [swatchRow, resetThemeButton])
+        stack.orientation = .horizontal
+        stack.alignment = .centerY
+        stack.spacing = 16
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        stack.widthAnchor.constraint(equalToConstant: Metrics.controlWidth).isActive = true
+        return stack
+    }
+
+    private func makeFontControl() -> NSView {
+        let stack = NSStackView(views: [fontPopup, resetFontButton])
+        stack.orientation = .horizontal
+        stack.alignment = .centerY
+        stack.spacing = 12
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        stack.widthAnchor.constraint(equalToConstant: Metrics.controlWidth).isActive = true
+        return stack
+    }
+
+    private func makeFontSizeControl() -> NSView {
+        let sliderGroup = NSStackView(views: [fontSizeSlider, fontSizeDetailLabel])
+        sliderGroup.orientation = .horizontal
+        sliderGroup.alignment = .centerY
+        sliderGroup.spacing = Metrics.sliderValueSpacing
+        sliderGroup.translatesAutoresizingMaskIntoConstraints = false
+        sliderGroup.widthAnchor.constraint(equalToConstant: Metrics.sliderGroupWidth).isActive = true
+
+        let stack = NSStackView(views: [sliderGroup, resetFontSizeButton])
+        stack.orientation = .horizontal
+        stack.alignment = .centerY
+        stack.spacing = 12
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        stack.widthAnchor.constraint(equalToConstant: Metrics.controlWidth).isActive = true
+        return stack
+    }
+
+    private func makeBorderRadiusControl() -> NSView {
+        let sliderGroup = NSStackView(views: [borderRadiusSlider, borderRadiusValueLabel])
+        sliderGroup.orientation = .horizontal
+        sliderGroup.alignment = .centerY
+        sliderGroup.spacing = Metrics.sliderValueSpacing
+        sliderGroup.translatesAutoresizingMaskIntoConstraints = false
+        sliderGroup.widthAnchor.constraint(equalToConstant: Metrics.sliderGroupWidth).isActive = true
+
+        let stack = NSStackView(views: [sliderGroup, resetRadiusButton])
+        stack.orientation = .horizontal
+        stack.alignment = .centerY
+        stack.spacing = 12
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        stack.widthAnchor.constraint(equalToConstant: Metrics.controlWidth).isActive = true
+        return stack
+    }
+
+    private func makeFormRow(title: String, control: NSView) -> NSView {
+        let label = NSTextField(labelWithString: title)
+        label.font = .systemFont(ofSize: 12, weight: .regular)
+        label.textColor = .labelColor
+        label.alignment = .right
+        label.translatesAutoresizingMaskIntoConstraints = false
+        label.widthAnchor.constraint(equalToConstant: Metrics.labelWidth).isActive = true
+
+        let controlContainer = NSView()
+        controlContainer.translatesAutoresizingMaskIntoConstraints = false
+        controlContainer.widthAnchor.constraint(equalToConstant: Metrics.controlWidth).isActive = true
+        controlContainer.heightAnchor.constraint(equalToConstant: Metrics.rowHeight).isActive = true
+        control.translatesAutoresizingMaskIntoConstraints = false
+        controlContainer.addSubview(control)
+
+        NSLayoutConstraint.activate([
+            control.leadingAnchor.constraint(equalTo: controlContainer.leadingAnchor),
+            control.centerYAnchor.constraint(equalTo: controlContainer.centerYAnchor),
+            control.topAnchor.constraint(greaterThanOrEqualTo: controlContainer.topAnchor),
+            control.bottomAnchor.constraint(lessThanOrEqualTo: controlContainer.bottomAnchor),
+        ])
+
+        let row = NSStackView(views: [label, controlContainer])
+        row.orientation = .horizontal
+        row.alignment = .centerY
+        row.spacing = 18
+        return row
+    }
+
+    private func applyPreferencesToControls() {
+        isUpdatingControls = true
+        defer { isUpdatingControls = false }
+
+        let selectedPresetHex = nearestThemePresetHex(for: preferences.themeColor)
+        for (index, button) in themeButtons.enumerated() {
+            button.isSelected = Self.themePresets[index].hex == selectedPresetHex
+        }
+
         if let index = FontStylePreset.allCases.firstIndex(of: preferences.fontStyle) {
             fontPopup.selectItem(at: index)
         }
-        fontSizeSlider.doubleValue = preferences.fontSize
-        fontSizeValueLabel.stringValue = "\(Int(preferences.fontSize.rounded())) pt"
-        rowHeightSlider.doubleValue = preferences.rowHeight
-        rowHeightValueLabel.stringValue = "\(Int(preferences.rowHeight.rounded())) px"
+
+        let fontSize = LayoutMetrics.nearestFontSizeOption(to: preferences.fontSize)
+        let fontSizeIndex = LayoutMetrics.fontSizeOptions.firstIndex(of: fontSize) ?? LayoutMetrics.defaultFontSizeIndex
+        fontSizeSlider.doubleValue = Double(fontSizeIndex)
+        fontSizeDetailLabel.stringValue = "\(Int(fontSize)) pt"
+
+        borderRadiusSlider.maxValue = preferences.maximumCornerRadius
+        borderRadiusSlider.doubleValue = min(preferences.cornerRadius, preferences.maximumCornerRadius)
+        borderRadiusValueLabel.stringValue = "\(Int(round(borderRadiusSlider.doubleValue))) px"
     }
 
-    @objc private func fontStyleChanged(_ sender: NSPopUpButton) {
-        guard sender.indexOfSelectedItem >= 0 else { return }
-        let preset = FontStylePreset.allCases[sender.indexOfSelectedItem]
-        updatePreferences { preferences in
-            preferences.fontStyle = preset
+    private func nearestThemePresetHex(for color: ThemeColor) -> String {
+        let resolved = color.clamped()
+        return Self.themePresets.min(by: { lhs, rhs in
+            colorDistance(between: resolved, and: lhs.color) < colorDistance(between: resolved, and: rhs.color)
+        })?.hex ?? Self.themePresets[0].hex
+    }
+
+    private func colorDistance(between lhs: ThemeColor, and rhs: ThemeColor) -> Double {
+        let dr = lhs.red - rhs.red
+        let dg = lhs.green - rhs.green
+        let db = lhs.blue - rhs.blue
+        return (dr * dr) + (dg * dg) + (db * db)
+    }
+
+    private func commitPreferenceChange(_ mutation: (inout AppPreferences) -> Void) {
+        var updated = preferences
+        mutation(&updated)
+        preferences = updated
+        applyPreferencesToControls()
+        onPreferencesChange?(updated)
+    }
+
+    @objc private func themePresetSelected(_ sender: ThemePresetButton) {
+        guard !isUpdatingControls else { return }
+        guard Self.themePresets.indices.contains(sender.tag) else { return }
+        commitPreferenceChange { updated in
+            updated.themeColor = Self.themePresets[sender.tag].color
+        }
+    }
+
+    @objc private func resetThemeColor(_ sender: NSButton) {
+        guard !isUpdatingControls else { return }
+        commitPreferenceChange { updated in
+            updated.themeColor = .default
+        }
+    }
+
+    @objc private func fontChanged(_ sender: NSPopUpButton) {
+        guard !isUpdatingControls else { return }
+        guard FontStylePreset.allCases.indices.contains(sender.indexOfSelectedItem) else { return }
+        commitPreferenceChange { updated in
+            updated.fontStyle = FontStylePreset.allCases[sender.indexOfSelectedItem]
+        }
+    }
+
+    @objc private func resetFont(_ sender: NSButton) {
+        guard !isUpdatingControls else { return }
+        commitPreferenceChange { updated in
+            updated.fontStyle = .system
         }
     }
 
     @objc private func fontSizeChanged(_ sender: NSSlider) {
-        let value = sender.doubleValue.rounded()
-        fontSizeValueLabel.stringValue = "\(Int(value)) pt"
-        updatePreferences { preferences in
-            preferences.fontSize = value
+        guard !isUpdatingControls else { return }
+        let index = Int(round(sender.doubleValue))
+        guard LayoutMetrics.fontSizeOptions.indices.contains(index) else { return }
+        commitPreferenceChange { updated in
+            updated.fontSize = LayoutMetrics.fontSizeOptions[index]
         }
     }
 
-    @objc private func rowHeightChanged(_ sender: NSSlider) {
-        let value = sender.doubleValue.rounded()
-        rowHeightValueLabel.stringValue = "\(Int(value)) px"
-        updatePreferences { preferences in
-            preferences.rowHeight = value
-        }
-    }
-}
-
-private final class ShapeSettingsPaneViewController: SettingsPaneViewController {
-    private var radiusSlider: NSSlider!
-    private var radiusValueLabel: NSTextField!
-    private var widthSlider: NSSlider!
-    private var widthValueLabel: NSTextField!
-    private var snapSlider: NSSlider!
-    private var snapValueLabel: NSTextField!
-
-    override func buildControls(into stack: NSStackView) {
-        let radiusRow = makeSliderRow(
-            title: "Border radius",
-            minValue: LayoutMetrics.minCornerRadius,
-            maxValue: LayoutMetrics.maxCornerRadius,
-            target: self,
-            action: #selector(radiusChanged(_:))
-        )
-        radiusSlider = radiusRow.slider
-        radiusValueLabel = radiusRow.valueLabel
-
-        let widthRow = makeSliderRow(
-            title: "Panel width",
-            minValue: LayoutMetrics.minPanelWidth,
-            maxValue: LayoutMetrics.maxPanelWidth,
-            target: self,
-            action: #selector(widthChanged(_:))
-        )
-        widthSlider = widthRow.slider
-        widthValueLabel = widthRow.valueLabel
-
-        let snapRow = makeSliderRow(
-            title: "Snap padding",
-            minValue: 0,
-            maxValue: 80,
-            target: self,
-            action: #selector(snapChanged(_:))
-        )
-        snapSlider = snapRow.slider
-        snapValueLabel = snapRow.valueLabel
-
-        stack.addArrangedSubview(
-            makeCard(
-                title: "Surface",
-                subtitle: "Control the roundness and visual footprint of the panel and active row surfaces.",
-                content: {
-                    let content = NSStackView(views: [radiusRow.view, widthRow.view])
-                    content.orientation = .vertical
-                    content.alignment = .leading
-                    content.spacing = 14
-                    return content
-                }()
-            )
-        )
-        stack.addArrangedSubview(
-            makeCard(
-                title: "Window snapping",
-                subtitle: "Set how much space the panel keeps from the screen edges when it snaps around.",
-                content: snapRow.view
-            )
-        )
-    }
-
-    override func applyPreferencesToControls() {
-        radiusSlider.doubleValue = preferences.cornerRadius
-        radiusValueLabel.stringValue = "\(Int(preferences.cornerRadius.rounded())) px"
-        widthSlider.doubleValue = preferences.panelWidth
-        widthValueLabel.stringValue = "\(Int(preferences.panelWidth.rounded())) px"
-        snapSlider.doubleValue = preferences.snapPadding
-        snapValueLabel.stringValue = "\(Int(preferences.snapPadding.rounded())) px"
-    }
-
-    @objc private func radiusChanged(_ sender: NSSlider) {
-        let value = sender.doubleValue.rounded()
-        radiusValueLabel.stringValue = "\(Int(value)) px"
-        updatePreferences { preferences in
-            preferences.cornerRadius = value
+    @objc private func resetFontSize(_ sender: NSButton) {
+        guard !isUpdatingControls else { return }
+        commitPreferenceChange { updated in
+            updated.fontSize = LayoutMetrics.defaultFontSize
         }
     }
 
-    @objc private func widthChanged(_ sender: NSSlider) {
-        let value = sender.doubleValue.rounded()
-        widthValueLabel.stringValue = "\(Int(value)) px"
-        updatePreferences { preferences in
-            preferences.panelWidth = value
+    @objc private func borderRadiusChanged(_ sender: NSSlider) {
+        guard !isUpdatingControls else { return }
+        commitPreferenceChange { updated in
+            updated.cornerRadius = sender.doubleValue
         }
     }
 
-    @objc private func snapChanged(_ sender: NSSlider) {
-        let value = sender.doubleValue.rounded()
-        snapValueLabel.stringValue = "\(Int(value)) px"
-        updatePreferences { preferences in
-            preferences.snapPadding = value
+    @objc private func resetRadius(_ sender: NSButton) {
+        guard !isUpdatingControls else { return }
+        commitPreferenceChange { updated in
+            updated.cornerRadius = 10
         }
     }
 }
 
-private final class SettingsPreviewCardView: NSView {
-    private let cardBackground = NSView()
-    private let panelPreview = NSView()
-    private let headerStack = NSStackView()
-    private let titleLabel = NSTextField(labelWithString: "FloatyDo")
-    private let subtitleLabel = NSTextField(labelWithString: "Appearance")
-    private let rowStack = NSStackView()
-    private let rowViews = [PreviewRowView(), PreviewRowView(), PreviewRowView()]
+private final class ThemePresetButton: NSButton {
+    private let outerCircle = NSView()
+    private let innerCircle = NSView()
 
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
+    var isSelected = false {
+        didSet { updateAppearance() }
+    }
+
+    init(color: NSColor) {
+        super.init(frame: NSRect(x: 0, y: 0, width: 28, height: 28))
+        setButtonType(.momentaryChange)
+        title = ""
+        isBordered = false
+        imagePosition = .imageOnly
+        focusRingType = .none
         wantsLayer = true
         translatesAutoresizingMaskIntoConstraints = false
+        widthAnchor.constraint(equalToConstant: 28).isActive = true
+        heightAnchor.constraint(equalToConstant: 28).isActive = true
 
-        cardBackground.wantsLayer = true
-        cardBackground.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(cardBackground)
+        outerCircle.wantsLayer = true
+        outerCircle.translatesAutoresizingMaskIntoConstraints = false
+        outerCircle.layer?.backgroundColor = color.cgColor
+        outerCircle.layer?.cornerRadius = 14
+        addSubview(outerCircle)
 
-        headerStack.orientation = .vertical
-        headerStack.alignment = .leading
-        headerStack.spacing = 4
-        headerStack.translatesAutoresizingMaskIntoConstraints = false
-
-        titleLabel.font = .systemFont(ofSize: 16, weight: .semibold)
-        subtitleLabel.font = .systemFont(ofSize: 12, weight: .medium)
-        subtitleLabel.textColor = .secondaryLabelColor
-
-        headerStack.addArrangedSubview(titleLabel)
-        headerStack.addArrangedSubview(subtitleLabel)
-
-        panelPreview.wantsLayer = true
-        panelPreview.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(panelPreview)
-        addSubview(headerStack)
-
-        rowStack.orientation = .vertical
-        rowStack.alignment = .leading
-        rowStack.spacing = 10
-        rowStack.translatesAutoresizingMaskIntoConstraints = false
-        panelPreview.addSubview(rowStack)
-
-        rowViews.forEach { rowStack.addArrangedSubview($0) }
+        innerCircle.wantsLayer = true
+        innerCircle.translatesAutoresizingMaskIntoConstraints = false
+        innerCircle.layer?.backgroundColor = NSColor.white.cgColor
+        innerCircle.layer?.cornerRadius = 6.5
+        addSubview(innerCircle)
 
         NSLayoutConstraint.activate([
-            cardBackground.topAnchor.constraint(equalTo: topAnchor),
-            cardBackground.leadingAnchor.constraint(equalTo: leadingAnchor),
-            cardBackground.trailingAnchor.constraint(equalTo: trailingAnchor),
-            cardBackground.bottomAnchor.constraint(equalTo: bottomAnchor),
+            outerCircle.leadingAnchor.constraint(equalTo: leadingAnchor),
+            outerCircle.trailingAnchor.constraint(equalTo: trailingAnchor),
+            outerCircle.topAnchor.constraint(equalTo: topAnchor),
+            outerCircle.bottomAnchor.constraint(equalTo: bottomAnchor),
 
-            headerStack.topAnchor.constraint(equalTo: topAnchor, constant: 18),
-            headerStack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 18),
-            headerStack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -18),
-
-            panelPreview.topAnchor.constraint(equalTo: headerStack.bottomAnchor, constant: 18),
-            panelPreview.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 18),
-            panelPreview.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -18),
-            panelPreview.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -18),
-
-            rowStack.topAnchor.constraint(equalTo: panelPreview.topAnchor, constant: 18),
-            rowStack.leadingAnchor.constraint(equalTo: panelPreview.leadingAnchor, constant: 14),
-            rowStack.trailingAnchor.constraint(equalTo: panelPreview.trailingAnchor, constant: -14),
+            innerCircle.centerXAnchor.constraint(equalTo: centerXAnchor),
+            innerCircle.centerYAnchor.constraint(equalTo: centerYAnchor),
+            innerCircle.widthAnchor.constraint(equalToConstant: 13),
+            innerCircle.heightAnchor.constraint(equalToConstant: 13),
         ])
+
+        updateAppearance()
     }
 
     @available(*, unavailable)
@@ -624,108 +448,7 @@ private final class SettingsPreviewCardView: NSView {
         fatalError("init(coder:) has not been implemented")
     }
 
-    func update(preferences: AppPreferences) {
-        layer?.cornerRadius = 26
-        layer?.backgroundColor = NSColor(
-            red: 0.976,
-            green: 0.978,
-            blue: 0.984,
-            alpha: 1.0
-        ).cgColor
-        cardBackground.layer?.cornerRadius = 26
-        cardBackground.layer?.backgroundColor = NSColor(
-            red: 0.976,
-            green: 0.978,
-            blue: 0.984,
-            alpha: 1.0
-        ).cgColor
-        cardBackground.layer?.borderWidth = 1
-        cardBackground.layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.55).cgColor
-
-        panelPreview.layer?.cornerRadius = 24
-        panelPreview.layer?.backgroundColor = NSColor(
-            red: 0.039,
-            green: 0.039,
-            blue: 0.094,
-            alpha: 1.0
-        ).cgColor
-
-        titleLabel.font = preferences.appFont(weight: .semibold).withSize(16)
-        subtitleLabel.font = preferences.appFont(weight: .medium).withSize(12)
-
-        let samples = [
-            ("Plan sprint scope", false),
-            ("Review calendar", true),
-            ("Clean archive", false),
-        ]
-
-        for (rowView, sample) in zip(rowViews, samples) {
-            rowView.configure(
-                text: sample.0,
-                selected: sample.1,
-                preferences: preferences
-            )
-        }
-    }
-}
-
-private final class PreviewRowView: NSView {
-    private let backgroundView = NSView()
-    private let circleView = NSView()
-    private let label = NSTextField(labelWithString: "")
-
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
-        translatesAutoresizingMaskIntoConstraints = false
-        heightAnchor.constraint(equalToConstant: 42).isActive = true
-
-        backgroundView.wantsLayer = true
-        backgroundView.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(backgroundView)
-
-        circleView.wantsLayer = true
-        circleView.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(circleView)
-
-        label.lineBreakMode = .byTruncatingTail
-        label.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(label)
-
-        NSLayoutConstraint.activate([
-            backgroundView.topAnchor.constraint(equalTo: topAnchor),
-            backgroundView.leadingAnchor.constraint(equalTo: leadingAnchor),
-            backgroundView.trailingAnchor.constraint(equalTo: trailingAnchor),
-            backgroundView.bottomAnchor.constraint(equalTo: bottomAnchor),
-
-            circleView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14),
-            circleView.centerYAnchor.constraint(equalTo: centerYAnchor),
-            circleView.widthAnchor.constraint(equalToConstant: 18),
-            circleView.heightAnchor.constraint(equalToConstant: 18),
-
-            label.leadingAnchor.constraint(equalTo: circleView.trailingAnchor, constant: 12),
-            label.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
-            label.centerYAnchor.constraint(equalTo: centerYAnchor),
-        ])
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
-
-    func configure(text: String, selected: Bool, preferences: AppPreferences) {
-        backgroundView.layer?.cornerRadius = CGFloat(preferences.cornerRadius)
-        backgroundView.layer?.backgroundColor = selected
-            ? preferences.activeFillColor.cgColor
-            : NSColor.clear.cgColor
-
-        circleView.layer?.cornerRadius = 9
-        circleView.layer?.borderWidth = 2
-        circleView.layer?.borderColor = NSColor.white.withAlphaComponent(selected ? 0.95 : 0.4).cgColor
-        circleView.layer?.backgroundColor = NSColor.clear.cgColor
-
-        label.stringValue = text
-        label.font = preferences.appFont(weight: .medium)
-        label.textColor = NSColor.white.withAlphaComponent(selected ? 0.98 : 0.9)
+    private func updateAppearance() {
+        innerCircle.isHidden = !isSelected
     }
 }

@@ -130,16 +130,22 @@ public final class TodoStore: ObservableObject {
     }
 
     public func updatePreferences(_ newPreferences: AppPreferences) {
+        let clampedRowHeight = min(max(newPreferences.rowHeight, LayoutMetrics.minRowHeight), LayoutMetrics.maxRowHeight)
+        let clampedPanelWidth = min(max(newPreferences.panelWidth, LayoutMetrics.minPanelWidth), LayoutMetrics.maxPanelWidth)
+        let clampedCornerRadius = min(
+            max(newPreferences.cornerRadius, LayoutMetrics.minCornerRadius),
+            LayoutMetrics.maximumCornerRadius(forRowHeight: clampedRowHeight)
+        )
         let clamped = AppPreferences(
-            rowHeight: min(max(newPreferences.rowHeight, LayoutMetrics.minRowHeight), LayoutMetrics.maxRowHeight),
-            panelWidth: min(max(newPreferences.panelWidth, LayoutMetrics.minPanelWidth), LayoutMetrics.maxPanelWidth),
+            rowHeight: clampedRowHeight,
+            panelWidth: clampedPanelWidth,
             hoverHighlightsEnabled: newPreferences.hoverHighlightsEnabled,
             animationPreset: newPreferences.animationPreset,
             snapPadding: max(0, newPreferences.snapPadding),
             themeColor: newPreferences.themeColor.clamped(),
             fontStyle: newPreferences.fontStyle,
-            fontSize: min(max(newPreferences.fontSize, LayoutMetrics.minFontSize), LayoutMetrics.maxFontSize),
-            cornerRadius: min(max(newPreferences.cornerRadius, LayoutMetrics.minCornerRadius), LayoutMetrics.maxCornerRadius)
+            fontSize: LayoutMetrics.nearestFontSizeOption(to: newPreferences.fontSize),
+            cornerRadius: clampedCornerRadius
         )
         preferences = clamped
     }

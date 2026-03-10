@@ -36,6 +36,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         let initialWidth = max(CGFloat(store.preferences.panelWidth), CGFloat(LayoutMetrics.minPanelWidth))
         panel = FloatingPanel(contentRect: NSRect(x: 0, y: 0, width: initialWidth, height: 300))
         panel.minSize = NSSize(width: LayoutMetrics.minPanelWidth, height: 200)
+        panel.applyTheme(preferences: store.preferences)
         debugLog("panel created")
 
         // AppKit view controller

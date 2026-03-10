@@ -1,6 +1,11 @@
 import AppKit
 
 final class SettingsWindowController: NSWindowController, NSWindowDelegate {
+    private enum ChromeMetrics {
+        static let trafficLightInset: CGFloat = 18
+        static let trafficLightSpacing: CGFloat = 6
+    }
+
     var onPreferencesChange: ((AppPreferences) -> Void)? {
         didSet {
             settingsViewController.onPreferencesChange = onPreferencesChange
@@ -15,18 +20,22 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         self.settingsViewController = SettingsViewController(preferences: preferences)
 
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 820, height: 560),
+            contentRect: NSRect(x: 0, y: 0, width: 690, height: 330),
             styleMask: [.titled, .closable, .miniaturizable, .fullSizeContentView],
             backing: .buffered,
             defer: false
         )
-        window.title = "Settings"
+        window.title = "Theme"
         window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true
         window.isReleasedWhenClosed = false
         window.center()
-        window.minSize = NSSize(width: 760, height: 520)
+        window.minSize = NSSize(width: 660, height: 320)
         window.contentViewController = settingsViewController
+
+        let toolbar = NSToolbar(identifier: "settings")
+        toolbar.showsBaselineSeparator = false
+        window.toolbar = toolbar
         window.toolbarStyle = .unified
 
         super.init(window: window)
@@ -47,6 +56,10 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         showWindow(nil)
         window?.center()
         window?.makeKeyAndOrderFront(nil)
+        applyWindowChromeLayout()
+        DispatchQueue.main.async { [weak self] in
+            self?.applyWindowChromeLayout()
+        }
         NSApp.activate(ignoringOtherApps: true)
         onWindowVisibilityChange?(true)
     }
@@ -60,10 +73,37 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     }
 
     func windowDidBecomeKey(_ notification: Notification) {
+        applyWindowChromeLayout()
         onWindowVisibilityChange?(true)
     }
 
     func windowDidResignKey(_ notification: Notification) {
         onWindowVisibilityChange?(window?.isVisible == true)
+    }
+
+    func windowDidResize(_ notification: Notification) {
+        applyWindowChromeLayout()
+    }
+
+    private func applyWindowChromeLayout() {
+        guard let window,
+              let closeButton = window.standardWindowButton(.closeButton),
+              let miniButton = window.standardWindowButton(.miniaturizeButton),
+              let zoomButton = window.standardWindowButton(.zoomButton),
+              let buttonSuperview = closeButton.superview else {
+            return
+        }
+
+        let buttons = [closeButton, miniButton, zoomButton]
+        let leadingInset = ChromeMetrics.trafficLightInset
+        let topInset = ChromeMetrics.trafficLightInset
+        let spacing = ChromeMetrics.trafficLightSpacing
+        let buttonY = buttonSuperview.bounds.height - topInset - closeButton.frame.height
+
+        var currentX = leadingInset
+        for button in buttons {
+            button.setFrameOrigin(NSPoint(x: currentX, y: buttonY))
+            currentX += button.frame.width + spacing
+        }
     }
 }
