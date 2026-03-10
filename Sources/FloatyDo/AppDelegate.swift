@@ -91,13 +91,33 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
             debugLog("status item button missing")
         }
 
-        // App-level shortcuts: cmd+Q to quit, cmd+W to hide panel, cmd+, for theme
+        // App-level shortcuts: cmd+Q to quit, cmd+W to hide panel, cmd+, for theme,
+        // ctrl+option+arrow to snap the panel to screen edges/corners.
         appEventMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self else { return event }
-            let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            let mods = event.modifierFlags.intersection([.command, .option, .control, .shift])
 
             if mods.isEmpty, event.keyCode == 53, self.todoVC.closeSettingsWindowIfVisible() {
                 return nil
+            }
+
+            if mods == [.control, .option] || mods == [.control, .shift] {
+                switch event.keyCode {
+                case 123:
+                    self.pushPanel(.left)
+                    return nil
+                case 124:
+                    self.pushPanel(.right)
+                    return nil
+                case 125:
+                    self.pushPanel(.down)
+                    return nil
+                case 126:
+                    self.pushPanel(.up)
+                    return nil
+                default:
+                    break
+                }
             }
 
             guard mods == .command else { return event }
@@ -116,22 +136,6 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
             if event.charactersIgnoringModifiers == "," {
                 self.todoVC.openSettingsWindow()
                 return nil
-            }
-            switch event.keyCode {
-            case 123:
-                self.pushPanel(.left)
-                return nil
-            case 124:
-                self.pushPanel(.right)
-                return nil
-            case 125:
-                self.pushPanel(.down)
-                return nil
-            case 126:
-                self.pushPanel(.up)
-                return nil
-            default:
-                break
             }
             return event
         }
@@ -173,11 +177,11 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
     private func showPanel(activate: Bool) {
         debugLog("showPanel activate=\(activate)")
         positionPanel()
-        panel.makeKeyAndOrderFront(nil)
-        panel.orderFrontRegardless()
         if activate {
-            NSApp.activate(ignoringOtherApps: true)
+            NSRunningApplication.current.activate(options: [.activateIgnoringOtherApps])
         }
+        panel.makeKeyAndOrderFront(nil)
+        panel.orderFront(nil)
         debugLog("panel visible after show=\(panel.isVisible) frame=\(panel.frame.debugDescription)")
     }
 
@@ -204,27 +208,28 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         let visibleFrame = screen.visibleFrame
         let padding = CGFloat(store.preferences.snapPadding)
         let size = panel.frame.size
+        let currentOrigin = panel.frame.origin
 
         let origin: NSPoint
         switch direction {
         case .left:
             origin = NSPoint(
                 x: visibleFrame.minX + padding,
-                y: visibleFrame.midY - (size.height / 2)
+                y: currentOrigin.y
             )
         case .right:
             origin = NSPoint(
                 x: visibleFrame.maxX - size.width - padding,
-                y: visibleFrame.midY - (size.height / 2)
+                y: currentOrigin.y
             )
         case .up:
             origin = NSPoint(
-                x: visibleFrame.midX - (size.width / 2),
+                x: currentOrigin.x,
                 y: visibleFrame.maxY - size.height - padding
             )
         case .down:
             origin = NSPoint(
-                x: visibleFrame.midX - (size.width / 2),
+                x: currentOrigin.x,
                 y: visibleFrame.minY + padding
             )
         }
@@ -235,6 +240,6 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         )
 
         let targetFrame = NSRect(origin: clampedOrigin, size: size)
-        panel.setFrame(targetFrame, display: true, animate: true)
+        panel.setFrame(targetFrame, display: true, animate: false)
     }
 }

@@ -20,6 +20,7 @@ public final class TodoStore: ObservableObject {
     private static let key = "floatydo.items"
     private static let archiveKey = "floatydo.archived"
     private static let preferencesKey = "floatydo.preferences"
+    private static let minimumSnapPadding = 32.0
     public static let maxItems = 10
 
     @Published public private(set) var items: [TodoItem] = [] {
@@ -141,7 +142,7 @@ public final class TodoStore: ObservableObject {
             panelWidth: clampedPanelWidth,
             hoverHighlightsEnabled: newPreferences.hoverHighlightsEnabled,
             animationPreset: newPreferences.animationPreset,
-            snapPadding: max(0, newPreferences.snapPadding),
+            snapPadding: max(Self.minimumSnapPadding, newPreferences.snapPadding),
             themeColor: newPreferences.themeColor.clamped(),
             fontStyle: newPreferences.fontStyle,
             fontSize: LayoutMetrics.nearestFontSizeOption(to: newPreferences.fontSize),
@@ -199,6 +200,6 @@ public final class TodoStore: ObservableObject {
         guard let data = UserDefaults.standard.data(forKey: Self.preferencesKey),
               let decoded = try? JSONDecoder().decode(AppPreferences.self, from: data)
         else { return }
-        preferences = decoded
+        updatePreferences(decoded)
     }
 }

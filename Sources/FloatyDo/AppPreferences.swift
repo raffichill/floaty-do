@@ -143,7 +143,7 @@ public struct AppPreferences: Codable, Equatable {
         panelWidth: 400,
         hoverHighlightsEnabled: true,
         animationPreset: .balanced,
-        snapPadding: 40,
+        snapPadding: 32,
         themeColor: .default,
         fontStyle: .system,
         fontSize: LayoutMetrics.defaultFontSize,

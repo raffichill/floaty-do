@@ -504,7 +504,7 @@ final class TodoStoreTests: XCTestCase {
             panelWidth: 460,
             hoverHighlightsEnabled: false,
             animationPreset: .snappy,
-            snapPadding: 24,
+            snapPadding: 32,
             themeColor: ThemeColor(red: 0.12, green: 0.45, blue: 0.73, alpha: 1),
             fontStyle: .rounded,
             fontSize: 16,
@@ -534,6 +534,7 @@ final class TodoStoreTests: XCTestCase {
 
         XCTAssertEqual(store.preferences.fontSize, 14)
         XCTAssertEqual(store.preferences.cornerRadius, 16)
+        XCTAssertEqual(store.preferences.snapPadding, 40)
     }
 
     func testLegacyPreferencesDecodeUsesNewFieldDefaults() throws {
@@ -553,7 +554,7 @@ final class TodoStoreTests: XCTestCase {
         XCTAssertEqual(store.preferences.panelWidth, 430.0)
         XCTAssertFalse(store.preferences.hoverHighlightsEnabled)
         XCTAssertEqual(store.preferences.animationPreset, .relaxed)
-        XCTAssertEqual(store.preferences.snapPadding, 18.0)
+        XCTAssertEqual(store.preferences.snapPadding, 32.0)
         XCTAssertEqual(store.preferences.themeColor, .default)
         XCTAssertEqual(store.preferences.fontStyle, .system)
         XCTAssertEqual(store.preferences.fontSize, 14.0)
