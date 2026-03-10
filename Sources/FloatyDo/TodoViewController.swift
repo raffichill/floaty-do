@@ -479,7 +479,10 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         switch tab ?? currentTab {
         case .tasks:
             let showsDraft = canShowDraftRow
-            let visibleRowCount = min(store.items.count + 3, TodoStore.maxItems)
+            // Keep very small task lists on a stable panel height. The 0/1/2-item
+            // transitions are where AppKit's full-size-content resize path was
+            // producing the first-row/titlebar overlap bug.
+            let visibleRowCount = max(5, min(store.items.count + 3, TodoStore.maxItems))
             let baseRowCount = store.items.count + (showsDraft ? 1 : 0)
             let fillerCount = max(visibleRowCount - baseRowCount, 0)
 
