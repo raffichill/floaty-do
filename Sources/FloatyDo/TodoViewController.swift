@@ -1066,23 +1066,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
 
             switch currentTab {
             case .tasks:
-                let itemIDs = selectedBatchRows.compactMap { rowID -> UUID? in
-                    guard case .taskItem(let item) = rowModels.first(where: { $0.id == rowID })?.kind else { return nil }
-                    return item.id
-                }
-                guard !itemIDs.isEmpty else { return }
-                detachEditor(makeListFirstResponder: false)
-                itemIDs.forEach { store.archive(id: $0) }
-                clearRangeSelectionState()
-                let updatedModels = buildRowModels(for: .tasks)
-                selectedRowID = buildSelectionID(in: updatedModels, selectableIndex: selectionIndex)
-                scheduleDeferredEditorActivation(for: selectedRowID, delay: motion.collapse * 0.75)
-                refreshRows(
-                    animatedLayout: true,
-                    animatedLayoutDuration: motion.collapse,
-                    selectionRevealRowID: selectedRowID,
-                    placeCaretAtEnd: false
-                )
+                animateBatchCompletion(for: selectedBatchRows, selectionIndex: selectionIndex)
 
             case .archive:
                 let itemIDs = selectedBatchRows.compactMap { rowID -> UUID? in
@@ -1206,6 +1190,56 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
                 selectionRevealRowID: self.selectedRowID,
                 placeCaretAtEnd: false
             )
+        }
+    }
+
+    private func animateBatchCompletion(for rowIDs: [TodoRowID], selectionIndex: Int) {
+        guard !isAnimating, !listView.isBusy else { return }
+
+        let itemIDs = rowIDs.compactMap { rowID -> UUID? in
+            guard case .taskItem(let item) = rowModels.first(where: { $0.id == rowID })?.kind else { return nil }
+            return item.id
+        }
+        guard !itemIDs.isEmpty else { return }
+
+        let rows = rowIDs.compactMap { listView.rowView(for: $0) }
+        let completeArchiveAndRefresh = { [weak self] in
+            guard let self else { return }
+            itemIDs.forEach { self.store.archive(id: $0) }
+            self.clearRangeSelectionState()
+            let updatedModels = self.buildRowModels(for: .tasks)
+            self.selectedRowID = self.buildSelectionID(in: updatedModels, selectableIndex: selectionIndex)
+            self.isAnimating = false
+            self.scheduleDeferredEditorActivation(for: self.selectedRowID, delay: self.motion.collapse * 0.75)
+            self.refreshRows(
+                animatedLayout: true,
+                animatedLayoutDuration: self.motion.collapse,
+                selectionRevealRowID: self.selectedRowID,
+                placeCaretAtEnd: false
+            )
+        }
+
+        guard !rows.isEmpty else {
+            detachEditor(makeListFirstResponder: false)
+            isAnimating = true
+            completeArchiveAndRefresh()
+            return
+        }
+
+        isAnimating = true
+        detachEditor(makeListFirstResponder: false)
+
+        let animationGroup = DispatchGroup()
+        rows.forEach { row in
+            row.setEditing(false)
+            animationGroup.enter()
+            row.playCompletionAnimation(motion: motion) {
+                animationGroup.leave()
+            }
+        }
+
+        animationGroup.notify(queue: .main) {
+            completeArchiveAndRefresh()
         }
     }
 
