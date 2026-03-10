@@ -16,20 +16,50 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func debugLog(_ message: String) {
         let line = "[\(Date())] \(message)\n"
-        let url = URL(fileURLWithPath: "/tmp/FloatyDo-launch.log")
+        fputs(line, stderr)
         let data = Data(line.utf8)
-        if FileManager.default.fileExists(atPath: url.path) {
-            if let handle = try? FileHandle(forWritingTo: url) {
+        if FileManager.default.fileExists(atPath: DebugLogPaths.launchURL.path) {
+            if let handle = try? FileHandle(forWritingTo: DebugLogPaths.launchURL) {
                 try? handle.seekToEnd()
                 try? handle.write(contentsOf: data)
                 try? handle.close()
             }
         } else {
-            try? data.write(to: url)
+            try? data.write(to: DebugLogPaths.launchURL)
         }
     }
 
+    private func resetDebugLogs() {
+        DebugLogPaths.ensureDirectoryExists()
+        let bundlePath = Bundle.main.bundleURL.path
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown"
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown"
+        let pid = ProcessInfo.processInfo.processIdentifier
+        let timestamp = ISO8601DateFormatter().string(from: Date())
+
+        let launchHeader = """
+        === FloatyDo launch session ===
+        timestamp=\(timestamp)
+        pid=\(pid)
+        bundle=\(bundlePath)
+        version=\(version)
+        build=\(build)
+
+        """
+        let layoutHeader = """
+        === FloatyDo layout session ===
+        timestamp=\(timestamp)
+        pid=\(pid)
+        bundle=\(bundlePath)
+
+        """
+
+        try? Data(launchHeader.utf8).write(to: DebugLogPaths.launchURL)
+        try? Data(layoutHeader.utf8).write(to: DebugLogPaths.layoutURL)
+    }
+
     public func applicationDidFinishLaunching(_ notification: Notification) {
+        resetDebugLogs()
         debugLog("applicationDidFinishLaunching")
         NSApp.setActivationPolicy(.regular)
 

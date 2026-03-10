@@ -49,6 +49,10 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
     private var settingsButton: HoverTrackingButton!
     private var settingsWindowController: SettingsWindowController?
     private var isAnimating = false
+    private weak var containerView: NSView?
+    private var tabBarHeightConstraint: NSLayoutConstraint?
+    private var listTopConstraint: NSLayoutConstraint?
+    private var lastKnownHeaderHeight: CGFloat = 0
 
     public init(store: TodoStore) {
         self.store = store
@@ -94,6 +98,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
     public override func loadView() {
         let container = NSView(frame: NSRect(x: 0, y: 0, width: panelWidth, height: 240))
         container.wantsLayer = true
+        containerView = container
 
         tasksTabButton = makeTabButton(symbolName: "checklist.unchecked", action: #selector(switchToTasks))
         archiveTabButton = makeTabButton(symbolName: "archivebox", action: #selector(switchToArchive))
@@ -116,12 +121,21 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         container.addSubview(listView)
         container.addSubview(sharedEditor)
 
+        let initialHeaderHeight = defaultHeaderHeight
+        let tabBarHeightConstraint = tabBar.heightAnchor.constraint(equalToConstant: initialHeaderHeight)
+        let listTopConstraint = listView.topAnchor.constraint(
+            equalTo: container.topAnchor,
+            constant: initialHeaderHeight + CGFloat(LayoutMetrics.contentTopPadding)
+        )
+        self.tabBarHeightConstraint = tabBarHeightConstraint
+        self.listTopConstraint = listTopConstraint
+
         NSLayoutConstraint.activate([
             tabBar.topAnchor.constraint(equalTo: container.topAnchor),
-            tabBar.bottomAnchor.constraint(equalTo: container.safeAreaLayoutGuide.topAnchor),
+            tabBarHeightConstraint,
             tabBar.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -LayoutMetrics.titlebarTrailingInset),
 
-            listView.topAnchor.constraint(equalTo: container.safeAreaLayoutGuide.topAnchor, constant: LayoutMetrics.contentTopPadding),
+            listTopConstraint,
             listView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             listView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
             listView.bottomAnchor.constraint(equalTo: container.bottomAnchor),
@@ -211,6 +225,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         if let panel = view.window as? FloatingPanel {
             panel.applyTheme(preferences: store.preferences)
         }
+        updateHeaderLayoutInsets()
         refreshRows(resize: false, animateResize: false, placeCaretAtEnd: false)
         resizeWindow(animate: false)
     }
@@ -251,8 +266,37 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         if let panel = view.window as? FloatingPanel {
             panel.applyTheme(preferences: store.preferences)
         }
+        updateHeaderLayoutInsets()
         updateTabAppearance()
         refreshRows(animateResize: false)
+    }
+
+    private var defaultHeaderHeight: CGFloat {
+        CGFloat(LayoutMetrics.trafficLightTopInset + 14)
+    }
+
+    private func effectiveHeaderHeight(for window: NSWindow?) -> CGFloat {
+        let safeAreaTop = containerView?.safeAreaInsets.top ?? view.safeAreaInsets.top
+        let layoutChromeHeight: CGFloat
+        if let window {
+            layoutChromeHeight = max(0, window.frame.height - window.contentLayoutRect.height)
+        } else {
+            layoutChromeHeight = 0
+        }
+
+        let measuredHeight = max(safeAreaTop, layoutChromeHeight)
+        if measuredHeight > 0.5 {
+            lastKnownHeaderHeight = measuredHeight
+        }
+
+        return max(lastKnownHeaderHeight, defaultHeaderHeight)
+    }
+
+    private func updateHeaderLayoutInsets() {
+        let headerHeight = effectiveHeaderHeight(for: view.window)
+        tabBarHeightConstraint?.constant = headerHeight
+        listTopConstraint?.constant = headerHeight + CGFloat(LayoutMetrics.contentTopPadding)
+        logSingleItemLayoutState(trigger: "updateHeaderLayoutInsets")
     }
 
     private func makeTabButton(symbolName: String, action: Selector) -> NSButton {
@@ -546,6 +590,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         selectionRevealRowID: TodoRowID? = nil,
         placeCaretAtEnd: Bool = true
     ) {
+        let previousRowCount = rowModels.count
         rowModels = buildRowModels()
         ensureSelectedRowExists()
         listView.apply(
@@ -559,11 +604,19 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         )
 
         if resize {
-            resizeWindow(animate: animateResize)
+            resizeWindow(animate: animateResize && shouldAnimateWindowResize(from: previousRowCount, to: rowModels.count))
         }
 
+        updateHeaderLayoutInsets()
+        view.layoutSubtreeIfNeeded()
         listView.layoutSubtreeIfNeeded()
         attachEditorIfNeeded(placeCaretAtEnd: placeCaretAtEnd)
+        logSingleItemLayoutState(trigger: "refreshRows")
+    }
+
+    private func shouldAnimateWindowResize(from previousRowCount: Int, to newRowCount: Int) -> Bool {
+        guard currentTab == .tasks else { return true }
+        return max(previousRowCount, newRowCount) > 5
     }
 
     private func fadeOpacity(emptyIndex: Int, emptyCount: Int) -> Double {
@@ -1013,6 +1066,36 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         }
     }
 
+    private func logSingleItemLayoutState(trigger: String) {
+        guard currentTab == .tasks, store.items.count <= 1 else { return }
+
+        DebugLogPaths.ensureDirectoryExists()
+        let url = DebugLogPaths.layoutURL
+        let timestamp = ISO8601DateFormatter().string(from: Date())
+        let windowFrame = view.window?.frame.debugDescription ?? "nil"
+        let contentLayoutRect = view.window?.contentLayoutRect.debugDescription ?? "nil"
+        let titlebarHeight = view.window?.titlebarHeight ?? 0
+        let safeAreaTop = containerView?.safeAreaInsets.top ?? view.safeAreaInsets.top
+        let tabBarHeight = tabBarHeightConstraint?.constant ?? 0
+        let tabBarFrame = tasksTabButton.superview?.frame.debugDescription ?? "nil"
+        let listTop = listTopConstraint?.constant ?? 0
+        let firstRowID = rowModels.first.map { String(describing: $0.id) } ?? "nil"
+        let firstRowFrame = rowModels.first.flatMap { listView.rowView(for: $0.id)?.frame.debugDescription } ?? "nil"
+        let line = "[\(timestamp)] trigger=\(trigger) items=\(store.items.count) rowCount=\(rowModels.count) selected=\(String(describing: selectedRowID)) editorRowID=\(String(describing: editorRowID)) editing=\(String(describing: currentEditingRowID)) editorText=\"\(sharedEditor.stringValue)\" draftIndex=\(taskDraft.insertionIndex) draftText=\"\(taskDraft.text)\" windowFrame=\(windowFrame) contentLayoutRect=\(contentLayoutRect) titlebarHeight=\(titlebarHeight) safeAreaTop=\(safeAreaTop) tabBarHeight=\(tabBarHeight) tabBarFrame=\(tabBarFrame) listTop=\(listTop) listFrame=\(listView.frame.debugDescription) firstRowID=\(firstRowID) firstRowFrame=\(firstRowFrame)\n"
+        fputs(line, stderr)
+
+        let data = Data(line.utf8)
+        if FileManager.default.fileExists(atPath: url.path) {
+            if let handle = try? FileHandle(forWritingTo: url) {
+                try? handle.seekToEnd()
+                try? handle.write(contentsOf: data)
+                try? handle.close()
+            }
+        } else {
+            try? data.write(to: url)
+        }
+    }
+
     public func controlTextDidChange(_ obj: Notification) {
         guard let rowID = editorRowID else { return }
         switch rowModels.first(where: { $0.id == rowID })?.kind {
@@ -1040,6 +1123,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
             break
         }
         syncVisibleEditorState()
+        logSingleItemLayoutState(trigger: "controlTextDidChange")
     }
 
     public func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
@@ -1108,7 +1192,9 @@ extension TodoViewController: TodoListViewDelegate {
 
 private extension NSWindow {
     var titlebarHeight: CGFloat {
-        contentView?.safeAreaInsets.top ?? 0
+        let safeAreaHeight = contentView?.safeAreaInsets.top ?? 0
+        let layoutChromeHeight = max(0, frame.height - contentLayoutRect.height)
+        return max(safeAreaHeight, layoutChromeHeight)
     }
 }
 
@@ -1167,6 +1253,16 @@ fileprivate final class TodoListView: NSView {
     override var isFlipped: Bool { true }
     override var acceptsFirstResponder: Bool { true }
     override var mouseDownCanMoveWindow: Bool { false }
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        layer?.masksToBounds = true
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError()
+    }
 
     var isDragging: Bool {
         if case .dragging = interactionState { return true }
@@ -1840,6 +1936,7 @@ fileprivate final class TodoRowView: NSView {
         super.init(frame: .zero)
 
         wantsLayer = true
+        layer?.masksToBounds = true
 
         backgroundView.wantsLayer = true
         backgroundView.layer?.cornerRadius = CGFloat(preferences.cornerRadius)
