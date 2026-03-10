@@ -1,6 +1,6 @@
 import AppKit
 
-public final class FloatingPanel: NSPanel {
+public final class FloatingPanel: NSWindow {
     private let customFieldEditor = CaretEndFieldEditor()
     private var observers: [NSObjectProtocol] = []
 
@@ -13,7 +13,6 @@ public final class FloatingPanel: NSPanel {
         )
 
         level = .floating
-        isFloatingPanel = true
         titleVisibility = .hidden
         titlebarAppearsTransparent = true
 
@@ -60,6 +59,7 @@ public final class FloatingPanel: NSPanel {
 
     // Allow key events even when the app isn't active (menu bar utility)
     public override var canBecomeKey: Bool { true }
+    public override var canBecomeMain: Bool { true }
 
     public override func fieldEditor(_ createFlag: Bool, for object: Any?) -> NSText? {
         if object is NSTextField {

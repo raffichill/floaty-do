@@ -178,7 +178,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         debugLog("showPanel activate=\(activate)")
         positionPanel()
         if activate {
-            NSRunningApplication.current.activate(options: [.activateIgnoringOtherApps])
+            NSApp.activate(ignoringOtherApps: true)
         }
         panel.makeKeyAndOrderFront(nil)
         panel.orderFront(nil)

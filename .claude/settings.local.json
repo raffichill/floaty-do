@@ -1,0 +1,25 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(swift build 2>&1)",
+      "Bash(cd /Users/raffichilingaryan/Developer/floaty-do && swift build 2>&1)",
+      "Bash(mdfind \"kMDItemFSName == 'FloatyDo.app'\" 2>/dev/null)",
+      "Bash(swift build 2>&1 && pkill -f FloatyDo 2>/dev/null; sleep 0.3; cp .build/debug/FloatyDo /Applications/FloatyDo.app/Contents/MacOS/FloatyDo && cp .build/debug/FloatyDo FloatyDo.app/Contents/MacOS/FloatyDo && echo \"Done\")",
+      "Bash(pkill -f FloatyDo 2>/dev/null; sleep 0.3; cp .build/debug/FloatyDo /Applications/FloatyDo.app/Contents/MacOS/FloatyDo && cp .build/debug/FloatyDo FloatyDo.app/Contents/MacOS/FloatyDo && echo \"Done\")",
+      "Bash(pkill -f FloatyDo 2>/dev/null; sleep 0.3; swift build 2>&1 && cp .build/debug/FloatyDo /Applications/FloatyDo.app/Contents/MacOS/FloatyDo && cp .build/debug/FloatyDo FloatyDo.app/Contents/MacOS/FloatyDo && echo \"Built and deployed\")",
+      "Bash(pkill -f FloatyDo 2>/dev/null)",
+      "Bash(cd /Users/raffichilingaryan/Developer/floaty-do && swift build 2>&1 && cp .build/debug/FloatyDo /Applications/FloatyDo.app/Contents/MacOS/FloatyDo && cp .build/debug/FloatyDo FloatyDo.app/Contents/MacOS/FloatyDo && echo \"Built\")",
+      "Bash(.build/debug/FloatyDo 2>&1)",
+      "Bash(ffmpeg -i \"/Users/raffichilingaryan/Library/Application Support/CleanShot/media/media_ULgtA3qXiV/CleanShot 2026-03-02 at 15.38.38.mp4\" -vf \"fps=10\" /tmp/floaty_frames/frame_%03d.png 2>&1 | tail -5)",
+      "Bash(pkill -f FloatyDo 2>/dev/null; sleep 0.5 && cp .build/debug/FloatyDo /Applications/FloatyDo.app/Contents/MacOS/FloatyDo && cp .build/debug/FloatyDo FloatyDo.app/Contents/MacOS/FloatyDo 2>/dev/null; echo \"Deployed successfully\")",
+      "Bash(open /Applications/FloatyDo.app)",
+      "Bash(pkill -f FloatyDo 2>/dev/null; sleep 0.3 && cp .build/debug/FloatyDo /Applications/FloatyDo.app/Contents/MacOS/FloatyDo && open /Applications/FloatyDo.app)",
+      "Bash(ffmpeg -i \"/Users/raffichilingaryan/Library/Application Support/CleanShot/media/media_NoN2OsGXf2/CleanShot 2026-03-02 at 16.17.35.mp4\" -vf \"fps=10,scale=800:-1\" /tmp/floaty_frames/frame_%04d.png 2>&1 | tail -5 && ls /tmp/floaty_frames/ | wc -l)",
+      "Bash(pkill -f FloatyDo 2>/dev/null; sleep 0.3 && cp .build/debug/FloatyDo /Applications/FloatyDo.app/Contents/MacOS/FloatyDo)",
+      "Bash(swift test 2>&1)",
+      "Bash(ffprobe -v quiet -print_format json -show_streams \"/Users/raffichilingaryan/Library/Application Support/CleanShot/media/media_IZLpvOzQNc/CleanShot 2026-03-06 at 15.07.47.mp4\" 2>&1 | head -30)",
+      "Bash(mkdir -p /tmp/floatydo-frames && ffmpeg -i \"/Users/raffichilingaryan/Library/Application Support/CleanShot/media/media_IZLpvOzQNc/CleanShot 2026-03-06 at 15.07.47.mp4\" -vf \"fps=60\" /tmp/floatydo-frames/frame_%04d.png 2>&1 | tail -5)",
+      "Bash(ffmpeg -y -i \"/Users/raffichilingaryan/Library/Application Support/CleanShot/media/media_IZLpvOzQNc/CleanShot 2026-03-06 at 15.07.47.mp4\" -vf \"select='not\\(mod\\(n\\\\,30\\)\\)',scale=259:227,tile=8x5\" -frames:v 1 -update 1 /tmp/floatydo-overview.png 2>&1 | tail -3)"
+    ]
+  }
+}
