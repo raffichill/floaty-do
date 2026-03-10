@@ -504,11 +504,39 @@ final class TodoStoreTests: XCTestCase {
             panelWidth: 460,
             hoverHighlightsEnabled: false,
             animationPreset: .snappy,
-            snapPadding: 24
+            snapPadding: 24,
+            themeColor: ThemeColor(red: 0.12, green: 0.45, blue: 0.73, alpha: 1),
+            fontStyle: .rounded,
+            fontSize: 16,
+            cornerRadius: 18
         )
         store1.updatePreferences(updatedPreferences)
 
         let store2 = TodoStore()
         XCTAssertEqual(store2.preferences, updatedPreferences)
+    }
+
+    func testLegacyPreferencesDecodeUsesNewFieldDefaults() throws {
+        let legacyPreferences: [String: Any] = [
+            "rowHeight": 42.0,
+            "panelWidth": 430.0,
+            "hoverHighlightsEnabled": false,
+            "animationPreset": "relaxed",
+            "snapPadding": 18.0
+        ]
+        let data = try JSONSerialization.data(withJSONObject: legacyPreferences)
+        UserDefaults.standard.set(data, forKey: "floatydo.preferences")
+
+        let store = TodoStore()
+
+        XCTAssertEqual(store.preferences.rowHeight, 42.0)
+        XCTAssertEqual(store.preferences.panelWidth, 430.0)
+        XCTAssertFalse(store.preferences.hoverHighlightsEnabled)
+        XCTAssertEqual(store.preferences.animationPreset, .relaxed)
+        XCTAssertEqual(store.preferences.snapPadding, 18.0)
+        XCTAssertEqual(store.preferences.themeColor, .default)
+        XCTAssertEqual(store.preferences.fontStyle, .system)
+        XCTAssertEqual(store.preferences.fontSize, 13.0)
+        XCTAssertEqual(store.preferences.cornerRadius, 10.0)
     }
 }

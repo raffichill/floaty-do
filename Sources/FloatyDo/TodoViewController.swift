@@ -28,7 +28,7 @@ fileprivate protocol TodoListViewDelegate: AnyObject {
     func listView(_ listView: TodoListView, didFinishDraggingRow rowID: TodoRowID, orderedItemIDs: [UUID])
 }
 
-public final class TodoViewController: NSViewController, NSPopoverDelegate, NSTextFieldDelegate {
+public final class TodoViewController: NSViewController, NSTextFieldDelegate {
     private let store: TodoStore
     private let listView = TodoListView()
     private let sharedEditor = KeyboardOnlyTextField()
@@ -47,7 +47,7 @@ public final class TodoViewController: NSViewController, NSPopoverDelegate, NSTe
     private var tasksTabButton: NSButton!
     private var archiveTabButton: NSButton!
     private var settingsButton: NSButton!
-    private var settingsPopover: NSPopover?
+    private var settingsWindowController: SettingsWindowController?
     private var isAnimating = false
 
     public init(store: TodoStore) {
@@ -97,7 +97,7 @@ public final class TodoViewController: NSViewController, NSPopoverDelegate, NSTe
 
         tasksTabButton = makeTabButton(symbolName: "checklist.unchecked", action: #selector(switchToTasks))
         archiveTabButton = makeTabButton(symbolName: "archivebox", action: #selector(switchToArchive))
-        settingsButton = makeTabButton(symbolName: "slider.horizontal.3", action: #selector(toggleSettings(_:)))
+        settingsButton = makeTabButton(symbolName: "gearshape", action: #selector(toggleSettings(_:)))
 
         let tabBar = NSStackView(views: [tasksTabButton, archiveTabButton, settingsButton])
         tabBar.orientation = .horizontal
@@ -230,7 +230,7 @@ public final class TodoViewController: NSViewController, NSPopoverDelegate, NSTe
     private func configureSharedEditor() {
         sharedEditor.isBordered = false
         sharedEditor.drawsBackground = false
-        sharedEditor.font = .systemFont(ofSize: 13)
+        sharedEditor.font = store.preferences.appFont()
         sharedEditor.focusRingType = .none
         sharedEditor.lineBreakMode = .byTruncatingTail
         sharedEditor.cell?.isScrollable = true
@@ -240,6 +240,9 @@ public final class TodoViewController: NSViewController, NSPopoverDelegate, NSTe
     }
 
     private func preferencesDidChange() {
+        sharedEditor.font = store.preferences.appFont()
+        settingsWindowController?.updatePreferences(store.preferences)
+        updateTabAppearance()
         refreshRows(animateResize: false)
     }
 
@@ -257,7 +260,7 @@ public final class TodoViewController: NSViewController, NSPopoverDelegate, NSTe
     private func updateTabAppearance() {
         tasksTabButton.contentTintColor = currentTab == .tasks ? .white : .white.withAlphaComponent(0.35)
         archiveTabButton.contentTintColor = currentTab == .archive ? .white : .white.withAlphaComponent(0.35)
-        settingsButton.contentTintColor = settingsPopover?.isShown == true ? .white : .white.withAlphaComponent(0.55)
+        settingsButton.contentTintColor = settingsWindowController?.window?.isVisible == true ? .white : .white.withAlphaComponent(0.55)
     }
 
     @objc private func switchToTasks() {
@@ -279,28 +282,22 @@ public final class TodoViewController: NSViewController, NSPopoverDelegate, NSTe
     }
 
     @objc private func toggleSettings(_ sender: NSButton) {
-        if let popover = settingsPopover, popover.isShown {
-            popover.performClose(nil)
+        if let window = settingsWindowController?.window, window.isVisible {
+            window.close()
             return
         }
 
-        let settingsController = SettingsViewController(preferences: store.preferences)
-        settingsController.onPreferencesChange = { [weak self] preferences in
+        let controller = settingsWindowController ?? SettingsWindowController(preferences: store.preferences)
+        controller.onPreferencesChange = { [weak self] preferences in
             self?.store.updatePreferences(preferences)
         }
-
-        let popover = NSPopover()
-        popover.behavior = .transient
-        popover.animates = true
-        popover.delegate = self
-        popover.contentViewController = settingsController
-        settingsPopover = popover
+        controller.onWindowVisibilityChange = { [weak self] _ in
+            self?.updateTabAppearance()
+        }
+        controller.updatePreferences(store.preferences)
+        settingsWindowController = controller
         updateTabAppearance()
-        popover.show(relativeTo: sender.bounds, of: sender, preferredEdge: .maxY)
-    }
-
-    public func popoverDidClose(_ notification: Notification) {
-        updateTabAppearance()
+        controller.present()
     }
 
     private func clampedDraftInsertionIndex(_ index: Int) -> Int {
@@ -1696,7 +1693,7 @@ fileprivate final class TodoListView: NSView {
         let imageView = NSImageView(image: image)
         imageView.imageScaling = .scaleAxesIndependently
         imageView.wantsLayer = true
-        imageView.layer?.cornerRadius = CGFloat(LayoutMetrics.rowCornerRadius)
+        imageView.layer?.cornerRadius = CGFloat(preferences.cornerRadius)
         imageView.layer?.shadowColor = NSColor.black.cgColor
         imageView.layer?.shadowOpacity = 0.22
         imageView.layer?.shadowRadius = 12
@@ -1811,13 +1808,13 @@ fileprivate final class TodoRowView: NSView {
         wantsLayer = true
 
         backgroundView.wantsLayer = true
-        backgroundView.layer?.cornerRadius = CGFloat(LayoutMetrics.rowCornerRadius)
+        backgroundView.layer?.cornerRadius = CGFloat(preferences.cornerRadius)
         addSubview(backgroundView)
 
         circleView.wantsLayer = true
         addSubview(circleView)
 
-        textLabel.font = .systemFont(ofSize: 13)
+        textLabel.font = preferences.appFont()
         textLabel.lineBreakMode = .byTruncatingTail
         textLabel.wantsLayer = true
         addSubview(textLabel)
@@ -1869,7 +1866,9 @@ fileprivate final class TodoRowView: NSView {
         let config = NSImage.SymbolConfiguration(pointSize: 14, weight: .regular)
         let image = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)!
         circleView.image = image.withSymbolConfiguration(config)
-        editingTextView.font = .systemFont(ofSize: 13)
+        textLabel.font = preferences.appFont()
+        editingTextView.font = preferences.appFont()
+        backgroundView.layer?.cornerRadius = CGFloat(preferences.cornerRadius)
 
         updateAppearance()
         needsLayout = true
@@ -2018,12 +2017,7 @@ fileprivate final class TodoRowView: NSView {
     }
 
     private func updateAppearance() {
-        let activeFillColor = NSColor(
-            srgbRed: 0.22745098,
-            green: 0.22745098,
-            blue: 0.2627451,
-            alpha: 1.0
-        )
+        let activeFillColor = preferences.activeFillColor
         let circleAlpha = isRowSelected && model.isSelectable
             ? max(CGFloat(model.circleOpacity), model.isDone ? CGFloat(model.textOpacity) : 0.86)
             : CGFloat(model.circleOpacity)
@@ -2135,7 +2129,7 @@ fileprivate final class TodoRowView: NSView {
     private func attributedText(alpha: CGFloat) -> NSAttributedString {
         let attributes: [NSAttributedString.Key: Any] = [
             .foregroundColor: NSColor.white.withAlphaComponent(alpha),
-            .font: NSFont.systemFont(ofSize: 13),
+            .font: preferences.appFont(),
             .strikethroughStyle: model.showsStrikethrough ? NSUnderlineStyle.single.rawValue : 0,
         ]
         return NSAttributedString(string: model.text, attributes: attributes)

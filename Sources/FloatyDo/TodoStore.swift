@@ -135,7 +135,11 @@ public final class TodoStore: ObservableObject {
             panelWidth: min(max(newPreferences.panelWidth, LayoutMetrics.minPanelWidth), LayoutMetrics.maxPanelWidth),
             hoverHighlightsEnabled: newPreferences.hoverHighlightsEnabled,
             animationPreset: newPreferences.animationPreset,
-            snapPadding: max(0, newPreferences.snapPadding)
+            snapPadding: max(0, newPreferences.snapPadding),
+            themeColor: newPreferences.themeColor.clamped(),
+            fontStyle: newPreferences.fontStyle,
+            fontSize: min(max(newPreferences.fontSize, LayoutMetrics.minFontSize), LayoutMetrics.maxFontSize),
+            cornerRadius: min(max(newPreferences.cornerRadius, LayoutMetrics.minCornerRadius), LayoutMetrics.maxCornerRadius)
         )
         preferences = clamped
     }
