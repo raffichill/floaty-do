@@ -376,6 +376,10 @@ extension AppPreferences {
         palette.highlight
     }
 
+    var secondarySelectionFillColor: NSColor {
+        panelBackgroundColor.blended(toward: activeFillColor, amount: usesLightText ? 0.55 : 0.48)
+    }
+
     var primaryTextColor: NSColor {
         palette.text
     }
