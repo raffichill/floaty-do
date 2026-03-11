@@ -209,6 +209,19 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
                 }
             }
 
+            if hasCommand && hasShift && !hasOption && !hasControl {
+                switch event.keyCode {
+                case 125:
+                    self.extendSelection(to: .bottom)
+                    return nil
+                case 126:
+                    self.extendSelection(to: .top)
+                    return nil
+                default:
+                    break
+                }
+            }
+
             let firstResponder = self.view.window?.firstResponder
             let listOwnsFocus = firstResponder === self.listView || firstResponder === self.view
             if self.isRangeSelectionActive, mods.isEmpty {
@@ -827,6 +840,31 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         self.selectedRowID = orderedBatchRows[nextIndex]
         let lowerBound = min(anchorIndex, nextIndex)
         let upperBound = max(anchorIndex, nextIndex)
+        selectedRowIDs = Set(orderedBatchRows[lowerBound...upperBound])
+        syncSelectionUI(placeCaretAtEnd: false)
+    }
+
+    private func extendSelection(to destination: BoundaryDestination) {
+        guard !isAnimating, !listView.isBusy else { return }
+
+        let orderedBatchRows = batchSelectableRowIDs()
+        guard !orderedBatchRows.isEmpty else { return }
+        guard let selectedRowID,
+              orderedBatchRows.contains(selectedRowID) else { return }
+
+        if !isRangeSelectionActive {
+            selectionAnchorRowID = selectedRowID
+            selectedRowIDs = [selectedRowID]
+        }
+
+        let anchorID = selectionAnchorRowID ?? selectedRowID
+        guard let anchorIndex = orderedBatchRows.firstIndex(of: anchorID) else { return }
+
+        let targetIndex = destination == .top ? 0 : (orderedBatchRows.count - 1)
+        self.selectedRowID = orderedBatchRows[targetIndex]
+
+        let lowerBound = min(anchorIndex, targetIndex)
+        let upperBound = max(anchorIndex, targetIndex)
         selectedRowIDs = Set(orderedBatchRows[lowerBound...upperBound])
         syncSelectionUI(placeCaretAtEnd: false)
     }
@@ -1523,6 +1561,12 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
             return true
         case #selector(NSResponder.moveDownAndModifySelection(_:)):
             extendSelection(step: 1)
+            return true
+        case #selector(NSResponder.moveToBeginningOfDocumentAndModifySelection(_:)):
+            extendSelection(to: .top)
+            return true
+        case #selector(NSResponder.moveToEndOfDocumentAndModifySelection(_:)):
+            extendSelection(to: .bottom)
             return true
         case #selector(NSResponder.moveUp(_:)):
             moveUp()
