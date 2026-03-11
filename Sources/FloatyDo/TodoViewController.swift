@@ -165,7 +165,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
             guard let self else { return event }
             guard !self.isAnimating, !self.listView.isBusy else { return event }
 
-            let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            let mods = event.modifierFlags.intersection([.command, .shift, .option, .control])
             let hasCommand = mods.contains(.command)
             let hasShift = mods.contains(.shift)
             let hasOption = mods.contains(.option)
@@ -1399,14 +1399,16 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         }
     }
 
-    func moveUp() {
-        guard !isAnimating, !listView.isBusy else { return }
-        if isRangeSelectionActive {
+    @discardableResult
+    func moveUp() -> Bool {
+        guard !isAnimating, !listView.isBusy else { return false }
+        let collapsedRangeSelection = isRangeSelectionActive
+        if collapsedRangeSelection {
             clearRangeSelectionState()
         }
         if currentTab == .tasks {
             if collapseSelectedDraftForNavigation(step: -1) {
-                return
+                return true
             }
 
             if case .taskItem(let item)? = selectedModel?.kind,
@@ -1414,33 +1416,50 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
                itemIndex == 0,
                canShowDraftRow {
                 activateDraft(at: 0)
-                return
+                return true
             }
         }
 
         let navigationRows = navigationSelectableRowIDs()
-        guard !navigationRows.isEmpty else { return }
+        guard !navigationRows.isEmpty else {
+            if collapsedRangeSelection {
+                syncSelectionUI(placeCaretAtEnd: true)
+            }
+            return false
+        }
 
         if currentTab == .tasks, selectedRowID == .taskDraft, draftIsAtDefaultPosition {
             if let targetRowID = navigationRows.last {
                 activateRow(targetRowID, placeCaretAtEnd: true)
+                return true
             }
-            return
+            if collapsedRangeSelection {
+                syncSelectionUI(placeCaretAtEnd: true)
+            }
+            return false
         }
 
         guard let selectedRowID,
               let currentIndex = navigationRows.firstIndex(of: selectedRowID),
-              currentIndex > 0 else { return }
+              currentIndex > 0 else {
+            if collapsedRangeSelection {
+                syncSelectionUI(placeCaretAtEnd: true)
+            }
+            return false
+        }
         activateRow(navigationRows[currentIndex - 1], placeCaretAtEnd: true)
+        return true
     }
 
-    func moveDown() {
-        guard !isAnimating, !listView.isBusy else { return }
-        if isRangeSelectionActive {
+    @discardableResult
+    func moveDown() -> Bool {
+        guard !isAnimating, !listView.isBusy else { return false }
+        let collapsedRangeSelection = isRangeSelectionActive
+        if collapsedRangeSelection {
             clearRangeSelectionState()
         }
         if currentTab == .tasks, collapseSelectedDraftForNavigation(step: 1) {
-            return
+            return true
         }
 
         if currentTab == .tasks,
@@ -1449,15 +1468,26 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
            itemIndex == store.items.count - 1,
            canShowDraftRow {
             activateDraft(at: defaultDraftInsertionIndex)
-            return
+            return true
         }
 
         let navigationRows = navigationSelectableRowIDs()
-        guard !navigationRows.isEmpty else { return }
+        guard !navigationRows.isEmpty else {
+            if collapsedRangeSelection {
+                syncSelectionUI(placeCaretAtEnd: true)
+            }
+            return false
+        }
         guard let selectedRowID,
               let currentIndex = navigationRows.firstIndex(of: selectedRowID),
-              currentIndex < navigationRows.count - 1 else { return }
+              currentIndex < navigationRows.count - 1 else {
+            if collapsedRangeSelection {
+                syncSelectionUI(placeCaretAtEnd: true)
+            }
+            return false
+        }
         activateRow(navigationRows[currentIndex + 1], placeCaretAtEnd: true)
+        return true
     }
 
     func submitRow() {
