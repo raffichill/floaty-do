@@ -746,6 +746,38 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         }
     }
 
+    private func navigationSelectableRowIDs(in models: [TodoRowModel]? = nil) -> [TodoRowID] {
+        let source = models ?? rowModels
+        return source.compactMap { model in
+            switch model.kind {
+            case .taskItem where currentTab == .tasks:
+                return model.id
+            case .taskDraft where currentTab == .tasks:
+                let shouldIncludeDraft = !draftIsAtDefaultPosition || !taskDraft.isEmpty || store.items.isEmpty
+                return shouldIncludeDraft ? model.id : nil
+            case .archiveItem where currentTab == .archive:
+                return model.id
+            default:
+                return nil
+            }
+        }
+    }
+
+    private func batchSelectionIndex(for rowID: TodoRowID?, in models: [TodoRowModel]? = nil) -> Int? {
+        guard let rowID else { return nil }
+        return batchSelectableRowIDs(in: models).firstIndex(of: rowID)
+    }
+
+    private func taskSelectionIDAfterMutation(in models: [TodoRowModel], taskIndex: Int) -> TodoRowID? {
+        let taskRows = batchSelectableRowIDs(in: models)
+        if !taskRows.isEmpty {
+            let clampedIndex = max(0, min(taskIndex, taskRows.count - 1))
+            return taskRows[clampedIndex]
+        }
+
+        return models.contains(where: { $0.id == .taskDraft && $0.isSelectable }) ? .taskDraft : nil
+    }
+
     private func selectedBatchRowIDs() -> [TodoRowID] {
         let orderedBatchRows = batchSelectableRowIDs()
         if isRangeSelectionActive {
@@ -787,9 +819,9 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
 
     private func jumpToBoundary(_ destination: BoundaryDestination) {
         guard !isAnimating, !listView.isBusy else { return }
-        let selectableRows = rowModels.filter(\.isSelectable)
-        guard !selectableRows.isEmpty else { return }
-        let targetRowID = destination == .top ? selectableRows.first?.id : selectableRows.last?.id
+        let navigableRows = navigationSelectableRowIDs()
+        guard !navigableRows.isEmpty else { return }
+        let targetRowID = destination == .top ? navigableRows.first : navigableRows.last
         if let targetRowID {
             activateRow(targetRowID, placeCaretAtEnd: true)
         }
@@ -806,17 +838,6 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         selectionAnchorRowID = focusedRowID
         selectedRowIDs = Set(orderedBatchRows)
         syncSelectionUI(placeCaretAtEnd: false)
-    }
-
-    private func nextSelectableIndex(from start: Int, step: Int) -> Int? {
-        var index = start + step
-        while rowModels.indices.contains(index) {
-            if rowModels[index].isSelectable {
-                return index
-            }
-            index += step
-        }
-        return nil
     }
 
     private func activateRow(_ rowID: TodoRowID, placeCaretAtEnd: Bool = true) {
@@ -1052,14 +1073,15 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         cancelDeferredEditorActivation()
         let selectedBatchRows = selectedBatchRowIDs()
         if isRangeSelectionActive, !selectedBatchRows.isEmpty {
-            let selectableRowIDs = rowModels.filter(\.isSelectable).map(\.id)
-            let selectionIndex = selectedBatchRows.compactMap { selectableRowIDs.firstIndex(of: $0) }.min() ?? 0
-
             switch currentTab {
             case .tasks:
+                let taskRowIDs = batchSelectableRowIDs()
+                let selectionIndex = selectedBatchRows.compactMap { taskRowIDs.firstIndex(of: $0) }.min() ?? 0
                 animateBatchCompletion(for: selectedBatchRows, selectionIndex: selectionIndex)
 
             case .archive:
+                let selectableRowIDs = rowModels.filter(\.isSelectable).map(\.id)
+                let selectionIndex = selectedBatchRows.compactMap { selectableRowIDs.firstIndex(of: $0) }.min() ?? 0
                 let itemIDs = selectedBatchRows.compactMap { rowID -> UUID? in
                     guard case .archiveItem(let item) = rowModels.first(where: { $0.id == rowID })?.kind else { return nil }
                     return item.id
@@ -1104,11 +1126,10 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         cancelDeferredEditorActivation()
         let selectedBatchRows = selectedBatchRowIDs()
         if isRangeSelectionActive, !selectedBatchRows.isEmpty {
-            let selectableRowIDs = rowModels.filter(\.isSelectable).map(\.id)
-            let selectionIndex = selectedBatchRows.compactMap { selectableRowIDs.firstIndex(of: $0) }.min() ?? 0
-
             switch currentTab {
             case .tasks:
+                let taskRowIDs = batchSelectableRowIDs()
+                let selectionIndex = selectedBatchRows.compactMap { taskRowIDs.firstIndex(of: $0) }.min() ?? 0
                 let itemIDs = selectedBatchRows.compactMap { rowID -> UUID? in
                     guard case .taskItem(let item) = rowModels.first(where: { $0.id == rowID })?.kind else { return nil }
                     return item.id
@@ -1118,10 +1139,12 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
                 itemIDs.forEach { store.deleteItem(id: $0) }
                 clearRangeSelectionState()
                 let updatedModels = buildRowModels(for: .tasks)
-                selectedRowID = buildSelectionID(in: updatedModels, selectableIndex: selectionIndex)
+                selectedRowID = taskSelectionIDAfterMutation(in: updatedModels, taskIndex: selectionIndex)
                 refreshRows()
 
             case .archive:
+                let selectableRowIDs = rowModels.filter(\.isSelectable).map(\.id)
+                let selectionIndex = selectedBatchRows.compactMap { selectableRowIDs.firstIndex(of: $0) }.min() ?? 0
                 let itemIDs = selectedBatchRows.compactMap { rowID -> UUID? in
                     guard case .archiveItem(let item) = rowModels.first(where: { $0.id == rowID })?.kind else { return nil }
                     return item.id
@@ -1137,18 +1160,19 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         }
 
         guard let selectedModel else { return }
-        let selectionIndex = selectedRowIndex ?? 0
 
         switch currentTab {
         case .tasks:
             guard case .taskItem(let item) = selectedModel.kind else { return }
+            let selectionIndex = batchSelectionIndex(for: selectedRowID) ?? 0
             store.deleteItem(id: item.id)
             let updatedModels = buildRowModels(for: .tasks)
-            selectedRowID = buildSelectionID(in: updatedModels, selectableIndex: selectionIndex)
+            selectedRowID = taskSelectionIDAfterMutation(in: updatedModels, taskIndex: selectionIndex)
             refreshRows()
 
         case .archive:
             guard case .archiveItem(let item) = selectedModel.kind else { return }
+            let selectionIndex = selectedRowIndex ?? 0
             store.deleteArchived(id: item.id)
             let updatedModels = buildRowModels(for: .archive)
             selectedRowID = buildSelectionID(in: updatedModels, selectableIndex: selectionIndex)
@@ -1158,8 +1182,9 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
 
     private func animateCompletion(for itemID: UUID) {
         guard !isAnimating, !listView.isBusy else { return }
-        guard let index = rowModels.firstIndex(where: { $0.itemID == itemID }),
-              let row = listView.rowView(for: .taskItem(itemID)) else { return }
+        let taskRowID = TodoRowID.taskItem(itemID)
+        guard let selectionIndex = batchSelectionIndex(for: taskRowID),
+              let row = listView.rowView(for: taskRowID) else { return }
 
         isAnimating = true
         detachEditor(makeListFirstResponder: false)
@@ -1169,7 +1194,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
             guard let self else { return }
             self.store.archive(id: itemID)
             let updatedModels = self.buildRowModels(for: .tasks)
-            self.selectedRowID = self.buildSelectionID(in: updatedModels, selectableIndex: index)
+            self.selectedRowID = self.taskSelectionIDAfterMutation(in: updatedModels, taskIndex: selectionIndex)
             self.isAnimating = false
             self.scheduleDeferredEditorActivation(for: self.selectedRowID, delay: self.motion.collapse * 0.75)
             self.refreshRows(
@@ -1196,7 +1221,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
             itemIDs.forEach { self.store.archive(id: $0) }
             self.clearRangeSelectionState()
             let updatedModels = self.buildRowModels(for: .tasks)
-            self.selectedRowID = self.buildSelectionID(in: updatedModels, selectableIndex: selectionIndex)
+            self.selectedRowID = self.taskSelectionIDAfterMutation(in: updatedModels, taskIndex: selectionIndex)
             self.isAnimating = false
             self.scheduleDeferredEditorActivation(for: self.selectedRowID, delay: self.motion.collapse * 0.75)
             self.refreshRows(
@@ -1250,9 +1275,20 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
             }
         }
 
-        guard let currentIndex = selectedRowIndex,
-              let nextIndex = nextSelectableIndex(from: currentIndex, step: -1) else { return }
-        activateRow(rowModels[nextIndex].id, placeCaretAtEnd: true)
+        let navigationRows = navigationSelectableRowIDs()
+        guard !navigationRows.isEmpty else { return }
+
+        if currentTab == .tasks, selectedRowID == .taskDraft, draftIsAtDefaultPosition {
+            if let targetRowID = navigationRows.last {
+                activateRow(targetRowID, placeCaretAtEnd: true)
+            }
+            return
+        }
+
+        guard let selectedRowID,
+              let currentIndex = navigationRows.firstIndex(of: selectedRowID),
+              currentIndex > 0 else { return }
+        activateRow(navigationRows[currentIndex - 1], placeCaretAtEnd: true)
     }
 
     func moveDown() {
@@ -1263,9 +1299,22 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         if currentTab == .tasks, collapseSelectedDraftForNavigation(step: 1) {
             return
         }
-        guard let currentIndex = selectedRowIndex,
-              let nextIndex = nextSelectableIndex(from: currentIndex, step: 1) else { return }
-        activateRow(rowModels[nextIndex].id, placeCaretAtEnd: true)
+
+        if currentTab == .tasks,
+           case .taskItem(let item)? = selectedModel?.kind,
+           let itemIndex = store.items.firstIndex(where: { $0.id == item.id }),
+           itemIndex == store.items.count - 1,
+           canShowDraftRow {
+            activateDraft(at: defaultDraftInsertionIndex)
+            return
+        }
+
+        let navigationRows = navigationSelectableRowIDs()
+        guard !navigationRows.isEmpty else { return }
+        guard let selectedRowID,
+              let currentIndex = navigationRows.firstIndex(of: selectedRowID),
+              currentIndex < navigationRows.count - 1 else { return }
+        activateRow(navigationRows[currentIndex + 1], placeCaretAtEnd: true)
     }
 
     func submitRow() {
