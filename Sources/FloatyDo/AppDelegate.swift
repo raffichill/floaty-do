@@ -1,6 +1,6 @@
 import AppKit
 
-public class AppDelegate: NSObject, NSApplicationDelegate {
+public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private enum PanelSnapDirection {
         case left
         case right
@@ -14,65 +14,18 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
     private var todoVC: TodoViewController!
     private var appEventMonitor: Any?
 
-    private func debugLog(_ message: String) {
-        let line = "[\(Date())] \(message)\n"
-        fputs(line, stderr)
-        let data = Data(line.utf8)
-        if FileManager.default.fileExists(atPath: DebugLogPaths.launchURL.path) {
-            if let handle = try? FileHandle(forWritingTo: DebugLogPaths.launchURL) {
-                try? handle.seekToEnd()
-                try? handle.write(contentsOf: data)
-                try? handle.close()
-            }
-        } else {
-            try? data.write(to: DebugLogPaths.launchURL)
-        }
-    }
-
-    private func resetDebugLogs() {
-        DebugLogPaths.ensureDirectoryExists()
-        let bundlePath = Bundle.main.bundleURL.path
-        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown"
-        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown"
-        let pid = ProcessInfo.processInfo.processIdentifier
-        let timestamp = ISO8601DateFormatter().string(from: Date())
-
-        let launchHeader = """
-        === FloatyDo launch session ===
-        timestamp=\(timestamp)
-        pid=\(pid)
-        bundle=\(bundlePath)
-        version=\(version)
-        build=\(build)
-
-        """
-        let layoutHeader = """
-        === FloatyDo layout session ===
-        timestamp=\(timestamp)
-        pid=\(pid)
-        bundle=\(bundlePath)
-
-        """
-
-        try? Data(launchHeader.utf8).write(to: DebugLogPaths.launchURL)
-        try? Data(layoutHeader.utf8).write(to: DebugLogPaths.layoutURL)
-    }
-
     public func applicationDidFinishLaunching(_ notification: Notification) {
-        resetDebugLogs()
-        debugLog("applicationDidFinishLaunching")
         NSApp.setActivationPolicy(.regular)
 
         let initialWidth = max(CGFloat(store.preferences.panelWidth), CGFloat(LayoutMetrics.minPanelWidth))
         panel = FloatingPanel(contentRect: NSRect(x: 0, y: 0, width: initialWidth, height: 300))
         panel.minSize = NSSize(width: LayoutMetrics.minPanelWidth, height: 200)
         panel.applyTheme(preferences: store.preferences)
-        debugLog("panel created")
+        panel.delegate = self
 
         // AppKit view controller
         todoVC = TodoViewController(store: store)
         panel.contentViewController = todoVC
-        debugLog("content view controller attached")
 
         // Menu bar item
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
@@ -86,22 +39,21 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
             button.action = #selector(statusItemClicked)
             button.target = self
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
-            debugLog("status item button configured")
-        } else {
-            debugLog("status item button missing")
         }
 
         // App-level shortcuts: cmd+Q to quit, cmd+W to hide panel, cmd+, for theme,
-        // ctrl+option+arrow to snap the panel to screen edges/corners.
+        // cmd+0 to reset the main window size, cmd+z/cmd+shift+z for undo/redo,
+        // and ctrl+option+arrow to snap the panel to screen edges/corners.
         appEventMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self else { return event }
             let mods = event.modifierFlags.intersection([.command, .option, .control, .shift])
+            let characters = event.charactersIgnoringModifiers?.lowercased()
 
             if mods.isEmpty, event.keyCode == 53, self.todoVC.closeSettingsWindowIfVisible() {
                 return nil
             }
 
-            if mods == [.control, .option] || mods == [.control, .shift] {
+            if mods == [.control, .option] {
                 switch event.keyCode {
                 case 123:
                     self.pushPanel(.left)
@@ -120,21 +72,34 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
 
+            if characters == "z" {
+                if mods == .command {
+                    return self.todoVC.performUndo() ? nil : event
+                }
+                if mods == [.command, .shift] {
+                    return self.todoVC.performRedo() ? nil : event
+                }
+            }
+
             guard mods == .command else { return event }
 
-            if event.charactersIgnoringModifiers == "q" {
+            if characters == "q" {
                 NSApp.terminate(nil)
                 return nil
             }
-            if event.charactersIgnoringModifiers == "w" {
+            if characters == "w" {
                 if self.todoVC.closeSettingsWindowIfVisible() {
                     return nil
                 }
                 self.panel.orderOut(nil)
                 return nil
             }
-            if event.charactersIgnoringModifiers == "," {
+            if characters == "," {
                 self.todoVC.openSettingsWindow()
+                return nil
+            }
+            if characters == "0" {
+                self.todoVC.resetWindowSize()
                 return nil
             }
             return event
@@ -145,15 +110,22 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     public func applicationDidBecomeActive(_ notification: Notification) {
-        debugLog("applicationDidBecomeActive visible=\(panel?.isVisible ?? false)")
         guard panel != nil, !panel.isVisible else { return }
         showPanel(activate: true)
     }
 
     public func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        debugLog("applicationShouldHandleReopen visible=\(flag)")
         showPanel(activate: true)
         return true
+    }
+
+    public func applicationWillTerminate(_ notification: Notification) {
+        store.flushPendingSaves()
+    }
+
+    public func windowWillReturnUndoManager(_ window: NSWindow) -> UndoManager? {
+        guard window === panel else { return nil }
+        return todoVC.undoManager
     }
 
     @objc private func statusItemClicked() {
@@ -175,14 +147,12 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func showPanel(activate: Bool) {
-        debugLog("showPanel activate=\(activate)")
         positionPanel()
         if activate {
             NSApp.activate(ignoringOtherApps: true)
         }
         panel.makeKeyAndOrderFront(nil)
         panel.orderFront(nil)
-        debugLog("panel visible after show=\(panel.isVisible) frame=\(panel.frame.debugDescription)")
     }
 
     private func positionPanel() {
