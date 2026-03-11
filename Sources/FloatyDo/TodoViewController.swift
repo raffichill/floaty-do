@@ -1,9 +1,6 @@
 import AppKit
 import Combine
-import os.log
 import QuartzCore
-
-private let logger = Logger(subsystem: "com.floatydo", category: "TodoVC")
 
 public enum Tab { case tasks, archive }
 
@@ -18,14 +15,6 @@ private struct TaskDraftState {
     var isEmpty: Bool {
         trimmedText.isEmpty
     }
-}
-
-fileprivate protocol TodoListViewDelegate: AnyObject {
-    func listView(_ listView: TodoListView, didActivateRow rowID: TodoRowID)
-    func listView(_ listView: TodoListView, didActivateCheckboxFor rowID: TodoRowID)
-    func listViewWillPressRowBody(_ listView: TodoListView, rowID: TodoRowID)
-    func listViewWillBeginDragging(_ listView: TodoListView, rowID: TodoRowID)
-    func listView(_ listView: TodoListView, didFinishDraggingRow rowID: TodoRowID, orderedItemIDs: [UUID])
 }
 
 public final class TodoViewController: NSViewController, NSTextFieldDelegate {
@@ -354,7 +343,6 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         let headerHeight = effectiveHeaderHeight(for: view.window)
         tabBarHeightConstraint?.constant = headerHeight
         listTopConstraint?.constant = headerHeight + CGFloat(LayoutMetrics.contentTopPadding)
-        logSingleItemLayoutState(trigger: "updateHeaderLayoutInsets")
     }
 
     private func makeTabButton(symbolName: String, action: Selector) -> NSButton {
@@ -436,6 +424,11 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         settingsWindowController = controller
         updateTabAppearance()
         controller.present()
+    }
+
+    func resetWindowSize() {
+        refreshRows(resize: false, animateResize: false, placeCaretAtEnd: false)
+        resizeWindow(animate: false)
     }
 
     private func clampedDraftInsertionIndex(_ index: Int) -> Int {
@@ -679,7 +672,6 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         view.layoutSubtreeIfNeeded()
         listView.layoutSubtreeIfNeeded()
         attachEditorIfNeeded(placeCaretAtEnd: placeCaretAtEnd)
-        logSingleItemLayoutState(trigger: "refreshRows")
     }
 
     private func shouldAnimateWindowResize(from previousRowCount: Int, to newRowCount: Int) -> Bool {
@@ -918,7 +910,6 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
             sharedEditor.stringValue = targetText
             editorRowID = rowID
         } else if sharedEditor.stringValue != targetText {
-            logger.debug("attachEditorIfNeeded resetting hidden editor for rowID=\(String(describing: rowID), privacy: .public) from=\"\(self.sharedEditor.stringValue, privacy: .public)\" to=\"\(targetText, privacy: .public)\"")
             sharedEditor.stringValue = targetText
         }
 
@@ -1168,10 +1159,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
     private func animateCompletion(for itemID: UUID) {
         guard !isAnimating, !listView.isBusy else { return }
         guard let index = rowModels.firstIndex(where: { $0.itemID == itemID }),
-              let row = listView.rowView(for: .taskItem(itemID)) else {
-            logger.warning("animateCompletion SKIPPED for itemID=\(itemID)")
-            return
-        }
+              let row = listView.rowView(for: .taskItem(itemID)) else { return }
 
         isAnimating = true
         detachEditor(makeListFirstResponder: false)
@@ -1343,36 +1331,6 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         }
     }
 
-    private func logSingleItemLayoutState(trigger: String) {
-        guard currentTab == .tasks, store.items.count <= 1 else { return }
-
-        DebugLogPaths.ensureDirectoryExists()
-        let url = DebugLogPaths.layoutURL
-        let timestamp = ISO8601DateFormatter().string(from: Date())
-        let windowFrame = view.window?.frame.debugDescription ?? "nil"
-        let contentLayoutRect = view.window?.contentLayoutRect.debugDescription ?? "nil"
-        let titlebarHeight = view.window?.titlebarHeight ?? 0
-        let safeAreaTop = containerView?.safeAreaInsets.top ?? view.safeAreaInsets.top
-        let tabBarHeight = tabBarHeightConstraint?.constant ?? 0
-        let tabBarFrame = tasksTabButton.superview?.frame.debugDescription ?? "nil"
-        let listTop = listTopConstraint?.constant ?? 0
-        let firstRowID = rowModels.first.map { String(describing: $0.id) } ?? "nil"
-        let firstRowFrame = rowModels.first.flatMap { listView.rowView(for: $0.id)?.frame.debugDescription } ?? "nil"
-        let line = "[\(timestamp)] trigger=\(trigger) items=\(store.items.count) rowCount=\(rowModels.count) selected=\(String(describing: selectedRowID)) editorRowID=\(String(describing: editorRowID)) editing=\(String(describing: currentEditingRowID)) editorText=\"\(sharedEditor.stringValue)\" draftIndex=\(taskDraft.insertionIndex) draftText=\"\(taskDraft.text)\" windowFrame=\(windowFrame) contentLayoutRect=\(contentLayoutRect) titlebarHeight=\(titlebarHeight) safeAreaTop=\(safeAreaTop) tabBarHeight=\(tabBarHeight) tabBarFrame=\(tabBarFrame) listTop=\(listTop) listFrame=\(listView.frame.debugDescription) firstRowID=\(firstRowID) firstRowFrame=\(firstRowFrame)\n"
-        fputs(line, stderr)
-
-        let data = Data(line.utf8)
-        if FileManager.default.fileExists(atPath: url.path) {
-            if let handle = try? FileHandle(forWritingTo: url) {
-                try? handle.seekToEnd()
-                try? handle.write(contentsOf: data)
-                try? handle.close()
-            }
-        } else {
-            try? data.write(to: url)
-        }
-    }
-
     public func controlTextDidChange(_ obj: Notification) {
         guard let rowID = editorRowID else { return }
         switch rowModels.first(where: { $0.id == rowID })?.kind {
@@ -1400,7 +1358,6 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
             break
         }
         syncVisibleEditorState()
-        logSingleItemLayoutState(trigger: "controlTextDidChange")
     }
 
     public func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
@@ -1445,30 +1402,30 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
 }
 
 extension TodoViewController: TodoListViewDelegate {
-    fileprivate func listView(_ listView: TodoListView, didActivateRow rowID: TodoRowID) {
+    func listView(_ listView: TodoListView, didActivateRow rowID: TodoRowID) {
         activateRow(rowID, placeCaretAtEnd: true)
         if currentTab == .tasks, rowID != .taskDraft {
             normalizeDraftBeforeStructuralAction()
         }
     }
 
-    fileprivate func listView(_ listView: TodoListView, didActivateCheckboxFor rowID: TodoRowID) {
+    func listView(_ listView: TodoListView, didActivateCheckboxFor rowID: TodoRowID) {
         guard case .taskItem(let item) = rowModels.first(where: { $0.id == rowID })?.kind else { return }
         clearRangeSelectionState()
         selectedRowID = rowID
         animateCompletion(for: item.id)
     }
 
-    fileprivate func listViewWillPressRowBody(_ listView: TodoListView, rowID: TodoRowID) {
+    func listViewWillPressRowBody(_ listView: TodoListView, rowID: TodoRowID) {
         detachEditor(makeListFirstResponder: true)
     }
 
-    fileprivate func listViewWillBeginDragging(_ listView: TodoListView, rowID: TodoRowID) {
+    func listViewWillBeginDragging(_ listView: TodoListView, rowID: TodoRowID) {
         detachEditor(makeListFirstResponder: false)
         view.window?.makeFirstResponder(nil)
     }
 
-    fileprivate func listView(_ listView: TodoListView, didFinishDraggingRow rowID: TodoRowID, orderedItemIDs: [UUID]) {
+    func listView(_ listView: TodoListView, didFinishDraggingRow rowID: TodoRowID, orderedItemIDs: [UUID]) {
         store.reorderItems(by: orderedItemIDs)
         clearRangeSelectionState()
         selectedRowID = rowID
@@ -1483,6 +1440,8 @@ private extension NSWindow {
         return max(safeAreaHeight, layoutChromeHeight)
     }
 }
+
+#if false
 
 fileprivate final class TodoListView: NSView {
     fileprivate enum HitZone {
@@ -2898,3 +2857,4 @@ public final class CaretEndFieldEditor: NSTextView {
         }
     }
 }
+#endif
