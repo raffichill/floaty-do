@@ -140,6 +140,24 @@ public final class TodoStore: ObservableObject {
         persistPreferencesImmediately()
     }
 
+    public func restoreState(
+        items: [TodoItem],
+        archivedItems: [TodoItem],
+        preferences: AppPreferences
+    ) {
+        cancelScheduledSave(for: .items)
+        cancelScheduledSave(for: .archive)
+        cancelScheduledSave(for: .preferences)
+
+        self.items = items
+        self.archivedItems = archivedItems
+        self.preferences = clampedPreferences(from: preferences)
+
+        saveItems()
+        saveArchive()
+        savePreferences()
+    }
+
     public func flushPendingSaves() {
         pendingItemSaveWorkItem?.cancel()
         pendingItemSaveWorkItem = nil

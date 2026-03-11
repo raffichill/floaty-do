@@ -1,6 +1,6 @@
 import AppKit
 
-public class AppDelegate: NSObject, NSApplicationDelegate {
+public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private enum PanelSnapDirection {
         case left
         case right
@@ -21,6 +21,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         panel = FloatingPanel(contentRect: NSRect(x: 0, y: 0, width: initialWidth, height: 300))
         panel.minSize = NSSize(width: LayoutMetrics.minPanelWidth, height: 200)
         panel.applyTheme(preferences: store.preferences)
+        panel.delegate = self
 
         // AppKit view controller
         todoVC = TodoViewController(store: store)
@@ -41,11 +42,12 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         // App-level shortcuts: cmd+Q to quit, cmd+W to hide panel, cmd+, for theme,
-        // cmd+0 to reset the main window size, and ctrl+option+arrow to snap
-        // the panel to screen edges/corners.
+        // cmd+0 to reset the main window size, cmd+z/cmd+shift+z for undo/redo,
+        // and ctrl+option+arrow to snap the panel to screen edges/corners.
         appEventMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self else { return event }
             let mods = event.modifierFlags.intersection([.command, .option, .control, .shift])
+            let characters = event.charactersIgnoringModifiers?.lowercased()
 
             if mods.isEmpty, event.keyCode == 53, self.todoVC.closeSettingsWindowIfVisible() {
                 return nil
@@ -70,24 +72,33 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
 
+            if characters == "z" {
+                if mods == .command {
+                    return self.todoVC.performUndo() ? nil : event
+                }
+                if mods == [.command, .shift] {
+                    return self.todoVC.performRedo() ? nil : event
+                }
+            }
+
             guard mods == .command else { return event }
 
-            if event.charactersIgnoringModifiers == "q" {
+            if characters == "q" {
                 NSApp.terminate(nil)
                 return nil
             }
-            if event.charactersIgnoringModifiers == "w" {
+            if characters == "w" {
                 if self.todoVC.closeSettingsWindowIfVisible() {
                     return nil
                 }
                 self.panel.orderOut(nil)
                 return nil
             }
-            if event.charactersIgnoringModifiers == "," {
+            if characters == "," {
                 self.todoVC.openSettingsWindow()
                 return nil
             }
-            if event.charactersIgnoringModifiers == "0" {
+            if characters == "0" {
                 self.todoVC.resetWindowSize()
                 return nil
             }
@@ -110,6 +121,11 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
 
     public func applicationWillTerminate(_ notification: Notification) {
         store.flushPendingSaves()
+    }
+
+    public func windowWillReturnUndoManager(_ window: NSWindow) -> UndoManager? {
+        guard window === panel else { return nil }
+        return todoVC.undoManager
     }
 
     @objc private func statusItemClicked() {

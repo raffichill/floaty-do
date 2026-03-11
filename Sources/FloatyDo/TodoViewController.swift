@@ -2,9 +2,9 @@ import AppKit
 import Combine
 import QuartzCore
 
-public enum Tab { case tasks, archive }
+public enum Tab: Equatable { case tasks, archive }
 
-private struct TaskDraftState {
+private struct TaskDraftState: Equatable {
     var insertionIndex: Int
     var text: String
 
@@ -15,6 +15,17 @@ private struct TaskDraftState {
     var isEmpty: Bool {
         trimmedText.isEmpty
     }
+}
+
+private struct TodoUndoSnapshot: Equatable {
+    let items: [TodoItem]
+    let archivedItems: [TodoItem]
+    let preferences: AppPreferences
+    let currentTab: Tab
+    let selectedRowID: TodoRowID?
+    let selectionAnchorRowID: TodoRowID?
+    let selectedRowIDs: Set<TodoRowID>
+    let taskDraft: TaskDraftState
 }
 
 public final class TodoViewController: NSViewController, NSTextFieldDelegate {
@@ -44,11 +55,13 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
     private var tabBarHeightConstraint: NSLayoutConstraint?
     private var listTopConstraint: NSLayoutConstraint?
     private var lastKnownHeaderHeight: CGFloat = 0
+    private let historyManager = UndoManager()
 
     public init(store: TodoStore) {
         self.store = store
         self.taskDraft = TaskDraftState(insertionIndex: store.items.count, text: "")
         super.init(nibName: nil, bundle: nil)
+        historyManager.levelsOfUndo = 100
     }
 
     required init?(coder: NSCoder) { fatalError() }
@@ -138,6 +151,10 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
 
         self.view = container
         updateTabAppearance()
+    }
+
+    public override var undoManager: UndoManager? {
+        historyManager
     }
 
     public override func viewDidLoad() {
@@ -415,7 +432,9 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
     func openSettingsWindow() {
         let controller = settingsWindowController ?? SettingsWindowController(preferences: store.preferences)
         controller.onPreferencesChange = { [weak self] preferences in
-            self?.store.updatePreferences(preferences)
+            self?.performUndoableAction("Theme Change") {
+                self?.store.updatePreferences(preferences)
+            }
         }
         controller.onWindowVisibilityChange = { [weak self] _ in
             self?.updateTabAppearance()
@@ -858,6 +877,73 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         attachEditorIfNeeded(placeCaretAtEnd: placeCaretAtEnd)
     }
 
+    private func captureUndoSnapshot() -> TodoUndoSnapshot {
+        TodoUndoSnapshot(
+            items: store.items,
+            archivedItems: store.archivedItems,
+            preferences: store.preferences,
+            currentTab: currentTab,
+            selectedRowID: selectedRowID,
+            selectionAnchorRowID: selectionAnchorRowID,
+            selectedRowIDs: selectedRowIDs,
+            taskDraft: taskDraft
+        )
+    }
+
+    private func restoreUndoSnapshot(_ snapshot: TodoUndoSnapshot) {
+        cancelDeferredEditorActivation()
+        isAnimating = false
+        detachEditor(makeListFirstResponder: false)
+
+        store.restoreState(
+            items: snapshot.items,
+            archivedItems: snapshot.archivedItems,
+            preferences: snapshot.preferences
+        )
+        currentTab = snapshot.currentTab
+        selectedRowID = snapshot.selectedRowID
+        selectionAnchorRowID = snapshot.selectionAnchorRowID
+        selectedRowIDs = snapshot.selectedRowIDs
+        taskDraft = snapshot.taskDraft
+
+        updateTabAppearance()
+        refreshRows(animateResize: false, placeCaretAtEnd: true)
+    }
+
+    private func registerUndoSnapshot(_ snapshot: TodoUndoSnapshot, actionName: String) {
+        historyManager.registerUndo(withTarget: self) { target in
+            let redoSnapshot = target.captureUndoSnapshot()
+            target.restoreUndoSnapshot(snapshot)
+            target.registerUndoSnapshot(redoSnapshot, actionName: actionName)
+        }
+        historyManager.setActionName(actionName)
+    }
+
+    private func registerUndoSnapshotIfChanged(_ snapshot: TodoUndoSnapshot, actionName: String) {
+        guard captureUndoSnapshot() != snapshot else { return }
+        registerUndoSnapshot(snapshot, actionName: actionName)
+    }
+
+    private func performUndoableAction(_ actionName: String, _ action: () -> Void) {
+        let snapshot = captureUndoSnapshot()
+        action()
+        registerUndoSnapshotIfChanged(snapshot, actionName: actionName)
+    }
+
+    func performUndo() -> Bool {
+        guard historyManager.canUndo else { return false }
+        guard !isAnimating, !listView.isBusy else { return false }
+        historyManager.undo()
+        return true
+    }
+
+    func performRedo() -> Bool {
+        guard historyManager.canRedo else { return false }
+        guard !isAnimating, !listView.isBusy else { return false }
+        historyManager.redo()
+        return true
+    }
+
     private func refreshVisibleModel(for rowID: TodoRowID) {
         guard let index = rowModels.firstIndex(where: { $0.id == rowID }),
               let updatedModel = latestVisibleModel(for: rowID) else { return }
@@ -1077,21 +1163,27 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
             case .tasks:
                 let taskRowIDs = batchSelectableRowIDs()
                 let selectionIndex = selectedBatchRows.compactMap { taskRowIDs.firstIndex(of: $0) }.min() ?? 0
-                animateBatchCompletion(for: selectedBatchRows, selectionIndex: selectionIndex)
+                animateBatchCompletion(
+                    for: selectedBatchRows,
+                    selectionIndex: selectionIndex,
+                    undoSnapshot: captureUndoSnapshot()
+                )
 
             case .archive:
-                let selectableRowIDs = rowModels.filter(\.isSelectable).map(\.id)
-                let selectionIndex = selectedBatchRows.compactMap { selectableRowIDs.firstIndex(of: $0) }.min() ?? 0
-                let itemIDs = selectedBatchRows.compactMap { rowID -> UUID? in
-                    guard case .archiveItem(let item) = rowModels.first(where: { $0.id == rowID })?.kind else { return nil }
-                    return item.id
+                performUndoableAction("Restore") {
+                    let selectableRowIDs = rowModels.filter(\.isSelectable).map(\.id)
+                    let selectionIndex = selectedBatchRows.compactMap { selectableRowIDs.firstIndex(of: $0) }.min() ?? 0
+                    let itemIDs = selectedBatchRows.compactMap { rowID -> UUID? in
+                        guard case .archiveItem(let item) = rowModels.first(where: { $0.id == rowID })?.kind else { return nil }
+                        return item.id
+                    }
+                    guard !itemIDs.isEmpty else { return }
+                    itemIDs.forEach { store.restore(id: $0) }
+                    clearRangeSelectionState()
+                    let updatedModels = buildRowModels(for: .archive)
+                    selectedRowID = buildSelectionID(in: updatedModels, selectableIndex: selectionIndex)
+                    refreshRows()
                 }
-                guard !itemIDs.isEmpty else { return }
-                itemIDs.forEach { store.restore(id: $0) }
-                clearRangeSelectionState()
-                let updatedModels = buildRowModels(for: .archive)
-                selectedRowID = buildSelectionID(in: updatedModels, selectableIndex: selectionIndex)
-                refreshRows()
             }
             return
         }
@@ -1102,23 +1194,26 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         case .tasks:
             switch selectedModel.kind {
             case .taskItem(let item):
-                animateCompletion(for: item.id)
+                animateCompletion(for: item.id, undoSnapshot: captureUndoSnapshot())
 
             case .taskDraft:
+                let undoSnapshot = captureUndoSnapshot()
                 guard let insertedItem = promoteDraftToItem(selectInsertedItem: true) else { return }
-                animateCompletion(for: insertedItem.id)
+                animateCompletion(for: insertedItem.id, undoSnapshot: undoSnapshot)
 
             case .archiveItem, .filler:
                 return
             }
 
         case .archive:
-            guard case .archiveItem(let item) = selectedModel.kind else { return }
-            let selectionIndex = selectedRowIndex ?? 0
-            store.restore(id: item.id)
-            let updatedModels = buildRowModels(for: .archive)
-            selectedRowID = buildSelectionID(in: updatedModels, selectableIndex: selectionIndex)
-            refreshRows()
+            performUndoableAction("Restore") {
+                guard case .archiveItem(let item) = selectedModel.kind else { return }
+                let selectionIndex = selectedRowIndex ?? 0
+                store.restore(id: item.id)
+                let updatedModels = buildRowModels(for: .archive)
+                selectedRowID = buildSelectionID(in: updatedModels, selectableIndex: selectionIndex)
+                refreshRows()
+            }
         }
     }
 
@@ -1128,33 +1223,37 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         if isRangeSelectionActive, !selectedBatchRows.isEmpty {
             switch currentTab {
             case .tasks:
-                let taskRowIDs = batchSelectableRowIDs()
-                let selectionIndex = selectedBatchRows.compactMap { taskRowIDs.firstIndex(of: $0) }.min() ?? 0
-                let itemIDs = selectedBatchRows.compactMap { rowID -> UUID? in
-                    guard case .taskItem(let item) = rowModels.first(where: { $0.id == rowID })?.kind else { return nil }
-                    return item.id
+                performUndoableAction("Delete") {
+                    let taskRowIDs = batchSelectableRowIDs()
+                    let selectionIndex = selectedBatchRows.compactMap { taskRowIDs.firstIndex(of: $0) }.min() ?? 0
+                    let itemIDs = selectedBatchRows.compactMap { rowID -> UUID? in
+                        guard case .taskItem(let item) = rowModels.first(where: { $0.id == rowID })?.kind else { return nil }
+                        return item.id
+                    }
+                    guard !itemIDs.isEmpty else { return }
+                    detachEditor(makeListFirstResponder: false)
+                    itemIDs.forEach { store.deleteItem(id: $0) }
+                    clearRangeSelectionState()
+                    let updatedModels = buildRowModels(for: .tasks)
+                    selectedRowID = taskSelectionIDAfterMutation(in: updatedModels, taskIndex: selectionIndex)
+                    refreshRows()
                 }
-                guard !itemIDs.isEmpty else { return }
-                detachEditor(makeListFirstResponder: false)
-                itemIDs.forEach { store.deleteItem(id: $0) }
-                clearRangeSelectionState()
-                let updatedModels = buildRowModels(for: .tasks)
-                selectedRowID = taskSelectionIDAfterMutation(in: updatedModels, taskIndex: selectionIndex)
-                refreshRows()
 
             case .archive:
-                let selectableRowIDs = rowModels.filter(\.isSelectable).map(\.id)
-                let selectionIndex = selectedBatchRows.compactMap { selectableRowIDs.firstIndex(of: $0) }.min() ?? 0
-                let itemIDs = selectedBatchRows.compactMap { rowID -> UUID? in
-                    guard case .archiveItem(let item) = rowModels.first(where: { $0.id == rowID })?.kind else { return nil }
-                    return item.id
+                performUndoableAction("Delete") {
+                    let selectableRowIDs = rowModels.filter(\.isSelectable).map(\.id)
+                    let selectionIndex = selectedBatchRows.compactMap { selectableRowIDs.firstIndex(of: $0) }.min() ?? 0
+                    let itemIDs = selectedBatchRows.compactMap { rowID -> UUID? in
+                        guard case .archiveItem(let item) = rowModels.first(where: { $0.id == rowID })?.kind else { return nil }
+                        return item.id
+                    }
+                    guard !itemIDs.isEmpty else { return }
+                    itemIDs.forEach { store.deleteArchived(id: $0) }
+                    clearRangeSelectionState()
+                    let updatedModels = buildRowModels(for: .archive)
+                    selectedRowID = buildSelectionID(in: updatedModels, selectableIndex: selectionIndex)
+                    refreshRows()
                 }
-                guard !itemIDs.isEmpty else { return }
-                itemIDs.forEach { store.deleteArchived(id: $0) }
-                clearRangeSelectionState()
-                let updatedModels = buildRowModels(for: .archive)
-                selectedRowID = buildSelectionID(in: updatedModels, selectableIndex: selectionIndex)
-                refreshRows()
             }
             return
         }
@@ -1163,24 +1262,28 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
 
         switch currentTab {
         case .tasks:
-            guard case .taskItem(let item) = selectedModel.kind else { return }
-            let selectionIndex = batchSelectionIndex(for: selectedRowID) ?? 0
-            store.deleteItem(id: item.id)
-            let updatedModels = buildRowModels(for: .tasks)
-            selectedRowID = taskSelectionIDAfterMutation(in: updatedModels, taskIndex: selectionIndex)
-            refreshRows()
+            performUndoableAction("Delete") {
+                guard case .taskItem(let item) = selectedModel.kind else { return }
+                let selectionIndex = batchSelectionIndex(for: selectedRowID) ?? 0
+                store.deleteItem(id: item.id)
+                let updatedModels = buildRowModels(for: .tasks)
+                selectedRowID = taskSelectionIDAfterMutation(in: updatedModels, taskIndex: selectionIndex)
+                refreshRows()
+            }
 
         case .archive:
-            guard case .archiveItem(let item) = selectedModel.kind else { return }
-            let selectionIndex = selectedRowIndex ?? 0
-            store.deleteArchived(id: item.id)
-            let updatedModels = buildRowModels(for: .archive)
-            selectedRowID = buildSelectionID(in: updatedModels, selectableIndex: selectionIndex)
-            refreshRows()
+            performUndoableAction("Delete") {
+                guard case .archiveItem(let item) = selectedModel.kind else { return }
+                let selectionIndex = selectedRowIndex ?? 0
+                store.deleteArchived(id: item.id)
+                let updatedModels = buildRowModels(for: .archive)
+                selectedRowID = buildSelectionID(in: updatedModels, selectableIndex: selectionIndex)
+                refreshRows()
+            }
         }
     }
 
-    private func animateCompletion(for itemID: UUID) {
+    private func animateCompletion(for itemID: UUID, undoSnapshot: TodoUndoSnapshot) {
         guard !isAnimating, !listView.isBusy else { return }
         let taskRowID = TodoRowID.taskItem(itemID)
         guard let selectionIndex = batchSelectionIndex(for: taskRowID),
@@ -1203,10 +1306,11 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
                 selectionRevealRowID: self.selectedRowID,
                 placeCaretAtEnd: false
             )
+            self.registerUndoSnapshotIfChanged(undoSnapshot, actionName: "Complete")
         }
     }
 
-    private func animateBatchCompletion(for rowIDs: [TodoRowID], selectionIndex: Int) {
+    private func animateBatchCompletion(for rowIDs: [TodoRowID], selectionIndex: Int, undoSnapshot: TodoUndoSnapshot) {
         guard !isAnimating, !listView.isBusy else { return }
 
         let itemIDs = rowIDs.compactMap { rowID -> UUID? in
@@ -1230,6 +1334,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
                 selectionRevealRowID: self.selectedRowID,
                 placeCaretAtEnd: false
             )
+            self.registerUndoSnapshotIfChanged(undoSnapshot, actionName: "Complete")
         }
 
         guard !rows.isEmpty else {
@@ -1321,24 +1426,26 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         guard !isAnimating, !listView.isBusy, currentTab == .tasks else { return }
         guard let selectedModel else { return }
 
-        switch selectedModel.kind {
-        case .taskItem(let item):
-            normalizeDraftBeforeStructuralAction()
-            guard let itemIndex = store.items.firstIndex(where: { $0.id == item.id }),
-                  canShowDraftRow else { return }
-            activateDraft(at: itemIndex + 1)
+        performUndoableAction("Insert Row") {
+            switch selectedModel.kind {
+            case .taskItem(let item):
+                normalizeDraftBeforeStructuralAction()
+                guard let itemIndex = store.items.firstIndex(where: { $0.id == item.id }),
+                      canShowDraftRow else { return }
+                activateDraft(at: itemIndex + 1)
 
-        case .taskDraft:
-            if let insertedItem = promoteDraftToItem(selectInsertedItem: true),
-               let insertedIndex = store.items.firstIndex(where: { $0.id == insertedItem.id }),
-               canShowDraftRow {
-                activateDraft(at: insertedIndex + 1)
-            } else if !draftIsAtDefaultPosition {
-                _ = collapseSelectedDraftForNavigation(step: 1)
+            case .taskDraft:
+                if let insertedItem = promoteDraftToItem(selectInsertedItem: true),
+                   let insertedIndex = store.items.firstIndex(where: { $0.id == insertedItem.id }),
+                   canShowDraftRow {
+                    activateDraft(at: insertedIndex + 1)
+                } else if !draftIsAtDefaultPosition {
+                    _ = collapseSelectedDraftForNavigation(step: 1)
+                }
+
+            case .archiveItem, .filler:
+                return
             }
-
-        case .archiveItem, .filler:
-            return
         }
     }
 
@@ -1462,7 +1569,7 @@ extension TodoViewController: TodoListViewDelegate {
         guard case .taskItem(let item) = rowModels.first(where: { $0.id == rowID })?.kind else { return }
         clearRangeSelectionState()
         selectedRowID = rowID
-        animateCompletion(for: item.id)
+        animateCompletion(for: item.id, undoSnapshot: captureUndoSnapshot())
     }
 
     func listViewWillPressRowBody(_ listView: TodoListView, rowID: TodoRowID) {
@@ -1475,10 +1582,12 @@ extension TodoViewController: TodoListViewDelegate {
     }
 
     func listView(_ listView: TodoListView, didFinishDraggingRow rowID: TodoRowID, orderedItemIDs: [UUID]) {
-        store.reorderItems(by: orderedItemIDs)
-        clearRangeSelectionState()
-        selectedRowID = rowID
-        refreshRows(resize: false, animateResize: false)
+        performUndoableAction("Reorder") {
+            store.reorderItems(by: orderedItemIDs)
+            clearRangeSelectionState()
+            selectedRowID = rowID
+            refreshRows(resize: false, animateResize: false)
+        }
     }
 }
 

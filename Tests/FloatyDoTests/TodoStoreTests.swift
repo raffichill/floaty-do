@@ -560,4 +560,55 @@ final class TodoStoreTests: XCTestCase {
         XCTAssertEqual(store.preferences.fontSize, 14.0)
         XCTAssertEqual(store.preferences.cornerRadius, 10.0)
     }
+
+    func testRestoreStateReplacesItemsArchiveAndPreferences() {
+        let store = TodoStore()
+        store.add("Old")
+        store.archive(store.items[0])
+
+        let restoredItems = [TodoItem(text: "A"), TodoItem(text: "B")]
+        let restoredArchive = [TodoItem(text: "Archived")]
+        let restoredPreferences = AppPreferences(
+            rowHeight: 40,
+            panelWidth: 420,
+            hoverHighlightsEnabled: false,
+            animationPreset: .snappy,
+            snapPadding: 48,
+            themeColor: ThemeColor(red: 0.2, green: 0.3, blue: 0.4, alpha: 1),
+            fontStyle: .rounded,
+            fontSize: 15,
+            cornerRadius: 14
+        )
+
+        store.restoreState(
+            items: restoredItems,
+            archivedItems: restoredArchive,
+            preferences: restoredPreferences
+        )
+
+        XCTAssertEqual(store.items, restoredItems)
+        XCTAssertEqual(store.archivedItems, restoredArchive)
+        XCTAssertEqual(store.preferences, restoredPreferences)
+    }
+
+    func testRestoreStateClampsPreferences() {
+        let store = TodoStore()
+        let oversizedPreferences = AppPreferences(
+            rowHeight: 36,
+            panelWidth: 420,
+            hoverHighlightsEnabled: true,
+            animationPreset: .balanced,
+            snapPadding: 12,
+            themeColor: .default,
+            fontStyle: .system,
+            fontSize: 14.4,
+            cornerRadius: 99
+        )
+
+        store.restoreState(items: [], archivedItems: [], preferences: oversizedPreferences)
+
+        XCTAssertEqual(store.preferences.snapPadding, 32)
+        XCTAssertEqual(store.preferences.fontSize, 14)
+        XCTAssertEqual(store.preferences.cornerRadius, 16)
+    }
 }
