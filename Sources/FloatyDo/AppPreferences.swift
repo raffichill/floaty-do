@@ -432,7 +432,7 @@ enum LayoutMetrics {
     static let maxCornerRadius: Double = 24
     static let rowHorizontalInset: Double = 12
     static let textInset: Double = 8
-    static let rowBackgroundInset: Double = 10
+    static let rowBackgroundInset: Double = 8
     static let rowVerticalInset: Double = 2
     static let rowCornerRadius: Double = 10
     static let circleSize: Double = 18
