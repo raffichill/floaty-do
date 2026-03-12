@@ -723,7 +723,7 @@ final class TodoRowView: NSView {
     private enum AppearanceMetrics {
         static let pressedScale: CGFloat = 0.99
         static let pressAnimationDuration: CFTimeInterval = 0.08
-        static let showsDebugGeometry = true
+        static let showsDebugGeometry = false
     }
 
     private let backgroundView = NSView()
