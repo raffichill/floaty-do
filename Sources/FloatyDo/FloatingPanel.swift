@@ -2,6 +2,7 @@ import AppKit
 
 public final class FloatingPanel: NSWindow {
     private let customFieldEditor = CaretEndFieldEditor()
+    private let chromeToolbar = NSToolbar(identifier: "main")
     private var observers: [NSObjectProtocol] = []
 
     public init(contentRect: NSRect) {
@@ -13,6 +14,7 @@ public final class FloatingPanel: NSWindow {
         )
 
         level = .floating
+        collectionBehavior = [.managed, .fullScreenPrimary]
         titleVisibility = .hidden
         titlebarAppearsTransparent = true
 
@@ -20,9 +22,8 @@ public final class FloatingPanel: NSWindow {
         isReleasedWhenClosed = false
 
         // Taller title bar via empty toolbar — matches Things-style traffic light padding
-        let toolbar = NSToolbar(identifier: "main")
-        toolbar.showsBaselineSeparator = false
-        self.toolbar = toolbar
+        chromeToolbar.showsBaselineSeparator = false
+        self.toolbar = chromeToolbar
         toolbarStyle = .unifiedCompact
 
         // Unified dark background — title bar blends with content
@@ -73,6 +74,11 @@ public final class FloatingPanel: NSWindow {
         backgroundColor = preferences.panelBackgroundColor
         invalidateShadow()
         contentView?.needsDisplay = true
+    }
+
+    public func setFullScreenChromeHidden(_ hidden: Bool) {
+        toolbar = hidden ? nil : chromeToolbar
+        titlebarAppearsTransparent = true
     }
 
     private func applyWindowChromeLayout() {

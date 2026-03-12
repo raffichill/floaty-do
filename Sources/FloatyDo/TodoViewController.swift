@@ -104,9 +104,15 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         return selectedModel.isEditable ? selectedModel.id : nil
     }
 
+    private var isInNativeFullScreen: Bool {
+        view.window?.styleMask.contains(.fullScreen) == true
+    }
+
     public override func loadView() {
         let container = NSView(frame: NSRect(x: 0, y: 0, width: panelWidth, height: 240))
         container.wantsLayer = true
+        container.layer?.backgroundColor = store.preferences.panelBackgroundColor.cgColor
+        container.autoresizingMask = [.width, .height]
         containerView = container
 
         tasksTabButton = makeTabButton(symbolName: "checklist.unchecked", action: #selector(switchToTasks))
@@ -360,6 +366,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         if let panel = view.window as? FloatingPanel {
             panel.applyTheme(preferences: preferences)
         }
+        containerView?.layer?.backgroundColor = preferences.panelBackgroundColor.cgColor
         updateHeaderLayoutInsets()
         updateTabAppearance()
         refreshRows(preferences: preferences, animateResize: false)
@@ -374,6 +381,10 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
     }
 
     private func effectiveHeaderHeight(for window: NSWindow?) -> CGFloat {
+        if window?.styleMask.contains(.fullScreen) == true {
+            return defaultHeaderHeight
+        }
+
         let safeAreaTop = containerView?.safeAreaInsets.top ?? view.safeAreaInsets.top
         let layoutChromeHeight: CGFloat
         if let window {
@@ -1558,6 +1569,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
 
     private func resizeWindow(animate: Bool = true) {
         guard let window = view.window else { return }
+        guard !isInNativeFullScreen else { return }
         let rows = CGFloat(max(rowCount, 1))
         let contentHeight = rows * rowHeight + LayoutMetrics.contentTopPadding + LayoutMetrics.contentBottomPadding
         let titlebarHeight = window.titlebarHeight
