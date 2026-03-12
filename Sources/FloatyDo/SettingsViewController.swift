@@ -107,6 +107,7 @@ final class SettingsViewController: NSViewController {
     }
 
     func updatePreferences(_ preferences: AppPreferences) {
+        guard self.preferences != preferences else { return }
         self.preferences = preferences
         guard isViewLoaded else { return }
         applyPreferencesToControls()
@@ -164,8 +165,9 @@ final class SettingsViewController: NSViewController {
         fontSizeSlider.minValue = 0
         fontSizeSlider.maxValue = Double(LayoutMetrics.fontSizeOptions.count - 1)
         fontSizeSlider.numberOfTickMarks = LayoutMetrics.fontSizeOptions.count
-        fontSizeSlider.allowsTickMarkValuesOnly = true
+        fontSizeSlider.allowsTickMarkValuesOnly = false
         fontSizeSlider.isContinuous = true
+        fontSizeSlider.sendAction(on: [.leftMouseDown, .leftMouseDragged, .leftMouseUp])
         fontSizeSlider.target = self
         fontSizeSlider.action = #selector(fontSizeChanged(_:))
         fontSizeSlider.translatesAutoresizingMaskIntoConstraints = false
@@ -186,6 +188,7 @@ final class SettingsViewController: NSViewController {
     private func configureBorderRadiusSlider() {
         borderRadiusSlider.minValue = LayoutMetrics.minCornerRadius
         borderRadiusSlider.isContinuous = true
+        borderRadiusSlider.sendAction(on: [.leftMouseDown, .leftMouseDragged, .leftMouseUp])
         borderRadiusSlider.target = self
         borderRadiusSlider.action = #selector(borderRadiusChanged(_:))
         borderRadiusSlider.translatesAutoresizingMaskIntoConstraints = false
@@ -370,6 +373,10 @@ final class SettingsViewController: NSViewController {
         guard !isUpdatingControls else { return }
         let index = Int(round(sender.doubleValue))
         guard LayoutMetrics.fontSizeOptions.indices.contains(index) else { return }
+        let snappedValue = Double(index)
+        if sender.doubleValue != snappedValue {
+            sender.doubleValue = snappedValue
+        }
         commitPreferenceChange { updated in
             updated.fontSize = LayoutMetrics.fontSizeOptions[index]
         }
