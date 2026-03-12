@@ -130,17 +130,37 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     public func windowWillEnterFullScreen(_ notification: Notification) {
         guard notification.object as AnyObject? === panel else { return }
+        todoVC.setNativeFullScreenState(active: true)
         panel.level = .normal
         panel.isMovableByWindowBackground = false
         panel.setFullScreenChromeHidden(true)
     }
 
+    public func windowDidEnterFullScreen(_ notification: Notification) {
+        guard notification.object as AnyObject? === panel else { return }
+        todoVC.syncToWindowBounds()
+    }
+
+    public func windowWillExitFullScreen(_ notification: Notification) {
+        guard notification.object as AnyObject? === panel else { return }
+        todoVC.syncToWindowBounds()
+    }
+
     public func windowDidExitFullScreen(_ notification: Notification) {
         guard notification.object as AnyObject? === panel else { return }
+        todoVC.setNativeFullScreenState(active: false)
         panel.setFullScreenChromeHidden(false)
         panel.level = .floating
         panel.isMovableByWindowBackground = true
         positionPanel()
+    }
+
+    public func window(
+        _ window: NSWindow,
+        willUseFullScreenPresentationOptions proposedOptions: NSApplication.PresentationOptions
+    ) -> NSApplication.PresentationOptions {
+        guard window === panel else { return proposedOptions }
+        return proposedOptions.union([.autoHideToolbar, .autoHideMenuBar])
     }
 
     public func windowWillReturnUndoManager(_ window: NSWindow) -> UndoManager? {

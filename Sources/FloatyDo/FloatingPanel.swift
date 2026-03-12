@@ -77,8 +77,13 @@ public final class FloatingPanel: NSWindow {
     }
 
     public func setFullScreenChromeHidden(_ hidden: Bool) {
-        toolbar = hidden ? nil : chromeToolbar
+        // Detaching the toolbar in native fullscreen causes AppKit to fall back
+        // to an opaque titlebar region that sits on top of our custom header.
+        // Keep the transparent toolbar attached and let fullscreen presentation
+        // options auto-hide the system chrome instead.
+        toolbar = chromeToolbar
         titlebarAppearsTransparent = true
+        titleVisibility = .hidden
     }
 
     private func applyWindowChromeLayout() {

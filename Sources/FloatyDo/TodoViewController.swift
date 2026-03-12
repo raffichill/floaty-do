@@ -57,6 +57,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
     private var lastKnownHeaderHeight: CGFloat = 0
     private let historyManager = UndoManager()
     private var isApplyingSettingsPreferenceChange = false
+    private var nativeFullScreenState = false
 
     public init(store: TodoStore) {
         self.store = store
@@ -105,7 +106,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
     }
 
     private var isInNativeFullScreen: Bool {
-        view.window?.styleMask.contains(.fullScreen) == true
+        nativeFullScreenState || view.window?.styleMask.contains(.fullScreen) == true
     }
 
     public override func loadView() {
@@ -320,6 +321,12 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         resizeWindow(animate: false)
     }
 
+    public override func viewDidLayout() {
+        super.viewDidLayout()
+        syncToWindowBounds()
+        updateHeaderLayoutInsets()
+    }
+
     deinit {
         if let monitor = eventMonitor {
             NSEvent.removeMonitor(monitor)
@@ -503,6 +510,21 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
     func resetWindowSize() {
         refreshRows(resize: false, animateResize: false, placeCaretAtEnd: false)
         resizeWindow(animate: false)
+    }
+
+    func setNativeFullScreenState(active: Bool) {
+        nativeFullScreenState = active
+        syncToWindowBounds()
+        updateHeaderLayoutInsets()
+        view.layoutSubtreeIfNeeded()
+    }
+
+    func syncToWindowBounds() {
+        guard let superview = view.superview else { return }
+        let targetBounds = superview.bounds
+        if view.frame != targetBounds {
+            view.frame = targetBounds
+        }
     }
 
     private func clampedDraftInsertionIndex(_ index: Int) -> Int {
