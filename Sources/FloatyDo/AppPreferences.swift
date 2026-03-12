@@ -412,6 +412,10 @@ extension AppPreferences {
         LayoutMetrics.maximumCornerRadius(forRowHeight: rowHeight)
     }
 
+    var manualTextVerticalOffset: Double {
+        LayoutMetrics.manualTextVerticalOffset(fontStyle: fontStyle, fontSize: fontSize)
+    }
+
     func appFont(weight: NSFont.Weight = .regular) -> NSFont {
         fontStyle.font(ofSize: CGFloat(fontSize), weight: weight)
     }
@@ -428,11 +432,11 @@ enum LayoutMetrics {
     static var defaultFontSize: Double { fontSizeOptions[defaultFontSizeIndex] }
     static let minFontSize: Double = fontSizeOptions.first ?? 11
     static let maxFontSize: Double = fontSizeOptions.last ?? 16
-    static let minCornerRadius: Double = 0
+    static let minCornerRadius: Double = 4
     static let maxCornerRadius: Double = 24
     static let rowHorizontalInset: Double = 12
     static let textInset: Double = 8
-    static let rowBackgroundInset: Double = 10
+    static let rowBackgroundInset: Double = 8
     static let rowVerticalInset: Double = 2
     static let rowCornerRadius: Double = 10
     static let circleSize: Double = 18
@@ -448,6 +452,12 @@ enum LayoutMetrics {
     static func maximumCornerRadius(forRowHeight rowHeight: Double) -> Double {
         let visibleRowHeight = max(0, rowHeight - (rowVerticalInset * 2.0))
         return min(maxCornerRadius, visibleRowHeight / 2.0)
+    }
+
+    static func manualTextVerticalOffset(fontStyle: FontStylePreset, fontSize: Double) -> Double {
+        _ = fontStyle
+        _ = fontSize
+        return 0
     }
 
     static func nearestFontSizeOption(to value: Double) -> Double {

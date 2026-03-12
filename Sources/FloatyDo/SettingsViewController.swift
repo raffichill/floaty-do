@@ -107,6 +107,7 @@ final class SettingsViewController: NSViewController {
     }
 
     func updatePreferences(_ preferences: AppPreferences) {
+        guard self.preferences != preferences else { return }
         self.preferences = preferences
         guard isViewLoaded else { return }
         applyPreferencesToControls()
@@ -164,8 +165,9 @@ final class SettingsViewController: NSViewController {
         fontSizeSlider.minValue = 0
         fontSizeSlider.maxValue = Double(LayoutMetrics.fontSizeOptions.count - 1)
         fontSizeSlider.numberOfTickMarks = LayoutMetrics.fontSizeOptions.count
-        fontSizeSlider.allowsTickMarkValuesOnly = true
+        fontSizeSlider.allowsTickMarkValuesOnly = false
         fontSizeSlider.isContinuous = true
+        fontSizeSlider.sendAction(on: [.leftMouseDown, .leftMouseDragged, .leftMouseUp])
         fontSizeSlider.target = self
         fontSizeSlider.action = #selector(fontSizeChanged(_:))
         fontSizeSlider.translatesAutoresizingMaskIntoConstraints = false
@@ -186,6 +188,7 @@ final class SettingsViewController: NSViewController {
     private func configureBorderRadiusSlider() {
         borderRadiusSlider.minValue = LayoutMetrics.minCornerRadius
         borderRadiusSlider.isContinuous = true
+        borderRadiusSlider.sendAction(on: [.leftMouseDown, .leftMouseDragged, .leftMouseUp])
         borderRadiusSlider.target = self
         borderRadiusSlider.action = #selector(borderRadiusChanged(_:))
         borderRadiusSlider.translatesAutoresizingMaskIntoConstraints = false
@@ -329,8 +332,16 @@ final class SettingsViewController: NSViewController {
     }
 
     private func commitPreferenceChange(_ mutation: (inout AppPreferences) -> Void) {
+        let previous = preferences
         var updated = preferences
         mutation(&updated)
+        print(
+            "[SettingsTrace] commit",
+            "font=\(previous.fontStyle.rawValue)->\(updated.fontStyle.rawValue)",
+            "fontSize=\(previous.fontSize)->\(updated.fontSize)",
+            "radius=\(previous.cornerRadius)->\(updated.cornerRadius)",
+            "theme=\(previous.themeColor.red),\(previous.themeColor.green),\(previous.themeColor.blue)->\(updated.themeColor.red),\(updated.themeColor.green),\(updated.themeColor.blue)"
+        )
         preferences = updated
         applyPreferencesToControls()
         onPreferencesChange?(updated)
@@ -339,6 +350,7 @@ final class SettingsViewController: NSViewController {
     @objc private func themePresetSelected(_ sender: ThemePresetButton) {
         guard !isUpdatingControls else { return }
         guard Self.themePresets.indices.contains(sender.tag) else { return }
+        print("[SettingsTrace] themePresetSelected", "tag=\(sender.tag)", "currentFont=\(preferences.fontStyle.rawValue)")
         commitPreferenceChange { updated in
             updated.themeColor = Self.themePresets[sender.tag].color
         }
@@ -354,6 +366,13 @@ final class SettingsViewController: NSViewController {
     @objc private func fontChanged(_ sender: NSPopUpButton) {
         guard !isUpdatingControls else { return }
         guard FontStylePreset.allCases.indices.contains(sender.indexOfSelectedItem) else { return }
+        let selectedTitle = sender.titleOfSelectedItem ?? "nil"
+        print(
+            "[SettingsTrace] fontChanged",
+            "index=\(sender.indexOfSelectedItem)",
+            "title=\(selectedTitle)",
+            "currentFont=\(preferences.fontStyle.rawValue)"
+        )
         commitPreferenceChange { updated in
             updated.fontStyle = FontStylePreset.allCases[sender.indexOfSelectedItem]
         }
@@ -370,6 +389,10 @@ final class SettingsViewController: NSViewController {
         guard !isUpdatingControls else { return }
         let index = Int(round(sender.doubleValue))
         guard LayoutMetrics.fontSizeOptions.indices.contains(index) else { return }
+        let snappedValue = Double(index)
+        if sender.doubleValue != snappedValue {
+            sender.doubleValue = snappedValue
+        }
         commitPreferenceChange { updated in
             updated.fontSize = LayoutMetrics.fontSizeOptions[index]
         }

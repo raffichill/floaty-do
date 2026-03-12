@@ -56,6 +56,8 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
     private var listTopConstraint: NSLayoutConstraint?
     private var lastKnownHeaderHeight: CGFloat = 0
     private let historyManager = UndoManager()
+    private var isApplyingSettingsPreferenceChange = false
+    private var nativeFullScreenState = false
 
     public init(store: TodoStore) {
         self.store = store
@@ -103,9 +105,15 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         return selectedModel.isEditable ? selectedModel.id : nil
     }
 
+    private var isInNativeFullScreen: Bool {
+        nativeFullScreenState || view.window?.styleMask.contains(.fullScreen) == true
+    }
+
     public override func loadView() {
         let container = NSView(frame: NSRect(x: 0, y: 0, width: panelWidth, height: 240))
         container.wantsLayer = true
+        container.layer?.backgroundColor = store.preferences.panelBackgroundColor.cgColor
+        container.autoresizingMask = [.width, .height]
         containerView = container
 
         tasksTabButton = makeTabButton(symbolName: "checklist.unchecked", action: #selector(switchToTasks))
@@ -287,9 +295,15 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
 
         store.$preferences
             .dropFirst()
-            .receive(on: RunLoop.main)
-            .sink { [weak self] _ in
-                self?.preferencesDidChange()
+            .sink { [weak self] preferences in
+                guard let self else { return }
+                if Thread.isMainThread {
+                    self.preferencesDidChange(preferences)
+                } else {
+                    DispatchQueue.main.async { [weak self] in
+                        self?.preferencesDidChange(preferences)
+                    }
+                }
             }
             .store(in: &cancellables)
 
@@ -305,6 +319,12 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         updateHeaderLayoutInsets()
         refreshRows(resize: false, animateResize: false, placeCaretAtEnd: false)
         resizeWindow(animate: false)
+    }
+
+    public override func viewDidLayout() {
+        super.viewDidLayout()
+        syncToWindowBounds()
+        updateHeaderLayoutInsets()
     }
 
     deinit {
@@ -337,15 +357,30 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         sharedEditor.autoresizingMask = [.width, .height]
     }
 
-    private func preferencesDidChange() {
-        sharedEditor.font = store.preferences.appFont()
-        settingsWindowController?.updatePreferences(store.preferences)
-        if let panel = view.window as? FloatingPanel {
-            panel.applyTheme(preferences: store.preferences)
+    private func preferencesDidChange(_ preferences: AppPreferences) {
+        print(
+            "[SettingsTrace] todo.preferencesDidChange",
+            "font=\(preferences.fontStyle.rawValue)",
+            "fontSize=\(preferences.fontSize)",
+            "radius=\(preferences.cornerRadius)",
+            "theme=\(preferences.themeColor.red),\(preferences.themeColor.green),\(preferences.themeColor.blue)",
+            "fromSettings=\(isApplyingSettingsPreferenceChange)"
+        )
+        sharedEditor.font = preferences.appFont()
+        if !isApplyingSettingsPreferenceChange {
+            settingsWindowController?.updatePreferences(preferences)
         }
+        if let panel = view.window as? FloatingPanel {
+            panel.applyTheme(preferences: preferences)
+        }
+        containerView?.layer?.backgroundColor = preferences.panelBackgroundColor.cgColor
         updateHeaderLayoutInsets()
         updateTabAppearance()
-        refreshRows(animateResize: false)
+        refreshRows(preferences: preferences, animateResize: false)
+        view.window?.layoutIfNeeded()
+        view.window?.displayIfNeeded()
+        settingsWindowController?.window?.displayIfNeeded()
+        NSApp.updateWindows()
     }
 
     private var defaultHeaderHeight: CGFloat {
@@ -353,6 +388,10 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
     }
 
     private func effectiveHeaderHeight(for window: NSWindow?) -> CGFloat {
+        if window?.styleMask.contains(.fullScreen) == true {
+            return defaultHeaderHeight
+        }
+
         let safeAreaTop = containerView?.safeAreaInsets.top ?? view.safeAreaInsets.top
         let layoutChromeHeight: CGFloat
         if let window {
@@ -445,9 +484,19 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
     func openSettingsWindow() {
         let controller = settingsWindowController ?? SettingsWindowController(preferences: store.preferences)
         controller.onPreferencesChange = { [weak self] preferences in
-            self?.performUndoableAction("Theme Change") {
-                self?.store.updatePreferences(preferences)
+            guard let self else { return }
+            print(
+                "[SettingsTrace] todo.onPreferencesChange",
+                "font=\(preferences.fontStyle.rawValue)",
+                "fontSize=\(preferences.fontSize)",
+                "radius=\(preferences.cornerRadius)",
+                "theme=\(preferences.themeColor.red),\(preferences.themeColor.green),\(preferences.themeColor.blue)"
+            )
+            self.isApplyingSettingsPreferenceChange = true
+            self.performUndoableAction("Theme Change") {
+                self.store.updatePreferences(preferences)
             }
+            self.isApplyingSettingsPreferenceChange = false
         }
         controller.onWindowVisibilityChange = { [weak self] _ in
             self?.updateTabAppearance()
@@ -461,6 +510,21 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
     func resetWindowSize() {
         refreshRows(resize: false, animateResize: false, placeCaretAtEnd: false)
         resizeWindow(animate: false)
+    }
+
+    func setNativeFullScreenState(active: Bool) {
+        nativeFullScreenState = active
+        syncToWindowBounds()
+        updateHeaderLayoutInsets()
+        view.layoutSubtreeIfNeeded()
+    }
+
+    func syncToWindowBounds() {
+        guard let superview = view.superview else { return }
+        let targetBounds = superview.bounds
+        if view.frame != targetBounds {
+            view.frame = targetBounds
+        }
     }
 
     private func clampedDraftInsertionIndex(_ index: Int) -> Int {
@@ -675,6 +739,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
     }
 
     private func refreshRows(
+        preferences: AppPreferences? = nil,
         resize: Bool = true,
         animateResize: Bool = true,
         animatedLayout: Bool = false,
@@ -682,6 +747,13 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         selectionRevealRowID: TodoRowID? = nil,
         placeCaretAtEnd: Bool = true
     ) {
+        let resolvedPreferences = preferences ?? store.preferences
+        print(
+            "[SettingsTrace] todo.refreshRows",
+            "font=\(resolvedPreferences.fontStyle.rawValue)",
+            "fontSize=\(resolvedPreferences.fontSize)",
+            "radius=\(resolvedPreferences.cornerRadius)"
+        )
         let previousRowCount = rowModels.count
         rowModels = buildRowModels()
         ensureSelectedRowExists()
@@ -690,7 +762,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
             selectedRowID: selectedRowID,
             selectedRowIDs: selectedRowIDs,
             editingRowID: currentEditingRowID,
-            preferences: store.preferences,
+            preferences: resolvedPreferences,
             animatedLayout: animatedLayout,
             animatedLayoutDuration: animatedLayoutDuration,
             selectionRevealRowID: selectionRevealRowID
@@ -1519,6 +1591,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
 
     private func resizeWindow(animate: Bool = true) {
         guard let window = view.window else { return }
+        guard !isInNativeFullScreen else { return }
         let rows = CGFloat(max(rowCount, 1))
         let contentHeight = rows * rowHeight + LayoutMetrics.contentTopPadding + LayoutMetrics.contentBottomPadding
         let titlebarHeight = window.titlebarHeight

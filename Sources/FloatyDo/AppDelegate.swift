@@ -72,6 +72,11 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 }
             }
 
+            if mods == [.command, .control], characters == "f" {
+                self.togglePanelFullScreen()
+                return nil
+            }
+
             if characters == "z" {
                 if mods == .command {
                     return self.todoVC.performUndo() ? nil : event
@@ -123,6 +128,41 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         store.flushPendingSaves()
     }
 
+    public func windowWillEnterFullScreen(_ notification: Notification) {
+        guard notification.object as AnyObject? === panel else { return }
+        todoVC.setNativeFullScreenState(active: true)
+        panel.level = .normal
+        panel.isMovableByWindowBackground = false
+        panel.setFullScreenChromeHidden(true)
+    }
+
+    public func windowDidEnterFullScreen(_ notification: Notification) {
+        guard notification.object as AnyObject? === panel else { return }
+        todoVC.syncToWindowBounds()
+    }
+
+    public func windowWillExitFullScreen(_ notification: Notification) {
+        guard notification.object as AnyObject? === panel else { return }
+        todoVC.syncToWindowBounds()
+    }
+
+    public func windowDidExitFullScreen(_ notification: Notification) {
+        guard notification.object as AnyObject? === panel else { return }
+        todoVC.setNativeFullScreenState(active: false)
+        panel.setFullScreenChromeHidden(false)
+        panel.level = .floating
+        panel.isMovableByWindowBackground = true
+        positionPanel()
+    }
+
+    public func window(
+        _ window: NSWindow,
+        willUseFullScreenPresentationOptions proposedOptions: NSApplication.PresentationOptions
+    ) -> NSApplication.PresentationOptions {
+        guard window === panel else { return proposedOptions }
+        return proposedOptions.union([.autoHideToolbar, .autoHideMenuBar])
+    }
+
     public func windowWillReturnUndoManager(_ window: NSWindow) -> UndoManager? {
         guard window === panel else { return nil }
         return todoVC.undoManager
@@ -147,7 +187,9 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     private func showPanel(activate: Bool) {
-        positionPanel()
+        if !panel.styleMask.contains(.fullScreen) {
+            positionPanel()
+        }
         if activate {
             NSApp.activate(ignoringOtherApps: true)
         }
@@ -170,6 +212,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     private func pushPanel(_ direction: PanelSnapDirection) {
+        guard !panel.styleMask.contains(.fullScreen) else { return }
         guard let screen = panel.screen ?? NSScreen.main ?? NSScreen.screens.first else { return }
         if !panel.isVisible {
             panel.orderFront(nil)
@@ -211,5 +254,14 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
         let targetFrame = NSRect(origin: clampedOrigin, size: size)
         panel.setFrame(targetFrame, display: true, animate: false)
+    }
+
+    private func togglePanelFullScreen() {
+        if !panel.isVisible {
+            showPanel(activate: true)
+        } else {
+            NSApp.activate(ignoringOtherApps: true)
+        }
+        panel.toggleFullScreen(nil)
     }
 }
