@@ -723,7 +723,6 @@ final class TodoRowView: NSView {
     private enum AppearanceMetrics {
         static let pressedScale: CGFloat = 0.99
         static let pressAnimationDuration: CFTimeInterval = 0.08
-        static let showsDebugGeometry = true
     }
 
     private let backgroundView = NSView()
@@ -732,7 +731,6 @@ final class TodoRowView: NSView {
     private let editingTextView = EditingTextDisplayView()
     let editorHostView = PassiveEditorHostView()
     private let cursorShieldView = CursorShieldView()
-    private let debugOverlayView = DebugGeometryOverlayView()
 
     private var preferences: AppPreferences
     private(set) var model: TodoRowModel
@@ -782,9 +780,6 @@ final class TodoRowView: NSView {
         addSubview(editingTextView)
         addSubview(editorHostView)
         addSubview(cursorShieldView)
-        if AppearanceMetrics.showsDebugGeometry {
-            addSubview(debugOverlayView)
-        }
         configure(model: model, preferences: preferences)
     }
 
@@ -805,15 +800,6 @@ final class TodoRowView: NSView {
         editingTextView.frame = textFrame
         editorHostView.frame = textFrame
         cursorShieldView.frame = textFrame
-        if AppearanceMetrics.showsDebugGeometry {
-            debugOverlayView.frame = bounds
-            debugOverlayView.rowFrame = bounds
-            debugOverlayView.backgroundFrame = backgroundView.frame
-            debugOverlayView.checkboxFrame = checkboxRect
-            debugOverlayView.textFrame = textFrame
-            debugOverlayView.centerlineY = checkboxRect.midY
-            debugOverlayView.needsDisplay = true
-        }
     }
 
     override func resetCursorRects() {
@@ -1170,51 +1156,6 @@ final class TodoRowView: NSView {
         transform = CATransform3DScale(transform, scale, scale, 1)
         transform = CATransform3DTranslate(transform, -centerX, -centerY, 0)
         return transform
-    }
-}
-
-final class DebugGeometryOverlayView: NSView {
-    var rowFrame: NSRect = .zero
-    var backgroundFrame: NSRect = .zero
-    var checkboxFrame: NSRect = .zero
-    var textFrame: NSRect = .zero
-    var centerlineY: CGFloat = 0
-
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
-        wantsLayer = true
-        layer?.zPosition = 999
-    }
-
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
-
-    override func hitTest(_ point: NSPoint) -> NSView? {
-        nil
-    }
-
-    override func draw(_ dirtyRect: NSRect) {
-        super.draw(dirtyRect)
-
-        draw(rect: rowFrame, color: NSColor.systemRed.withAlphaComponent(0.8))
-        draw(rect: backgroundFrame, color: NSColor.systemGreen.withAlphaComponent(0.8))
-        draw(rect: checkboxFrame, color: NSColor.systemYellow.withAlphaComponent(0.8))
-        draw(rect: textFrame, color: NSColor.systemCyan.withAlphaComponent(0.9))
-
-        let centerlinePath = NSBezierPath()
-        centerlinePath.move(to: NSPoint(x: rowFrame.minX, y: centerlineY))
-        centerlinePath.line(to: NSPoint(x: rowFrame.maxX, y: centerlineY))
-        centerlinePath.lineWidth = 1
-        NSColor.systemPink.withAlphaComponent(0.8).setStroke()
-        centerlinePath.stroke()
-    }
-
-    private func draw(rect: NSRect, color: NSColor) {
-        let path = NSBezierPath(rect: rect.integral)
-        path.lineWidth = 1
-        color.setStroke()
-        path.stroke()
     }
 }
 
