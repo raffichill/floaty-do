@@ -332,8 +332,16 @@ final class SettingsViewController: NSViewController {
     }
 
     private func commitPreferenceChange(_ mutation: (inout AppPreferences) -> Void) {
+        let previous = preferences
         var updated = preferences
         mutation(&updated)
+        print(
+            "[SettingsTrace] commit",
+            "font=\(previous.fontStyle.rawValue)->\(updated.fontStyle.rawValue)",
+            "fontSize=\(previous.fontSize)->\(updated.fontSize)",
+            "radius=\(previous.cornerRadius)->\(updated.cornerRadius)",
+            "theme=\(previous.themeColor.red),\(previous.themeColor.green),\(previous.themeColor.blue)->\(updated.themeColor.red),\(updated.themeColor.green),\(updated.themeColor.blue)"
+        )
         preferences = updated
         applyPreferencesToControls()
         onPreferencesChange?(updated)
@@ -342,6 +350,7 @@ final class SettingsViewController: NSViewController {
     @objc private func themePresetSelected(_ sender: ThemePresetButton) {
         guard !isUpdatingControls else { return }
         guard Self.themePresets.indices.contains(sender.tag) else { return }
+        print("[SettingsTrace] themePresetSelected", "tag=\(sender.tag)", "currentFont=\(preferences.fontStyle.rawValue)")
         commitPreferenceChange { updated in
             updated.themeColor = Self.themePresets[sender.tag].color
         }
@@ -357,6 +366,13 @@ final class SettingsViewController: NSViewController {
     @objc private func fontChanged(_ sender: NSPopUpButton) {
         guard !isUpdatingControls else { return }
         guard FontStylePreset.allCases.indices.contains(sender.indexOfSelectedItem) else { return }
+        let selectedTitle = sender.titleOfSelectedItem ?? "nil"
+        print(
+            "[SettingsTrace] fontChanged",
+            "index=\(sender.indexOfSelectedItem)",
+            "title=\(selectedTitle)",
+            "currentFont=\(preferences.fontStyle.rawValue)"
+        )
         commitPreferenceChange { updated in
             updated.fontStyle = FontStylePreset.allCases[sender.indexOfSelectedItem]
         }
