@@ -427,7 +427,19 @@ final class SettingsViewController: NSViewController {
         updateAppIconControls()
 
         do {
-            try controller.applyAndRelaunch(theme: selectedTheme)
+            let process = try controller.iconApplyProcess(for: selectedTheme)
+            try process.run()
+
+            DispatchQueue.global(qos: .utility).async {
+                process.waitUntilExit()
+                guard process.terminationStatus != 0 else { return }
+                DispatchQueue.main.async { [weak self] in
+                    guard let self else { return }
+                    self.isApplyingPrimaryIconChange = false
+                    self.updateAppIconControls()
+                    self.presentIconApplyError(message: "Failed to apply icon. Please try again.")
+                }
+            }
         } catch {
             isApplyingPrimaryIconChange = false
             updateAppIconControls()

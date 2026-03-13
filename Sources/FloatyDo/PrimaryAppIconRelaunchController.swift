@@ -46,6 +46,27 @@ final class PrimaryAppIconRelaunchController {
         try process.run()
     }
 
+    func iconApplyProcess(for theme: BuiltInTheme) throws -> Process {
+        guard let repoRootURL = repositoryRootURL() else {
+            throw RelaunchError.repositoryNotFound
+        }
+
+        let scriptURL = repoRootURL.appendingPathComponent("scripts/apply_primary_icon_and_relaunch.sh")
+        guard FileManager.default.fileExists(atPath: scriptURL.path) else {
+            throw RelaunchError.scriptNotFound
+        }
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/bash")
+        process.arguments = [
+            scriptURL.path,
+            repoRootURL.path,
+            theme.rawValue,
+            "\(ProcessInfo.processInfo.processIdentifier)",
+        ]
+        return process
+    }
+
     private func themeMarkerURL() -> URL? {
         repositoryRootURL()?.appendingPathComponent(themeMarkerFileName)
     }
