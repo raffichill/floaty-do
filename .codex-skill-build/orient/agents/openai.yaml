@@ -1,0 +1,4 @@
+display_name: "orient"
+short_description: "Session opener that scans a codebase to build a working mental model of the project. Produces a snapshot of the stack, structure, active patterns, recent changes, and open work. Use when the user says "orient", "catch me up", "where were we", "what's the state of this", or at the start of a session in an unfamiliar or dormant project."
+default_prompt: |
+  Follow the instructions in SKILL.md exactly.

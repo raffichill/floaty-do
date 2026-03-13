@@ -1,0 +1,4 @@
+display_name: "debug"
+short_description: "Structured investigation when something is broken. Follows a disciplined trace from symptoms to root cause, resisting the urge to guess or patch over symptoms. Use when the user says "debug", "investigate", "this is broken", "why is this happening", "something's wrong", or when encountering unexpected behavior during a build."
+default_prompt: |
+  Follow the instructions in SKILL.md exactly.
