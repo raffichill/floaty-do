@@ -16,6 +16,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     public func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
+        syncLiveApplicationIcon()
 
         let initialWidth = max(CGFloat(store.preferences.panelWidth), CGFloat(LayoutMetrics.minPanelWidth))
         panel = FloatingPanel(contentRect: NSRect(x: 0, y: 0, width: initialWidth, height: 300))
@@ -195,6 +196,12 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
         panel.makeKeyAndOrderFront(nil)
         panel.orderFront(nil)
+    }
+
+    private func syncLiveApplicationIcon() {
+        let image = NSWorkspace.shared.icon(forFile: Bundle.main.bundlePath)
+        image.size = NSSize(width: 128, height: 128)
+        NSApp.applicationIconImage = image
     }
 
     private func positionPanel() {

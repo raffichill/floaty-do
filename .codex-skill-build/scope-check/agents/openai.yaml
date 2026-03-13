@@ -1,0 +1,4 @@
+display_name: "scope-check"
+short_description: "Mid-build checkpoint that compares current work against original intent. Flags scope creep, identifies what should be deferred, and re-centers on the core goal. Use when the user says "scope check", "are we overbuilding", "gut check", "is this too much", or when a feature branch is growing beyond its original intent."
+default_prompt: |
+  Follow the instructions in SKILL.md exactly.

@@ -20,6 +20,8 @@ final class SettingsViewController: NSViewController {
         static let popupWidth: CGFloat = 200
         static let valueWidth: CGFloat = 44
         static let sliderValueSpacing: CGFloat = 8
+        static let iconStatusWidth: CGFloat = 190
+        static let iconButtonWidth: CGFloat = 158
         static let shortcutsColumnWidth: CGFloat = 220
         static let shortcutsColumnGap: CGFloat = 16
     }
@@ -46,22 +48,6 @@ final class SettingsViewController: NSViewController {
         }
     }
 
-    private struct ThemePreset {
-        let hex: String
-
-        var color: ThemeColor {
-            ThemeColor(hex: hex)
-        }
-    }
-
-    private static let themePresets: [ThemePreset] = [
-        ThemePreset(hex: "#14141F"),
-        ThemePreset(hex: "#1B2130"),
-        ThemePreset(hex: "#1F2724"),
-        ThemePreset(hex: "#2A1E28"),
-        ThemePreset(hex: "#E6E0D6"),
-    ]
-
     var onPreferencesChange: ((AppPreferences) -> Void)?
 
     private var preferences: AppPreferences
@@ -77,6 +63,8 @@ final class SettingsViewController: NSViewController {
     private var pageViews: [SettingsTab: NSView] = [:]
 
     private let resetThemeButton = NSButton(title: "Reset", target: nil, action: nil)
+    private let iconStatusLabel = NSTextField(labelWithString: "")
+    private let applyIconButton = NSButton(title: "Apply & Relaunch", target: nil, action: nil)
     private var themeButtons: [ThemePresetButton] = []
     private let fontPopup = NSPopUpButton()
     private let resetFontButton = NSButton(title: "Reset", target: nil, action: nil)
@@ -87,8 +75,11 @@ final class SettingsViewController: NSViewController {
     private let borderRadiusValueLabel = NSTextField(labelWithString: "")
     private let resetRadiusButton = NSButton(title: "Reset", target: nil, action: nil)
 
+    private var currentAppliedIconTheme: BuiltInTheme
+    private var isApplyingPrimaryIconChange = false
     init(preferences: AppPreferences) {
         self.preferences = preferences
+        self.currentAppliedIconTheme = PrimaryAppIconRelaunchController.shared.currentTheme()
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -179,6 +170,7 @@ final class SettingsViewController: NSViewController {
 
     private func configureControls() {
         configureThemeButtons()
+        configureIconApplyControls()
         configureFontPopup()
         configureFontSizeSlider()
         configureBorderRadiusSlider()
@@ -218,6 +210,7 @@ final class SettingsViewController: NSViewController {
     private func makeAppearancePage() -> NSView {
         let contentStack = NSStackView(views: [
             makeFormRow(title: "Background", control: makeThemeControl()),
+            makeFormRow(title: "App Icon", control: makeAppIconControl()),
             makeFormRow(title: "Font", control: makeFontControl()),
             makeFormRow(title: "Font Size", control: makeFontSizeControl()),
             makeFormRow(title: "Radius", control: makeBorderRadiusControl()),
@@ -301,8 +294,8 @@ final class SettingsViewController: NSViewController {
     }
 
     private func configureThemeButtons() {
-        themeButtons = Self.themePresets.enumerated().map { index, preset in
-            let button = ThemePresetButton(color: preset.color.nsColor)
+        themeButtons = BuiltInTheme.allCases.enumerated().map { index, theme in
+            let button = ThemePresetButton(color: theme.color.nsColor)
             button.tag = index
             button.target = self
             button.action = #selector(themePresetSelected(_:))
@@ -312,6 +305,23 @@ final class SettingsViewController: NSViewController {
         resetThemeButton.target = self
         resetThemeButton.action = #selector(resetThemeColor(_:))
         configureResetButton(resetThemeButton)
+    }
+
+    private func configureIconApplyControls() {
+        iconStatusLabel.font = .systemFont(ofSize: 11)
+        iconStatusLabel.textColor = .secondaryLabelColor
+        iconStatusLabel.alignment = .left
+        iconStatusLabel.lineBreakMode = .byTruncatingTail
+        iconStatusLabel.translatesAutoresizingMaskIntoConstraints = false
+        iconStatusLabel.widthAnchor.constraint(equalToConstant: Metrics.iconStatusWidth).isActive = true
+
+        applyIconButton.target = self
+        applyIconButton.action = #selector(applyIconAndRelaunch(_:))
+        applyIconButton.bezelStyle = .rounded
+        applyIconButton.controlSize = .small
+        applyIconButton.font = .systemFont(ofSize: 12)
+        applyIconButton.translatesAutoresizingMaskIntoConstraints = false
+        applyIconButton.widthAnchor.constraint(equalToConstant: Metrics.iconButtonWidth).isActive = true
     }
 
     private func configureFontPopup() {
@@ -395,6 +405,16 @@ final class SettingsViewController: NSViewController {
 
     private func makeFontControl() -> NSView {
         let stack = NSStackView(views: [fontPopup, resetFontButton])
+        stack.orientation = .horizontal
+        stack.alignment = .centerY
+        stack.spacing = 12
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        stack.widthAnchor.constraint(equalToConstant: Metrics.controlWidth).isActive = true
+        return stack
+    }
+
+    private func makeAppIconControl() -> NSView {
+        let stack = NSStackView(views: [iconStatusLabel, applyIconButton])
         stack.orientation = .horizontal
         stack.alignment = .centerY
         stack.spacing = 12
@@ -553,9 +573,13 @@ final class SettingsViewController: NSViewController {
         isUpdatingControls = true
         defer { isUpdatingControls = false }
 
-        let selectedPresetHex = nearestThemePresetHex(for: preferences.themeColor)
+        if !isApplyingPrimaryIconChange {
+            currentAppliedIconTheme = PrimaryAppIconRelaunchController.shared.currentTheme()
+        }
+
+        let selectedTheme = BuiltInTheme.nearest(to: preferences.themeColor)
         for (index, button) in themeButtons.enumerated() {
-            button.isSelected = Self.themePresets[index].hex == selectedPresetHex
+            button.isSelected = BuiltInTheme.allCases[index] == selectedTheme
         }
 
         if let index = FontStylePreset.allCases.firstIndex(of: preferences.fontStyle) {
@@ -570,20 +594,7 @@ final class SettingsViewController: NSViewController {
         borderRadiusSlider.maxValue = preferences.maximumCornerRadius
         borderRadiusSlider.doubleValue = min(preferences.cornerRadius, preferences.maximumCornerRadius)
         borderRadiusValueLabel.stringValue = "\(Int(round(borderRadiusSlider.doubleValue))) px"
-    }
-
-    private func nearestThemePresetHex(for color: ThemeColor) -> String {
-        let resolved = color.clamped()
-        return Self.themePresets.min(by: { lhs, rhs in
-            colorDistance(between: resolved, and: lhs.color) < colorDistance(between: resolved, and: rhs.color)
-        })?.hex ?? Self.themePresets[0].hex
-    }
-
-    private func colorDistance(between lhs: ThemeColor, and rhs: ThemeColor) -> Double {
-        let dr = lhs.red - rhs.red
-        let dg = lhs.green - rhs.green
-        let db = lhs.blue - rhs.blue
-        return (dr * dr) + (dg * dg) + (db * db)
+        updateAppIconControls()
     }
 
     private func commitPreferenceChange(_ mutation: (inout AppPreferences) -> Void) {
@@ -596,16 +607,17 @@ final class SettingsViewController: NSViewController {
 
     @objc private func themePresetSelected(_ sender: ThemePresetButton) {
         guard !isUpdatingControls else { return }
-        guard Self.themePresets.indices.contains(sender.tag) else { return }
+        guard BuiltInTheme.allCases.indices.contains(sender.tag) else { return }
+        let theme = BuiltInTheme.allCases[sender.tag]
         commitPreferenceChange { updated in
-            updated.themeColor = Self.themePresets[sender.tag].color
+            updated.themeColor = theme.color
         }
     }
 
     @objc private func resetThemeColor(_ sender: NSButton) {
         guard !isUpdatingControls else { return }
         commitPreferenceChange { updated in
-            updated.themeColor = .default
+            updated.themeColor = BuiltInTheme.theme1.color
         }
     }
 
@@ -655,6 +667,77 @@ final class SettingsViewController: NSViewController {
         guard !isUpdatingControls else { return }
         commitPreferenceChange { updated in
             updated.cornerRadius = 10
+        }
+    }
+
+    @objc private func applyIconAndRelaunch(_ sender: NSButton) {
+        guard !isApplyingPrimaryIconChange else { return }
+        let controller = PrimaryAppIconRelaunchController.shared
+        guard controller.canApplyIconChanges() else {
+            presentIconApplyError(message: "App icon rebuilding is only available from the local project checkout.")
+            return
+        }
+
+        isApplyingPrimaryIconChange = true
+        updateAppIconControls()
+
+        do {
+            let process = try controller.iconApplyProcess(for: selectedTheme)
+            try process.run()
+
+            DispatchQueue.global(qos: .utility).async {
+                process.waitUntilExit()
+                guard process.terminationStatus != 0 else { return }
+                DispatchQueue.main.async { [weak self] in
+                    guard let self else { return }
+                    self.isApplyingPrimaryIconChange = false
+                    self.updateAppIconControls()
+                    self.presentIconApplyError(message: "Failed to apply icon. Please try again.")
+                }
+            }
+        } catch {
+            isApplyingPrimaryIconChange = false
+            updateAppIconControls()
+            presentIconApplyError(message: error.localizedDescription)
+        }
+    }
+
+    private var selectedTheme: BuiltInTheme {
+        BuiltInTheme.nearest(to: preferences.themeColor)
+    }
+
+    private func updateAppIconControls() {
+        let controller = PrimaryAppIconRelaunchController.shared
+        guard controller.canApplyIconChanges() else {
+            iconStatusLabel.stringValue = "Local build only."
+            applyIconButton.title = "Apply & Relaunch"
+            applyIconButton.isEnabled = false
+            return
+        }
+
+        let themeMatchesIcon = selectedTheme == currentAppliedIconTheme
+        if isApplyingPrimaryIconChange {
+            iconStatusLabel.stringValue = "Building, then relaunching…"
+            applyIconButton.title = "Rebuilding…"
+            applyIconButton.isEnabled = false
+            return
+        }
+
+        iconStatusLabel.stringValue = themeMatchesIcon ? "Icon matches this theme." : "Relaunch to apply current theme."
+        applyIconButton.title = themeMatchesIcon ? "Icon Is Current" : "Apply & Relaunch"
+        applyIconButton.isEnabled = !themeMatchesIcon
+    }
+
+    private func presentIconApplyError(message: String) {
+        guard isViewLoaded else { return }
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Couldn’t update the app icon"
+        alert.informativeText = message
+        if let window = view.window ?? NSApp.mainWindow {
+            alert.beginSheetModal(for: window, completionHandler: nil)
+        } else {
+            alert.runModal()
         }
     }
 }

@@ -85,6 +85,43 @@ public enum FontStylePreset: String, Codable, CaseIterable {
     }
 }
 
+public enum BuiltInTheme: String, Codable, CaseIterable {
+    case theme1
+    case theme2
+    case theme3
+    case theme4
+    case theme5
+
+    public var color: ThemeColor {
+        switch self {
+        case .theme1:
+            return ThemeColor(hex: "#14141F")
+        case .theme2:
+            return ThemeColor(hex: "#1B2130")
+        case .theme3:
+            return ThemeColor(hex: "#1F2724")
+        case .theme4:
+            return ThemeColor(hex: "#2A1E28")
+        case .theme5:
+            return ThemeColor(hex: "#E6E0D6")
+        }
+    }
+
+    public static func nearest(to color: ThemeColor) -> BuiltInTheme {
+        let resolved = color.clamped()
+        return allCases.min(by: { lhs, rhs in
+            colorDistance(between: resolved, and: lhs.color) < colorDistance(between: resolved, and: rhs.color)
+        }) ?? .theme1
+    }
+
+    private static func colorDistance(between lhs: ThemeColor, and rhs: ThemeColor) -> Double {
+        let dr = lhs.red - rhs.red
+        let dg = lhs.green - rhs.green
+        let db = lhs.blue - rhs.blue
+        return (dr * dr) + (dg * dg) + (db * db)
+    }
+}
+
 public struct ThemeColor: Codable, Equatable {
     public var red: Double
     public var green: Double
@@ -112,6 +149,20 @@ public struct ThemeColor: Codable, Equatable {
             blue: min(max(blue, 0), 1),
             alpha: min(max(alpha, 0), 1)
         )
+    }
+}
+
+extension ThemeColor {
+    init(hex: String) {
+        let cleaned = hex.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "#", with: "")
+        let scanner = Scanner(string: cleaned)
+        var value: UInt64 = 0
+        scanner.scanHexInt64(&value)
+
+        let red = Double((value >> 16) & 0xFF) / 255.0
+        let green = Double((value >> 8) & 0xFF) / 255.0
+        let blue = Double(value & 0xFF) / 255.0
+        self.init(red: red, green: green, blue: blue, alpha: 1.0)
     }
 }
 
@@ -199,18 +250,6 @@ struct ThemePalette {
 }
 
 extension ThemeColor {
-    init(hex: String) {
-        let cleaned = hex.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "#", with: "")
-        let scanner = Scanner(string: cleaned)
-        var value: UInt64 = 0
-        scanner.scanHexInt64(&value)
-
-        let red = Double((value >> 16) & 0xFF) / 255.0
-        let green = Double((value >> 8) & 0xFF) / 255.0
-        let blue = Double(value & 0xFF) / 255.0
-        self.init(red: red, green: green, blue: blue, alpha: 1.0)
-    }
-
     init(nsColor: NSColor) {
         let color = nsColor.usingColorSpace(.deviceRGB) ?? nsColor
         self.init(

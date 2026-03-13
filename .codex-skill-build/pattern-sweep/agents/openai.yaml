@@ -1,0 +1,4 @@
+display_name: "pattern-sweep"
+short_description: "Scans a full client application to generate a summary of active design patterns, deviations from those patterns, and opportunities for cleanup and unification. Covers visual, structural, data-fetching, animation, and interaction patterns. Use when the user says "pattern sweep", "audit patterns", "what patterns are we using", "consistency check", or periodically before a major feature push."
+default_prompt: |
+  Follow the instructions in SKILL.md exactly.

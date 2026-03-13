@@ -358,14 +358,6 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
     }
 
     private func preferencesDidChange(_ preferences: AppPreferences) {
-        print(
-            "[SettingsTrace] todo.preferencesDidChange",
-            "font=\(preferences.fontStyle.rawValue)",
-            "fontSize=\(preferences.fontSize)",
-            "radius=\(preferences.cornerRadius)",
-            "theme=\(preferences.themeColor.red),\(preferences.themeColor.green),\(preferences.themeColor.blue)",
-            "fromSettings=\(isApplyingSettingsPreferenceChange)"
-        )
         sharedEditor.font = preferences.appFont()
         if !isApplyingSettingsPreferenceChange {
             settingsWindowController?.updatePreferences(preferences)
@@ -485,13 +477,6 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         let controller = settingsWindowController ?? SettingsWindowController(preferences: store.preferences)
         controller.onPreferencesChange = { [weak self] preferences in
             guard let self else { return }
-            print(
-                "[SettingsTrace] todo.onPreferencesChange",
-                "font=\(preferences.fontStyle.rawValue)",
-                "fontSize=\(preferences.fontSize)",
-                "radius=\(preferences.cornerRadius)",
-                "theme=\(preferences.themeColor.red),\(preferences.themeColor.green),\(preferences.themeColor.blue)"
-            )
             self.isApplyingSettingsPreferenceChange = true
             self.performUndoableAction("Theme Change") {
                 self.store.updatePreferences(preferences)
@@ -748,12 +733,6 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         placeCaretAtEnd: Bool = true
     ) {
         let resolvedPreferences = preferences ?? store.preferences
-        print(
-            "[SettingsTrace] todo.refreshRows",
-            "font=\(resolvedPreferences.fontStyle.rawValue)",
-            "fontSize=\(resolvedPreferences.fontSize)",
-            "radius=\(resolvedPreferences.cornerRadius)"
-        )
         let previousRowCount = rowModels.count
         rowModels = buildRowModels()
         ensureSelectedRowExists()

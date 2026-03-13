@@ -136,12 +136,6 @@ public final class TodoStore: ObservableObject {
     }
 
     public func updatePreferences(_ newPreferences: AppPreferences) {
-        print(
-            "[SettingsTrace] store.updatePreferences",
-            "font=\(preferences.fontStyle.rawValue)->\(newPreferences.fontStyle.rawValue)",
-            "fontSize=\(preferences.fontSize)->\(newPreferences.fontSize)",
-            "radius=\(preferences.cornerRadius)->\(newPreferences.cornerRadius)"
-        )
         preferences = clampedPreferences(from: newPreferences)
         persistPreferencesImmediately()
     }
