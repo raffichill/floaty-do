@@ -5,14 +5,23 @@ import Foundation
 final class PrimaryAppIconRelaunchController {
     static let shared = PrimaryAppIconRelaunchController()
 
-    private let themeMarkerFileName = ".floatydo-primary-icon-theme"
-    private let supportDirectoryName = "FloatyDo"
-    private let projectRootFileName = "project-root.txt"
+    private enum Constants {
+        static let themeMarkerFileName = ".floatydo-primary-icon-theme"
+        static let supportDirectoryName = "FloatyDo"
+        static let projectRootFileName = "project-root.txt"
+        static let scriptsPath = "scripts"
+        static let iconApplyScriptName = "apply_primary_icon_and_relaunch.sh"
+        static let xcodeProjectPath = "FloatyDo/FloatyDo.xcodeproj"
+    }
+
+    private let fileManager = FileManager.default
+    private let bashPath = "/bin/bash"
+    private var cachedRepositoryRoot: URL?
 
     private init() {}
 
     func currentTheme() -> BuiltInTheme {
-        guard let markerURL = themeMarkerURL(),
+        guard let markerURL = repositoryRootURL().flatMap(themeMarkerURL),
               let rawValue = try? String(contentsOf: markerURL, encoding: .utf8)
                 .trimmingCharacters(in: .whitespacesAndNewlines),
               let theme = BuiltInTheme(rawValue: rawValue) else {
@@ -25,39 +34,18 @@ final class PrimaryAppIconRelaunchController {
         repositoryRootURL() != nil
     }
 
-    func applyAndRelaunch(theme: BuiltInTheme) throws {
-        guard let repoRootURL = repositoryRootURL() else {
-            throw RelaunchError.repositoryNotFound
-        }
-
-        let scriptURL = repoRootURL.appendingPathComponent("scripts/apply_primary_icon_and_relaunch.sh")
-        guard FileManager.default.fileExists(atPath: scriptURL.path) else {
-            throw RelaunchError.scriptNotFound
-        }
-
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/bin/bash")
-        process.arguments = [
-            scriptURL.path,
-            repoRootURL.path,
-            theme.rawValue,
-            "\(ProcessInfo.processInfo.processIdentifier)",
-        ]
-        try process.run()
-    }
-
     func iconApplyProcess(for theme: BuiltInTheme) throws -> Process {
         guard let repoRootURL = repositoryRootURL() else {
             throw RelaunchError.repositoryNotFound
         }
 
-        let scriptURL = repoRootURL.appendingPathComponent("scripts/apply_primary_icon_and_relaunch.sh")
-        guard FileManager.default.fileExists(atPath: scriptURL.path) else {
+        let scriptURL = try iconApplyScriptURL(in: repoRootURL)
+        guard fileManager.isExecutableFile(atPath: scriptURL.path) else {
             throw RelaunchError.scriptNotFound
         }
 
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/bin/bash")
+        process.executableURL = URL(fileURLWithPath: bashPath)
         process.arguments = [
             scriptURL.path,
             repoRootURL.path,
@@ -67,12 +55,17 @@ final class PrimaryAppIconRelaunchController {
         return process
     }
 
-    private func themeMarkerURL() -> URL? {
-        repositoryRootURL()?.appendingPathComponent(themeMarkerFileName)
+    private func themeMarkerURL(for repositoryRoot: URL) -> URL {
+        repositoryRoot.appendingPathComponent(Constants.themeMarkerFileName)
     }
 
     private func repositoryRootURL() -> URL? {
+        if let cachedRepositoryRoot {
+            return cachedRepositoryRoot
+        }
+
         if let persistedRootURL = persistedProjectRootURL() {
+            cachedRepositoryRoot = persistedRootURL
             return persistedRootURL
         }
 
@@ -80,7 +73,8 @@ final class PrimaryAppIconRelaunchController {
 
         while candidate.path != "/" {
             if isValidRepositoryRoot(candidate) {
-                persistRepositoryRoot(candidate)
+                cacheAndPersistRepositoryRoot(candidate)
+                cachedRepositoryRoot = candidate
                 return candidate
             }
             candidate.deleteLastPathComponent()
@@ -90,48 +84,62 @@ final class PrimaryAppIconRelaunchController {
     }
 
     private func persistedProjectRootURL() -> URL? {
-        guard let applicationSupportURL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
+        guard let applicationSupportURL = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
             return nil
         }
         let fileURL = applicationSupportURL
-            .appendingPathComponent(supportDirectoryName, isDirectory: true)
-            .appendingPathComponent(projectRootFileName)
-        guard let path = try? String(contentsOf: fileURL, encoding: .utf8)
-            .trimmingCharacters(in: .whitespacesAndNewlines),
-              !path.isEmpty else {
+            .appendingPathComponent(Constants.supportDirectoryName, isDirectory: true)
+            .appendingPathComponent(Constants.projectRootFileName)
+
+        guard let rootFileContents = try? String(contentsOf: fileURL, encoding: .utf8) else {
             return nil
         }
 
-        let candidates = normalizedPersistedPathCandidates(from: path)
+        let trimmed = rootFileContents.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        let candidates = normalizedPersistedPathCandidates(from: trimmed)
         for candidatePath in candidates {
             let url = URL(fileURLWithPath: candidatePath).standardizedFileURL
             guard isValidRepositoryRoot(url) else { continue }
-            if candidatePath != path {
-                persistRepositoryRoot(url)
+            if candidatePath != trimmed {
+                cacheAndPersistRepositoryRoot(url)
             }
+            cachedRepositoryRoot = url
             return url
         }
 
         return nil
     }
 
-    private func persistRepositoryRoot(_ url: URL) {
-        guard let applicationSupportURL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
+    private func cacheAndPersistRepositoryRoot(_ url: URL) {
+        cachedRepositoryRoot = url
+
+        guard let applicationSupportURL = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
             return
         }
-        let directoryURL = applicationSupportURL.appendingPathComponent(supportDirectoryName, isDirectory: true)
-        let fileURL = directoryURL.appendingPathComponent(projectRootFileName)
+        let directoryURL = applicationSupportURL.appendingPathComponent(Constants.supportDirectoryName, isDirectory: true)
+        let fileURL = directoryURL.appendingPathComponent(Constants.projectRootFileName)
 
-        try? FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
+        try? fileManager.createDirectory(at: directoryURL, withIntermediateDirectories: true)
         try? url.path.appending("\n").write(to: fileURL, atomically: true, encoding: .utf8)
     }
 
     private func isValidRepositoryRoot(_ url: URL) -> Bool {
-        let fileManager = FileManager.default
         let packageURL = url.appendingPathComponent("Package.swift")
-        let projectURL = url.appendingPathComponent("FloatyDo/FloatyDo.xcodeproj")
+        let projectURL = url.appendingPathComponent(Constants.xcodeProjectPath)
         return fileManager.fileExists(atPath: packageURL.path)
             && fileManager.fileExists(atPath: projectURL.path)
+    }
+
+    private func iconApplyScriptURL(in repositoryRoot: URL) throws -> URL {
+        let scriptURL = repositoryRoot
+            .appendingPathComponent(Constants.scriptsPath)
+            .appendingPathComponent(Constants.iconApplyScriptName)
+        guard fileManager.fileExists(atPath: scriptURL.path) else {
+            throw RelaunchError.scriptNotFound
+        }
+        return scriptURL
     }
 
     private func normalizedPersistedPathCandidates(from path: String) -> [String] {

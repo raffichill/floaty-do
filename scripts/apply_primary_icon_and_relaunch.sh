@@ -20,6 +20,7 @@ BUILD_STAMP="$(date +%s)"
 TMP_INSTALL="${INSTALL_PATH}.tmp"
 LOG_PATH="/tmp/floatydo-primary-icon-relaunch.log"
 LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Versions/Current/Frameworks/LaunchServices.framework/Versions/Current/Support/lsregister"
+XCODEBUILD="/Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild"
 
 exec >"$LOG_PATH" 2>&1
 
@@ -27,27 +28,33 @@ log() {
   echo "[$(date)] $*"
 }
 
-atomic_write() {
-  local content="$1"
-  local path="$2"
-  local tmp="${path}.tmp"
-  printf '%s\n' "$content" > "$tmp"
-  mv "$tmp" "$path"
+die() {
+  log "ERROR: $*"
+  exit 1
 }
 
 verify_file() {
   local path="$1"
   if [[ ! -f "$path" ]]; then
-    echo "Missing path: $path" >&2
-    return 1
+    die "Missing file: $path"
   fi
+}
+
+assert_known_theme() {
+  case "$THEME" in
+    theme1|theme2|theme3|theme4|theme5)
+      return 0
+      ;;
+    *)
+      die "Unknown theme: $THEME"
+      ;;
+  esac
 }
 
 verify_binary() {
   local app_bundle="$1"
   if [[ ! -d "$app_bundle" ]]; then
-    echo "Build did not produce app bundle: $app_bundle" >&2
-    return 1
+    die "Build did not produce app bundle: $app_bundle"
   fi
 
   local info_plist="$app_bundle/Contents/Info.plist"
@@ -56,8 +63,7 @@ verify_binary() {
   local icon_name
   icon_name=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIconName' "$info_plist" 2>/dev/null || true)
   if [[ "$icon_name" != "$APP_ICON_SET_NAME" ]]; then
-    echo "Unexpected CFBundleIconName: ${icon_name:-<missing>} (expected $APP_ICON_SET_NAME)" >&2
-    return 1
+    die "Unexpected CFBundleIconName: ${icon_name:-<missing>} (expected $APP_ICON_SET_NAME)"
   fi
 
   local icon_file
@@ -66,12 +72,16 @@ verify_binary() {
     if [[ "$icon_file" != *.icns ]]; then
       icon_file="${icon_file%.*}.icns"
     fi
-
-    if [[ ! -f "$app_bundle/Contents/Resources/$icon_file" ]]; then
-      echo "Expected bundled icon missing: $icon_file" >&2
-      return 1
-    fi
+    verify_file "$app_bundle/Contents/Resources/$icon_file"
   fi
+}
+
+atomic_write() {
+  local content="$1"
+  local path="$2"
+  local tmp="${path}.tmp"
+  printf '%s\n' "$content" > "$tmp"
+  mv "$tmp" "$path"
 }
 
 kill_running_instances() {
@@ -92,19 +102,8 @@ kill_running_instances() {
   fi
 }
 
-log "Starting primary icon relaunch for theme: $THEME"
-log "Repo root: $REPO_ROOT"
-log "Build stamp: $BUILD_STAMP"
-
-if [[ ! -f "$THEME_PNG" ]]; then
-  echo "Missing theme source: $THEME_PNG" >&2
-  exit 1
-fi
-
-rm -rf "$GENERATED_SET"
-mkdir -p "$GENERATED_SET"
-
-cat > "$GENERATED_CONTENTS" <<'JSON'
+write_generated_appiconset() {
+  cat > "$GENERATED_CONTENTS" <<'JSON'
 {
   "images" : [
     {
@@ -166,12 +165,37 @@ cat > "$GENERATED_CONTENTS" <<'JSON'
   }
 }
 JSON
+}
+
+register_clean_bundles() {
+  local stale_path
+  for stale_path in \
+    "$REPO_ROOT/DerivedData/Build/Products/Debug/FloatyDo.app" \
+    "$REPO_ROOT/.build/host-app/Debug/FloatyDo.app" \
+    "/private/tmp/FloatyDoHostDerivedData/Build/Products/Debug/FloatyDo.app" \
+    "/private/tmp/FloatyDoHostDerivedData/Build/Products/Release/FloatyDo.app"
+  do
+    "$LSREGISTER" -u "$stale_path" >/dev/null 2>&1 || true
+  done
+  "$LSREGISTER" -f -R -trusted "$INSTALL_PATH"
+}
+
+log "Starting primary icon relaunch for theme: $THEME"
+log "Repo root: $REPO_ROOT"
+log "Build stamp: $BUILD_STAMP"
+
+assert_known_theme
+verify_file "$THEME_PNG"
+
+rm -rf "$GENERATED_SET"
+mkdir -p "$GENERATED_SET"
+write_generated_appiconset
 
 cp "$THEME_PNG" "$GENERATED_SET/icon-1024.png"
 /usr/bin/sips -z 512 512 "$THEME_PNG" --out "$GENERATED_SET/icon-512.png" >/dev/null
 
 log "Rebuilding FloatyDo with primary icon theme: $THEME"
-/Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild \
+"$XCODEBUILD" \
   -project "$REPO_ROOT/FloatyDo/FloatyDo.xcodeproj" \
   -scheme FloatyDo \
   -configuration Debug \
@@ -182,7 +206,6 @@ log "Rebuilding FloatyDo with primary icon theme: $THEME"
   INFOPLIST_KEY_CFBundleVersion="$BUILD_STAMP"
 
 verify_binary "$APP_PATH"
-
 verify_file "$THEME_PNG"
 
 mkdir -p "$APP_SUPPORT_DIR"
@@ -197,20 +220,11 @@ verify_binary "$INSTALL_PATH"
 atomic_write "$THEME" "$THEME_MARKER"
 
 if [[ -x "$LSREGISTER" ]]; then
-  for stale_path in \
-    "$REPO_ROOT/DerivedData/Build/Products/Debug/FloatyDo.app" \
-    "$REPO_ROOT/.build/host-app/Debug/FloatyDo.app" \
-    "/private/tmp/FloatyDoHostDerivedData/Build/Products/Debug/FloatyDo.app" \
-    "/private/tmp/FloatyDoHostDerivedData/Build/Products/Release/FloatyDo.app"
-  do
-    "$LSREGISTER" -u "$stale_path" >/dev/null 2>&1 || true
-  done
-  "$LSREGISTER" -f -R -trusted "$INSTALL_PATH"
+  register_clean_bundles
 fi
 
 /usr/bin/killall Dock >/dev/null 2>&1 || true
 
 kill_running_instances
-
 nohup /usr/bin/open -n "$INSTALL_PATH" >>"$LOG_PATH" 2>&1 &
 log "Relaunch triggered for theme: $THEME"
