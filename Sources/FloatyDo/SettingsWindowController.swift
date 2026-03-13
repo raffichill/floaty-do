@@ -20,17 +20,17 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         self.settingsViewController = SettingsViewController(preferences: preferences)
 
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 690, height: 330),
+            contentRect: NSRect(x: 0, y: 0, width: 880, height: 660),
             styleMask: [.titled, .closable, .miniaturizable, .fullSizeContentView],
             backing: .buffered,
             defer: false
         )
-        window.title = "Theme"
+        window.title = "Settings"
         window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true
         window.isReleasedWhenClosed = false
         window.center()
-        window.minSize = NSSize(width: 660, height: 320)
+        window.minSize = NSSize(width: 820, height: 620)
         window.contentViewController = settingsViewController
 
         let toolbar = NSToolbar(identifier: "settings")
