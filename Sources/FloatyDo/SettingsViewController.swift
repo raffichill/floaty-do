@@ -20,6 +20,8 @@ final class SettingsViewController: NSViewController {
         static let popupWidth: CGFloat = 200
         static let valueWidth: CGFloat = 44
         static let sliderValueSpacing: CGFloat = 8
+        static let shortcutsColumnWidth: CGFloat = 220
+        static let shortcutsColumnGap: CGFloat = 16
     }
 
     private enum SettingsTab: CaseIterable, Hashable {
@@ -243,25 +245,25 @@ final class SettingsViewController: NSViewController {
     private func makeShortcutsPage() -> NSView {
         let stack = NSStackView()
         stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.spacing = 12
+        stack.alignment = .centerX
+        stack.spacing = 10
         stack.translatesAutoresizingMaskIntoConstraints = false
 
         [
-            ("Return", "New row below"),
-            ("Cmd Return", "Complete selected"),
-            ("Cmd Delete", "Delete"),
-            ("Up / Down", "Move selection"),
-            ("Shift Up / Down", "Expand selection"),
-            ("Cmd Up / Down", "Jump to top or bottom"),
-            ("Cmd Shift Up / Down", "Select to top or bottom"),
-            ("Cmd A", "Select all"),
-            ("Cmd ,", "Open settings"),
-            ("Cmd 0", "Reset window size"),
-            ("Ctrl Opt Arrow", "Snap window"),
-            ("Ctrl Cmd F", "Fullscreen"),
-        ].forEach { shortcut, label in
-            stack.addArrangedSubview(makeShortcutRow(shortcut: shortcut, label: label))
+            ("New row below", ["return"]),
+            ("Complete selected", ["command", "return"]),
+            ("Delete selected", ["command", "delete"]),
+            ("Move selection", ["up/down"]),
+            ("Expand selection", ["shift", "up/down"]),
+            ("Jump to top or bottom", ["command", "up/down"]),
+            ("Select to top or bottom", ["command", "shift", "up/down"]),
+            ("Select all", ["command", "A"]),
+            ("Open theme", ["command", ","]),
+            ("Reset window size", ["command", "0"]),
+            ("Snap window", ["control", "option", "arrow"]),
+            ("Fullscreen", ["control", "command", "F"]),
+        ].forEach { label, shortcut in
+            stack.addArrangedSubview(makeShortcutRow(label: label, shortcut: shortcut))
         }
 
         let container = NSView()
@@ -270,8 +272,9 @@ final class SettingsViewController: NSViewController {
 
         NSLayoutConstraint.activate([
             stack.topAnchor.constraint(equalTo: container.topAnchor),
-            stack.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 8),
-            stack.trailingAnchor.constraint(lessThanOrEqualTo: container.trailingAnchor),
+            stack.centerXAnchor.constraint(equalTo: container.centerXAnchor),
+            stack.leadingAnchor.constraint(greaterThanOrEqualTo: container.leadingAnchor, constant: 24),
+            stack.trailingAnchor.constraint(lessThanOrEqualTo: container.trailingAnchor, constant: -24),
             stack.bottomAnchor.constraint(lessThanOrEqualTo: container.bottomAnchor),
         ])
 
@@ -463,35 +466,53 @@ final class SettingsViewController: NSViewController {
         return row
     }
 
-    private func makeShortcutRow(shortcut: String, label: String) -> NSView {
-        let shortcutLabel = NSTextField(labelWithString: shortcut)
-        shortcutLabel.font = .monospacedSystemFont(ofSize: 12, weight: .medium)
-        shortcutLabel.textColor = .labelColor
-        shortcutLabel.translatesAutoresizingMaskIntoConstraints = false
-        shortcutLabel.widthAnchor.constraint(equalToConstant: 180).isActive = true
-
+    private func makeShortcutRow(label: String, shortcut: [String]) -> NSView {
         let descriptionLabel = NSTextField(labelWithString: label)
         descriptionLabel.font = .systemFont(ofSize: 12)
         descriptionLabel.textColor = .secondaryLabelColor
+        descriptionLabel.alignment = .right
+        descriptionLabel.translatesAutoresizingMaskIntoConstraints = false
+        descriptionLabel.widthAnchor.constraint(equalToConstant: Metrics.shortcutsColumnWidth).isActive = true
 
-        let row = NSStackView(views: [shortcutLabel, descriptionLabel])
+        let keysRow = NSStackView(views: shortcut.map(makeKeycap))
+        keysRow.orientation = .horizontal
+        keysRow.alignment = .centerY
+        keysRow.spacing = 2
+        keysRow.translatesAutoresizingMaskIntoConstraints = false
+
+        let keysContainer = NSView()
+        keysContainer.translatesAutoresizingMaskIntoConstraints = false
+        keysContainer.widthAnchor.constraint(equalToConstant: Metrics.shortcutsColumnWidth).isActive = true
+        keysContainer.addSubview(keysRow)
+
+        NSLayoutConstraint.activate([
+            keysRow.leadingAnchor.constraint(equalTo: keysContainer.leadingAnchor),
+            keysRow.centerYAnchor.constraint(equalTo: keysContainer.centerYAnchor),
+            keysRow.topAnchor.constraint(greaterThanOrEqualTo: keysContainer.topAnchor),
+            keysRow.bottomAnchor.constraint(lessThanOrEqualTo: keysContainer.bottomAnchor),
+        ])
+
+        let row = NSStackView(views: [descriptionLabel, keysContainer])
         row.orientation = .horizontal
-        row.alignment = .firstBaseline
-        row.spacing = 20
+        row.alignment = .centerY
+        row.spacing = Metrics.shortcutsColumnGap
         return row
     }
 
     private func makeKeycap(_ text: String) -> NSView {
-        let label = NSTextField(labelWithString: text)
-        label.font = .monospacedSystemFont(ofSize: 10, weight: .semibold)
-        label.textColor = .labelColor
+        let label = NSTextField(labelWithString: keycapDisplayText(for: text))
+        label.font = .systemFont(ofSize: 11, weight: .regular)
+        label.textColor = NSColor(
+            calibratedRed: 128.0 / 255.0,
+            green: 128.0 / 255.0,
+            blue: 128.0 / 255.0,
+            alpha: 1.0
+        )
 
         let container = NSView()
         container.wantsLayer = true
-        container.layer?.backgroundColor = NSColor.quaternaryLabelColor.withAlphaComponent(0.12).cgColor
-        container.layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.5).cgColor
-        container.layer?.borderWidth = 1
-        container.layer?.cornerRadius = 8
+        container.layer?.backgroundColor = NSColor(calibratedWhite: 0.949, alpha: 1.0).cgColor
+        container.layer?.cornerRadius = 3
         container.translatesAutoresizingMaskIntoConstraints = false
 
         label.translatesAutoresizingMaskIntoConstraints = false
@@ -499,10 +520,33 @@ final class SettingsViewController: NSViewController {
         NSLayoutConstraint.activate([
             label.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 9),
             label.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -9),
-            label.topAnchor.constraint(equalTo: container.topAnchor, constant: 5),
-            label.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -5),
+            label.topAnchor.constraint(equalTo: container.topAnchor, constant: 2),
+            label.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -2),
         ])
         return container
+    }
+
+    private func keycapDisplayText(for text: String) -> String {
+        switch text.lowercased() {
+        case "command":
+            return "⌘"
+        case "control":
+            return "⌃"
+        case "option":
+            return "⌥"
+        case "shift":
+            return "⇧"
+        case "return":
+            return "↩"
+        case "delete":
+            return "⌫"
+        case "up/down":
+            return "↑  ↓"
+        case "arrow":
+            return "←  ↑  ↓  →"
+        default:
+            return text
+        }
     }
 
     private func applyPreferencesToControls() {
