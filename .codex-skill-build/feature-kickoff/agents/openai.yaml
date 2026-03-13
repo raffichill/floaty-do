@@ -1,4 +1,0 @@
-display_name: "feature-kickoff"
-short_description: "Pre-build preparation for a new feature. Scans the codebase for related features and endpoints, then asks clarifying questions to ensure cohesiveness with the existing product before any code is written. Use when the user says "feature kickoff", "new feature", "let's build", "starting on [feature]", or at the beginning of any significant new work."
-default_prompt: |
-  Follow the instructions in SKILL.md exactly.

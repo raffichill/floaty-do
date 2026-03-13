@@ -1,4 +1,0 @@
-display_name: "design-principles"
-short_description: "Living reference document defining the design philosophy that underpins every product. Covers both visual design and the engineering decisions that shape how software feels. Updated via introspect after significant builds. Use when the user says "design principles", "what are our principles", "how should this feel", or when evaluating a design/architecture decision against project values."
-default_prompt: |
-  Follow the instructions in SKILL.md exactly.

@@ -1,4 +1,0 @@
-display_name: "introspect"
-short_description: "Post-feature reflection on the decisions and patterns chosen during a build. Synthesizes what was learned with the goal of accumulating knowledge and feeding insights back into living documents like design-principles. Use when the user says "introspect", "reflect on this", "what did we learn", "wrap up", or when moving on from a completed feature or release."
-default_prompt: |
-  Follow the instructions in SKILL.md exactly.

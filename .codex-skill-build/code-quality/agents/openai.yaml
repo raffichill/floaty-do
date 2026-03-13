@@ -1,4 +1,0 @@
-display_name: "code-quality"
-short_description: "Post-implementation retrospective and refactoring pass. Reviews conversation history to synthesize what was learned during iteration, then refactors the final code for elegance, repo consistency, and future extensibility. Use when the user says "code quality", "refactor pass", "clean up what we built", "polish this", or after any substantial build."
-default_prompt: |
-  Follow the instructions in SKILL.md exactly.
