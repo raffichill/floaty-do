@@ -5,11 +5,9 @@ REPO_ROOT="${1:?repo root required}"
 THEME="${2:?theme required}"
 CURRENT_PID="${3:?current pid required}"
 
-ASSETS_DIR="$REPO_ROOT/FloatyDo/FloatyDo/Assets.xcassets"
-THEME_PNG="$ASSETS_DIR/${THEME}.imageset/${THEME}.png"
-APP_ICON_SET_NAME="GeneratedAppIcon"
-GENERATED_SET="$ASSETS_DIR/$APP_ICON_SET_NAME.appiconset"
-GENERATED_CONTENTS="$GENERATED_SET/Contents.json"
+ICONS_DIR="$REPO_ROOT/FloatyDo/FloatyDo/Icons"
+THEME_ICON="$ICONS_DIR/${THEME}.icon"
+APP_ICON_NAME="$THEME"
 DERIVED_DATA="$REPO_ROOT/DerivedData"
 APP_PATH="$DERIVED_DATA/Build/Products/Debug/FloatyDo.app"
 INSTALL_PATH="/Applications/FloatyDo.app"
@@ -62,8 +60,8 @@ verify_binary() {
 
   local icon_name
   icon_name=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIconName' "$info_plist" 2>/dev/null || true)
-  if [[ "$icon_name" != "$APP_ICON_SET_NAME" ]]; then
-    die "Unexpected CFBundleIconName: ${icon_name:-<missing>} (expected $APP_ICON_SET_NAME)"
+  if [[ "$icon_name" != "$APP_ICON_NAME" ]]; then
+    die "Unexpected CFBundleIconName: ${icon_name:-<missing>} (expected $APP_ICON_NAME)"
   fi
 
   local icon_file
@@ -74,6 +72,15 @@ verify_binary() {
     fi
     verify_file "$app_bundle/Contents/Resources/$icon_file"
   fi
+}
+
+verify_icon_source() {
+  local icon_path="$1"
+  if [[ ! -d "$icon_path" ]]; then
+    die "Missing icon source: $icon_path"
+  fi
+
+  verify_file "$icon_path/icon.json"
 }
 
 atomic_write() {
@@ -102,71 +109,6 @@ kill_running_instances() {
   fi
 }
 
-write_generated_appiconset() {
-  cat > "$GENERATED_CONTENTS" <<'JSON'
-{
-  "images" : [
-    {
-      "idiom" : "mac",
-      "scale" : "1x",
-      "size" : "16x16"
-    },
-    {
-      "idiom" : "mac",
-      "scale" : "2x",
-      "size" : "16x16"
-    },
-    {
-      "idiom" : "mac",
-      "scale" : "1x",
-      "size" : "32x32"
-    },
-    {
-      "idiom" : "mac",
-      "scale" : "2x",
-      "size" : "32x32"
-    },
-    {
-      "idiom" : "mac",
-      "scale" : "1x",
-      "size" : "128x128"
-    },
-    {
-      "idiom" : "mac",
-      "scale" : "2x",
-      "size" : "128x128"
-    },
-    {
-      "idiom" : "mac",
-      "scale" : "1x",
-      "size" : "256x256"
-    },
-    {
-      "idiom" : "mac",
-      "scale" : "2x",
-      "size" : "256x256"
-    },
-    {
-      "filename" : "icon-512.png",
-      "idiom" : "mac",
-      "scale" : "1x",
-      "size" : "512x512"
-    },
-    {
-      "filename" : "icon-1024.png",
-      "idiom" : "mac",
-      "scale" : "2x",
-      "size" : "512x512"
-    }
-  ],
-  "info" : {
-    "author" : "xcode",
-    "version" : 1
-  }
-}
-JSON
-}
-
 register_clean_bundles() {
   local stale_path
   for stale_path in \
@@ -185,14 +127,7 @@ log "Repo root: $REPO_ROOT"
 log "Build stamp: $BUILD_STAMP"
 
 assert_known_theme
-verify_file "$THEME_PNG"
-
-rm -rf "$GENERATED_SET"
-mkdir -p "$GENERATED_SET"
-write_generated_appiconset
-
-cp "$THEME_PNG" "$GENERATED_SET/icon-1024.png"
-/usr/bin/sips -z 512 512 "$THEME_PNG" --out "$GENERATED_SET/icon-512.png" >/dev/null
+verify_icon_source "$THEME_ICON"
 
 log "Rebuilding FloatyDo with primary icon theme: $THEME"
 "$XCODEBUILD" \
@@ -201,12 +136,12 @@ log "Rebuilding FloatyDo with primary icon theme: $THEME"
   -configuration Debug \
   -derivedDataPath "$DERIVED_DATA" \
   clean build \
-  ASSETCATALOG_COMPILER_APPICON_NAME="$APP_ICON_SET_NAME" \
+  ASSETCATALOG_COMPILER_APPICON_NAME="$APP_ICON_NAME" \
   CURRENT_PROJECT_VERSION="$BUILD_STAMP" \
   INFOPLIST_KEY_CFBundleVersion="$BUILD_STAMP"
 
 verify_binary "$APP_PATH"
-verify_file "$THEME_PNG"
+verify_icon_source "$THEME_ICON"
 
 mkdir -p "$APP_SUPPORT_DIR"
 atomic_write "$REPO_ROOT" "$PROJECT_ROOT_FILE"
