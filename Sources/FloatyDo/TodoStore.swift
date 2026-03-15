@@ -212,6 +212,7 @@ public final class TodoStore: ObservableObject {
             fontSize: LayoutMetrics.nearestFontSizeOption(to: newPreferences.fontSize),
             cornerRadius: clampedCornerRadius,
             windowOpacity: min(max(newPreferences.windowOpacity, LayoutMetrics.minWindowOpacity), 1.0),
+            blurMaterial: newPreferences.blurMaterial,
             glassEnabled: newPreferences.glassEnabled
         )
     }

@@ -85,6 +85,56 @@ public enum FontStylePreset: String, Codable, CaseIterable {
     }
 }
 
+public enum BlurMaterialPreset: String, Codable, CaseIterable {
+    case underWindowBackground
+    case popover
+    case hudWindow
+    case sheet
+    case windowBackground
+    case contentBackground
+    case underPageBackground
+    case sidebar
+    case headerView
+    case titlebar
+    case selection
+    case menu
+    case fullScreenUI
+    case toolTip
+
+    public var displayName: String {
+        switch self {
+        case .underWindowBackground:
+            return "Under Window"
+        case .popover:
+            return "Popover"
+        case .hudWindow:
+            return "HUD Window"
+        case .sheet:
+            return "Sheet"
+        case .windowBackground:
+            return "Window Background"
+        case .contentBackground:
+            return "Content Background"
+        case .underPageBackground:
+            return "Under Page"
+        case .sidebar:
+            return "Sidebar"
+        case .headerView:
+            return "Header View"
+        case .titlebar:
+            return "Titlebar"
+        case .selection:
+            return "Selection"
+        case .menu:
+            return "Menu"
+        case .fullScreenUI:
+            return "Fullscreen UI"
+        case .toolTip:
+            return "Tooltip"
+        }
+    }
+}
+
 public enum BuiltInTheme: String, Codable, CaseIterable {
     case theme1
     case theme2
@@ -177,6 +227,7 @@ public struct AppPreferences: Codable, Equatable {
     public var fontSize: Double
     public var cornerRadius: Double
     public var windowOpacity: Double
+    public var blurMaterial: BlurMaterialPreset
     public var glassEnabled: Bool
 
     private enum CodingKeys: String, CodingKey {
@@ -190,6 +241,7 @@ public struct AppPreferences: Codable, Equatable {
         case fontSize
         case cornerRadius
         case windowOpacity
+        case blurMaterial
         case glassEnabled
     }
 
@@ -204,6 +256,7 @@ public struct AppPreferences: Codable, Equatable {
         fontSize: LayoutMetrics.defaultFontSize,
         cornerRadius: 10,
         windowOpacity: 1.0,
+        blurMaterial: .underWindowBackground,
         glassEnabled: false
     )
 
@@ -218,6 +271,7 @@ public struct AppPreferences: Codable, Equatable {
         fontSize: Double = 13,
         cornerRadius: Double = 10,
         windowOpacity: Double = 1.0,
+        blurMaterial: BlurMaterialPreset = .underWindowBackground,
         glassEnabled: Bool = false
     ) {
         self.rowHeight = rowHeight
@@ -230,6 +284,7 @@ public struct AppPreferences: Codable, Equatable {
         self.fontSize = fontSize
         self.cornerRadius = cornerRadius
         self.windowOpacity = windowOpacity
+        self.blurMaterial = blurMaterial
         self.glassEnabled = glassEnabled
     }
 
@@ -247,6 +302,7 @@ public struct AppPreferences: Codable, Equatable {
         fontSize = try container.decodeIfPresent(Double.self, forKey: .fontSize) ?? fallback.fontSize
         cornerRadius = try container.decodeIfPresent(Double.self, forKey: .cornerRadius) ?? fallback.cornerRadius
         windowOpacity = try container.decodeIfPresent(Double.self, forKey: .windowOpacity) ?? fallback.windowOpacity
+        blurMaterial = try container.decodeIfPresent(BlurMaterialPreset.self, forKey: .blurMaterial) ?? fallback.blurMaterial
         glassEnabled = try container.decodeIfPresent(Bool.self, forKey: .glassEnabled) ?? fallback.glassEnabled
     }
 
@@ -254,6 +310,41 @@ public struct AppPreferences: Codable, Equatable {
 }
 
 #if canImport(AppKit)
+extension BlurMaterialPreset {
+    var visualEffectMaterial: NSVisualEffectView.Material {
+        switch self {
+        case .titlebar:
+            return .titlebar
+        case .selection:
+            return .selection
+        case .menu:
+            return .menu
+        case .popover:
+            return .popover
+        case .sidebar:
+            return .sidebar
+        case .headerView:
+            return .headerView
+        case .sheet:
+            return .sheet
+        case .windowBackground:
+            return .windowBackground
+        case .hudWindow:
+            return .hudWindow
+        case .fullScreenUI:
+            return .fullScreenUI
+        case .toolTip:
+            return .toolTip
+        case .contentBackground:
+            return .contentBackground
+        case .underWindowBackground:
+            return .underWindowBackground
+        case .underPageBackground:
+            return .underPageBackground
+        }
+    }
+}
+
 struct ThemePalette {
     let background: NSColor
     let highlight: NSColor
@@ -435,14 +526,18 @@ extension AppPreferences {
         panelBackgroundColor.withAlphaComponent(translucentSurfaceOpacity)
     }
 
+    var glassBackdropTintColor: NSColor {
+        panelBackgroundColor.withAlphaComponent(0.30)
+    }
+
     var fallbackGlassTintColor: NSColor {
-        let alpha = palette.usesLightText ? 0.74 : 0.64
-        return panelBackgroundColor.withAlphaComponent(alpha)
+        glassBackdropTintColor
     }
 
     @available(macOS 26.0, *)
     var glassTintColor: NSColor {
-        fallbackGlassTintColor
+        let alpha = palette.usesLightText ? 0.015 : 0.01
+        return panelBackgroundColor.withAlphaComponent(alpha)
     }
 
     var activeFillColor: NSColor {
@@ -506,8 +601,14 @@ extension AppPreferences {
 
     var translucentSurfaceOpacity: Double {
         let normalized = (clampedWindowOpacity - LayoutMetrics.minWindowOpacity) / (1.0 - LayoutMetrics.minWindowOpacity)
-        let eased = min(max(normalized, 0), 1)
-        return 0.82 + (0.14 * eased * eased)
+        let eased = pow(min(max(normalized, 0), 1), 1.35)
+        return 0.03 + (0.49 * eased)
+    }
+
+    var translucentEffectAlpha: Double {
+        let normalized = (clampedWindowOpacity - LayoutMetrics.minWindowOpacity) / (1.0 - LayoutMetrics.minWindowOpacity)
+        let eased = pow(min(max(normalized, 0), 1), 0.85)
+        return 0.90 + (0.10 * eased)
     }
 
     var maximumCornerRadius: Double {
@@ -536,7 +637,7 @@ enum LayoutMetrics {
     static let maxFontSize: Double = fontSizeOptions.last ?? 16
     static let minCornerRadius: Double = 4
     static let maxCornerRadius: Double = 24
-    static let minWindowOpacity: Double = 0.5
+    static let minWindowOpacity: Double = 0.3
     static let rowHorizontalInset: Double = 12
     static let textInset: Double = 8
     static let rowBackgroundInset: Double = 8

@@ -30,7 +30,7 @@ public final class FloatingPanel: NSWindow {
         appearance = NSAppearance(named: .darkAqua)
         isOpaque = false
         backgroundColor = .clear
-        hasShadow = true
+        hasShadow = false
 
         // Configure custom field editor
         customFieldEditor.isFieldEditor = true
@@ -73,6 +73,7 @@ public final class FloatingPanel: NSWindow {
         appearance = NSAppearance(named: preferences.usesLightText ? .darkAqua : .aqua)
         backgroundColor = .clear
         alphaValue = 1.0
+        hasShadow = false
         invalidateShadow()
         contentView?.needsDisplay = true
     }
@@ -121,6 +122,7 @@ final class PanelSurfaceView: NSView {
     private let solidSurface = NSView()
     private let translucentSurface = NSVisualEffectView()
     private let translucentTintOverlay = NSView()
+    private let glassCompositeSurface = NSView()
     private var activeSurface: NSView?
     private var glassSurfaceStorage: NSView?
 
@@ -141,8 +143,8 @@ final class PanelSurfaceView: NSView {
         translucentSurface.translatesAutoresizingMaskIntoConstraints = false
         translucentSurface.state = .active
         translucentSurface.blendingMode = .behindWindow
-        translucentSurface.material = .hudWindow
-        translucentSurface.isEmphasized = true
+        translucentSurface.material = AppPreferences.default.blurMaterial.visualEffectMaterial
+        translucentSurface.isEmphasized = false
         translucentSurface.wantsLayer = true
         translucentSurface.layer?.backgroundColor = NSColor.clear.cgColor
 
@@ -155,6 +157,10 @@ final class PanelSurfaceView: NSView {
             translucentTintOverlay.topAnchor.constraint(equalTo: translucentSurface.topAnchor),
             translucentTintOverlay.bottomAnchor.constraint(equalTo: translucentSurface.bottomAnchor),
         ])
+
+        glassCompositeSurface.translatesAutoresizingMaskIntoConstraints = false
+        glassCompositeSurface.wantsLayer = true
+        glassCompositeSurface.layer?.backgroundColor = NSColor.clear.cgColor
 
         addSubview(contentContainer)
         NSLayoutConstraint.activate([
@@ -174,22 +180,28 @@ final class PanelSurfaceView: NSView {
     }
 
     func apply(preferences: AppPreferences) {
+        translucentSurface.alphaValue = CGFloat(preferences.translucentEffectAlpha)
+        let blurMaterial = preferences.blurMaterial.visualEffectMaterial
+
         switch resolvedSurfaceMode(for: preferences) {
         case .solid:
             installSurface(solidSurface)
             solidSurface.layer?.backgroundColor = preferences.panelBackgroundColor.cgColor
         case .translucent:
             installSurface(translucentSurface)
-            translucentSurface.material = preferences.usesLightText ? .hudWindow : .underWindowBackground
+            translucentSurface.material = blurMaterial
             translucentTintOverlay.layer?.backgroundColor = preferences.translucentSurfaceTintColor.cgColor
         case .glass:
             if #available(macOS 26.0, *) {
                 let glassSurface = resolvedGlassSurface()
+                configureGlassComposite(with: glassSurface)
+                translucentSurface.material = blurMaterial
+                translucentTintOverlay.layer?.backgroundColor = preferences.glassBackdropTintColor.cgColor
                 glassSurface.tintColor = preferences.glassTintColor
-                installSurface(glassSurface)
+                installSurface(glassCompositeSurface)
             } else {
                 installSurface(translucentSurface)
-                translucentSurface.material = preferences.usesLightText ? .hudWindow : .underWindowBackground
+                translucentSurface.material = blurMaterial
                 translucentTintOverlay.layer?.backgroundColor = preferences.fallbackGlassTintColor.cgColor
             }
         }
@@ -206,9 +218,29 @@ final class PanelSurfaceView: NSView {
         return preferences.usesTranslucentSurface ? .translucent : .solid
     }
 
+    @available(macOS 26.0, *)
+    private func configureGlassComposite(with glassSurface: NSGlassEffectView) {
+        pinSurface(translucentSurface, in: glassCompositeSurface)
+        pinSurface(glassSurface, in: glassCompositeSurface)
+    }
+
+    private func pinSurface(_ surface: NSView, in parent: NSView) {
+        guard surface.superview !== parent else { return }
+        surface.removeFromSuperview()
+        parent.addSubview(surface)
+        NSLayoutConstraint.activate([
+            surface.leadingAnchor.constraint(equalTo: parent.leadingAnchor),
+            surface.trailingAnchor.constraint(equalTo: parent.trailingAnchor),
+            surface.topAnchor.constraint(equalTo: parent.topAnchor),
+            surface.bottomAnchor.constraint(equalTo: parent.bottomAnchor),
+        ])
+    }
+
     private func installSurface(_ surface: NSView) {
         if activeSurface !== surface {
-            activeSurface?.removeFromSuperview()
+            if let currentSurface = activeSurface, currentSurface.superview === self {
+                currentSurface.removeFromSuperview()
+            }
             addSubview(surface, positioned: .below, relativeTo: contentContainer)
             NSLayoutConstraint.activate([
                 surface.leadingAnchor.constraint(equalTo: leadingAnchor),
@@ -228,8 +260,11 @@ final class PanelSurfaceView: NSView {
 
         let glassSurface = NSGlassEffectView()
         glassSurface.translatesAutoresizingMaskIntoConstraints = false
-        glassSurface.style = .regular
+        glassSurface.style = .clear
         glassSurface.cornerRadius = 0
+        glassSurface.wantsLayer = true
+        glassSurface.layer?.borderWidth = 0
+        glassSurface.layer?.borderColor = NSColor.clear.cgColor
         glassSurfaceStorage = glassSurface
         return glassSurface
     }

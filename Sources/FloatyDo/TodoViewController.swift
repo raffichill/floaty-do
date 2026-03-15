@@ -2542,9 +2542,8 @@ fileprivate final class TodoRowView: NSView {
         let textHeight = max(textLabel.intrinsicContentSize.height, (fontLineHeight(for: textLabel.font) + 2))
         let textY = floor((bounds.height - textHeight) / 2)
         let textFrame = NSRect(x: textX, y: textY, width: textWidth, height: textHeight)
-        let activeTextFrame = textFrame.offsetBy(dx: 0, dy: 2)
         textLabel.frame = textFrame
-        editingTextView.frame = activeTextFrame
+        editingTextView.frame = textFrame
         editorHostView.frame = textFrame
         cursorShieldView.frame = textFrame
     }
@@ -2926,7 +2925,10 @@ private final class PassiveEditorHostView: NSView {
 }
 
 private final class EditingTextDisplayView: NSView {
-    private let alignmentCell = NSTextFieldCell(textCell: "")
+    private let alignmentCell: NSTextFieldCell = {
+        let field = NSTextField(labelWithString: "")
+        return (field.cell as? NSTextFieldCell) ?? NSTextFieldCell(textCell: "")
+    }()
 
     var text: String = "" {
         didSet {
@@ -2978,8 +2980,9 @@ private final class EditingTextDisplayView: NSView {
         alignmentCell.font = font
         alignmentCell.textColor = textColor
         alignmentCell.lineBreakMode = .byTruncatingTail
-        alignmentCell.isScrollable = true
+        alignmentCell.isScrollable = false
         alignmentCell.usesSingleLineMode = true
+        alignmentCell.wraps = false
     }
 
     required init?(coder: NSCoder) {

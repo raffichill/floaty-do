@@ -24,18 +24,19 @@ final class SettingsViewController: NSViewController {
         static let iconButtonWidth: CGFloat = 158
         static let shortcutsColumnWidth: CGFloat = 220
         static let shortcutsColumnGap: CGFloat = 16
+        static let shortcutsRowSpacing: CGFloat = 14
     }
 
     private enum SettingsTab: CaseIterable, Hashable {
         case appearance
         case shortcuts
-        case statistics
+        case about
 
         var title: String {
             switch self {
             case .appearance: return "Theme"
             case .shortcuts: return "Shortcuts"
-            case .statistics: return "Statistics"
+            case .about: return "About"
             }
         }
 
@@ -43,7 +44,7 @@ final class SettingsViewController: NSViewController {
             switch self {
             case .appearance: return "paintpalette"
             case .shortcuts: return "command"
-            case .statistics: return "chart.bar"
+            case .about: return "info.circle"
             }
         }
     }
@@ -69,6 +70,8 @@ final class SettingsViewController: NSViewController {
     private let transparencySlider = NSSlider()
     private let transparencyValueLabel = NSTextField(labelWithString: "")
     private let resetTransparencyButton = NSButton(title: "Reset", target: nil, action: nil)
+    private let blurMaterialPopup = NSPopUpButton()
+    private let resetBlurMaterialButton = NSButton(title: "Reset", target: nil, action: nil)
     private let glassToggle = NSSwitch()
     private let fontPopup = NSPopUpButton()
     private let resetFontButton = NSButton(title: "Reset", target: nil, action: nil)
@@ -175,6 +178,7 @@ final class SettingsViewController: NSViewController {
     private func configureControls() {
         configureThemeButtons()
         configureTransparencySlider()
+        configureBlurMaterialPopup()
         configureGlassToggle()
         configureIconApplyControls()
         configureFontPopup()
@@ -186,7 +190,7 @@ final class SettingsViewController: NSViewController {
         pageViews = [
             .appearance: makeAppearancePage(),
             .shortcuts: makeShortcutsPage(),
-            .statistics: makeStatisticsPage(),
+            .about: makeAboutPage(),
         ]
     }
 
@@ -217,6 +221,7 @@ final class SettingsViewController: NSViewController {
         let contentStack = NSStackView(views: [
             makeFormRow(title: "Background", control: makeThemeControl()),
             makeFormRow(title: "Transparency", control: makeTransparencyControl()),
+            makeFormRow(title: "Blur", control: makeBlurMaterialControl()),
             makeFormRow(title: "Glass", control: makeGlassControl()),
             makeFormRow(title: "App Icon", control: makeAppIconControl()),
             makeFormRow(title: "Font", control: makeFontControl()),
@@ -247,7 +252,7 @@ final class SettingsViewController: NSViewController {
         let stack = NSStackView()
         stack.orientation = .vertical
         stack.alignment = .centerX
-        stack.spacing = 10
+        stack.spacing = Metrics.shortcutsRowSpacing
         stack.translatesAutoresizingMaskIntoConstraints = false
 
         [
@@ -282,11 +287,13 @@ final class SettingsViewController: NSViewController {
         return container
     }
 
-    private func makeStatisticsPage() -> NSView {
-        let label = NSTextField(labelWithString: "stats page here")
+    private func makeAboutPage() -> NSView {
+        let label = NSTextField(wrappingLabelWithString: "paragraph goes here")
         label.font = .systemFont(ofSize: 13)
         label.textColor = .secondaryLabelColor
         label.translatesAutoresizingMaskIntoConstraints = false
+        label.maximumNumberOfLines = 0
+        label.preferredMaxLayoutWidth = 420
 
         let container = NSView()
         container.translatesAutoresizingMaskIntoConstraints = false
@@ -295,6 +302,7 @@ final class SettingsViewController: NSViewController {
         NSLayoutConstraint.activate([
             label.topAnchor.constraint(equalTo: container.topAnchor, constant: 8),
             label.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 8),
+            label.trailingAnchor.constraint(lessThanOrEqualTo: container.trailingAnchor, constant: -8),
             label.bottomAnchor.constraint(lessThanOrEqualTo: container.bottomAnchor),
         ])
 
@@ -354,6 +362,21 @@ final class SettingsViewController: NSViewController {
         glassToggle.action = #selector(glassToggled(_:))
         glassToggle.controlSize = .small
         glassToggle.translatesAutoresizingMaskIntoConstraints = false
+    }
+
+    private func configureBlurMaterialPopup() {
+        blurMaterialPopup.removeAllItems()
+        blurMaterialPopup.addItems(withTitles: BlurMaterialPreset.allCases.map(\.displayName))
+        blurMaterialPopup.target = self
+        blurMaterialPopup.action = #selector(blurMaterialChanged(_:))
+        blurMaterialPopup.controlSize = .small
+        blurMaterialPopup.font = .systemFont(ofSize: 12)
+        blurMaterialPopup.translatesAutoresizingMaskIntoConstraints = false
+        blurMaterialPopup.widthAnchor.constraint(equalToConstant: Metrics.popupWidth).isActive = true
+
+        resetBlurMaterialButton.target = self
+        resetBlurMaterialButton.action = #selector(resetBlurMaterial(_:))
+        configureResetButton(resetBlurMaterialButton)
     }
 
     private func configureFontPopup() {
@@ -462,6 +485,16 @@ final class SettingsViewController: NSViewController {
         return stack
     }
 
+    private func makeBlurMaterialControl() -> NSView {
+        let stack = NSStackView(views: [blurMaterialPopup, resetBlurMaterialButton])
+        stack.orientation = .horizontal
+        stack.alignment = .centerY
+        stack.spacing = 12
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        stack.widthAnchor.constraint(equalToConstant: Metrics.controlWidth).isActive = true
+        return stack
+    }
+
     private func makeFontControl() -> NSView {
         let stack = NSStackView(views: [fontPopup, resetFontButton])
         stack.orientation = .horizontal
@@ -548,7 +581,7 @@ final class SettingsViewController: NSViewController {
     private func makeShortcutRow(label: String, shortcut: [String]) -> NSView {
         let descriptionLabel = NSTextField(labelWithString: label)
         descriptionLabel.font = .systemFont(ofSize: 12)
-        descriptionLabel.textColor = .secondaryLabelColor
+        descriptionLabel.textColor = NSColor.labelColor.withAlphaComponent(0.72)
         descriptionLabel.alignment = .right
         descriptionLabel.translatesAutoresizingMaskIntoConstraints = false
         descriptionLabel.widthAnchor.constraint(equalToConstant: Metrics.shortcutsColumnWidth).isActive = true
@@ -646,6 +679,10 @@ final class SettingsViewController: NSViewController {
         transparencySlider.isEnabled = !preferences.glassEnabled
         resetTransparencyButton.isEnabled = !preferences.glassEnabled && preferences.clampedWindowOpacity < 0.999
         transparencyValueLabel.stringValue = "\(Int(round(displayedTransparency)))%"
+        if let index = BlurMaterialPreset.allCases.firstIndex(of: preferences.blurMaterial) {
+            blurMaterialPopup.selectItem(at: index)
+        }
+        resetBlurMaterialButton.isEnabled = preferences.blurMaterial != .underWindowBackground
         glassToggle.state = preferences.glassEnabled ? .on : .off
 
         if let index = FontStylePreset.allCases.firstIndex(of: preferences.fontStyle) {
@@ -713,6 +750,21 @@ final class SettingsViewController: NSViewController {
             if updated.glassEnabled {
                 updated.windowOpacity = 1.0
             }
+        }
+    }
+
+    @objc private func blurMaterialChanged(_ sender: NSPopUpButton) {
+        guard !isUpdatingControls else { return }
+        guard BlurMaterialPreset.allCases.indices.contains(sender.indexOfSelectedItem) else { return }
+        commitPreferenceChange { updated in
+            updated.blurMaterial = BlurMaterialPreset.allCases[sender.indexOfSelectedItem]
+        }
+    }
+
+    @objc private func resetBlurMaterial(_ sender: NSButton) {
+        guard !isUpdatingControls else { return }
+        commitPreferenceChange { updated in
+            updated.blurMaterial = .underWindowBackground
         }
     }
 

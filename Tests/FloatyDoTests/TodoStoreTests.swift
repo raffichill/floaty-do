@@ -508,7 +508,8 @@ final class TodoStoreTests: XCTestCase {
             themeColor: ThemeColor(red: 0.12, green: 0.45, blue: 0.73, alpha: 1),
             fontStyle: .rounded,
             fontSize: 16,
-            cornerRadius: 18
+            cornerRadius: 18,
+            blurMaterial: .popover
         )
         store1.updatePreferences(updatedPreferences)
 
@@ -550,12 +551,14 @@ final class TodoStoreTests: XCTestCase {
             fontSize: 14,
             cornerRadius: 10,
             windowOpacity: 0.2,
+            blurMaterial: .hudWindow,
             glassEnabled: true
         )
 
         store.updatePreferences(updatedPreferences)
 
-        XCTAssertEqual(store.preferences.windowOpacity, 0.5)
+        XCTAssertEqual(store.preferences.windowOpacity, 0.3)
+        XCTAssertEqual(store.preferences.blurMaterial, .hudWindow)
         XCTAssertTrue(store.preferences.glassEnabled)
     }
 
@@ -582,6 +585,7 @@ final class TodoStoreTests: XCTestCase {
         XCTAssertEqual(store.preferences.fontSize, 14.0)
         XCTAssertEqual(store.preferences.cornerRadius, 10.0)
         XCTAssertEqual(store.preferences.windowOpacity, 1.0)
+        XCTAssertEqual(store.preferences.blurMaterial, .underWindowBackground)
         XCTAssertFalse(store.preferences.glassEnabled)
     }
 

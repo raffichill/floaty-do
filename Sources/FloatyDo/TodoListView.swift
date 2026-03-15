@@ -1273,7 +1273,10 @@ final class PassiveEditorHostView: NSView {
 }
 
 final class EditingTextDisplayView: NSView {
-    private let alignmentCell = NSTextFieldCell(textCell: "")
+    private let alignmentCell: NSTextFieldCell = {
+        let field = NSTextField(labelWithString: "")
+        return (field.cell as? NSTextFieldCell) ?? NSTextFieldCell(textCell: "")
+    }()
 
     var text: String = "" {
         didSet {
@@ -1325,8 +1328,9 @@ final class EditingTextDisplayView: NSView {
         alignmentCell.font = font
         alignmentCell.textColor = textColor
         alignmentCell.lineBreakMode = .byTruncatingTail
-        alignmentCell.isScrollable = true
+        alignmentCell.isScrollable = false
         alignmentCell.usesSingleLineMode = true
+        alignmentCell.wraps = false
     }
 
     required init?(coder: NSCoder) {
