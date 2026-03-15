@@ -611,6 +611,12 @@ extension AppPreferences {
         return 0.90 + (0.10 * eased)
     }
 
+    var backdropBlurRadius: Double {
+        let normalized = (clampedWindowOpacity - LayoutMetrics.minWindowOpacity) / (1.0 - LayoutMetrics.minWindowOpacity)
+        let eased = min(max(normalized, 0), 1)
+        return 18.0 - (8.0 * eased)
+    }
+
     var maximumCornerRadius: Double {
         LayoutMetrics.maximumCornerRadius(forRowHeight: rowHeight)
     }

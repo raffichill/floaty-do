@@ -1,4 +1,5 @@
 import AppKit
+import CoreImage
 
 public final class FloatingPanel: NSWindow {
     private let customFieldEditor = CaretEndFieldEditor()
@@ -122,7 +123,6 @@ final class PanelSurfaceView: NSView {
     private let solidSurface = NSView()
     private let translucentSurface = NSVisualEffectView()
     private let translucentTintOverlay = NSView()
-    private let glassCompositeSurface = NSView()
     private var activeSurface: NSView?
     private var glassSurfaceStorage: NSView?
 
@@ -145,8 +145,6 @@ final class PanelSurfaceView: NSView {
         translucentSurface.blendingMode = .behindWindow
         translucentSurface.material = AppPreferences.default.blurMaterial.visualEffectMaterial
         translucentSurface.isEmphasized = false
-        translucentSurface.wantsLayer = true
-        translucentSurface.layer?.backgroundColor = NSColor.clear.cgColor
 
         translucentTintOverlay.translatesAutoresizingMaskIntoConstraints = false
         translucentTintOverlay.wantsLayer = true
@@ -157,10 +155,6 @@ final class PanelSurfaceView: NSView {
             translucentTintOverlay.topAnchor.constraint(equalTo: translucentSurface.topAnchor),
             translucentTintOverlay.bottomAnchor.constraint(equalTo: translucentSurface.bottomAnchor),
         ])
-
-        glassCompositeSurface.translatesAutoresizingMaskIntoConstraints = false
-        glassCompositeSurface.wantsLayer = true
-        glassCompositeSurface.layer?.backgroundColor = NSColor.clear.cgColor
 
         addSubview(contentContainer)
         NSLayoutConstraint.activate([
@@ -180,29 +174,44 @@ final class PanelSurfaceView: NSView {
     }
 
     func apply(preferences: AppPreferences) {
-        translucentSurface.alphaValue = CGFloat(preferences.translucentEffectAlpha)
         let blurMaterial = preferences.blurMaterial.visualEffectMaterial
 
         switch resolvedSurfaceMode(for: preferences) {
         case .solid:
+            attachContentContainerToRoot()
             installSurface(solidSurface)
             solidSurface.layer?.backgroundColor = preferences.panelBackgroundColor.cgColor
         case .translucent:
-            installSurface(translucentSurface)
-            translucentSurface.material = blurMaterial
-            translucentTintOverlay.layer?.backgroundColor = preferences.translucentSurfaceTintColor.cgColor
+            if #available(macOS 26.0, *) {
+                let glassSurface = resolvedGlassSurface()
+                configureModernGlassSurface(
+                    glassSurface,
+                    style: .regular,
+                    tintColor: preferences.translucentSurfaceTintColor
+                )
+                installSurface(glassSurface)
+            } else {
+                attachContentContainerToRoot()
+                translucentSurface.alphaValue = CGFloat(preferences.translucentEffectAlpha)
+                translucentSurface.material = blurMaterial
+                translucentTintOverlay.layer?.backgroundColor = preferences.translucentSurfaceTintColor.cgColor
+                installSurface(translucentSurface)
+            }
         case .glass:
             if #available(macOS 26.0, *) {
                 let glassSurface = resolvedGlassSurface()
-                configureGlassComposite(with: glassSurface)
-                translucentSurface.material = blurMaterial
-                translucentTintOverlay.layer?.backgroundColor = preferences.glassBackdropTintColor.cgColor
-                glassSurface.tintColor = preferences.glassTintColor
-                installSurface(glassCompositeSurface)
+                configureModernGlassSurface(
+                    glassSurface,
+                    style: .clear,
+                    tintColor: preferences.glassBackdropTintColor
+                )
+                installSurface(glassSurface)
             } else {
-                installSurface(translucentSurface)
+                attachContentContainerToRoot()
+                translucentSurface.alphaValue = CGFloat(preferences.translucentEffectAlpha)
                 translucentSurface.material = blurMaterial
                 translucentTintOverlay.layer?.backgroundColor = preferences.fallbackGlassTintColor.cgColor
+                installSurface(translucentSurface)
             }
         }
     }
@@ -218,30 +227,13 @@ final class PanelSurfaceView: NSView {
         return preferences.usesTranslucentSurface ? .translucent : .solid
     }
 
-    @available(macOS 26.0, *)
-    private func configureGlassComposite(with glassSurface: NSGlassEffectView) {
-        pinSurface(translucentSurface, in: glassCompositeSurface)
-        pinSurface(glassSurface, in: glassCompositeSurface)
-    }
-
-    private func pinSurface(_ surface: NSView, in parent: NSView) {
-        guard surface.superview !== parent else { return }
-        surface.removeFromSuperview()
-        parent.addSubview(surface)
-        NSLayoutConstraint.activate([
-            surface.leadingAnchor.constraint(equalTo: parent.leadingAnchor),
-            surface.trailingAnchor.constraint(equalTo: parent.trailingAnchor),
-            surface.topAnchor.constraint(equalTo: parent.topAnchor),
-            surface.bottomAnchor.constraint(equalTo: parent.bottomAnchor),
-        ])
-    }
-
     private func installSurface(_ surface: NSView) {
         if activeSurface !== surface {
             if let currentSurface = activeSurface, currentSurface.superview === self {
                 currentSurface.removeFromSuperview()
             }
-            addSubview(surface, positioned: .below, relativeTo: contentContainer)
+            let relativeView = contentContainer.superview === self ? contentContainer : nil
+            addSubview(surface, positioned: .below, relativeTo: relativeView)
             NSLayoutConstraint.activate([
                 surface.leadingAnchor.constraint(equalTo: leadingAnchor),
                 surface.trailingAnchor.constraint(equalTo: trailingAnchor),
@@ -250,6 +242,25 @@ final class PanelSurfaceView: NSView {
             ])
             activeSurface = surface
         }
+    }
+
+    private func attachContentContainerToRoot() {
+        guard contentContainer.superview !== self else { return }
+
+        if #available(macOS 26.0, *),
+           let glassSurface = glassSurfaceStorage as? NSGlassEffectView,
+           glassSurface.contentView === contentContainer {
+            glassSurface.contentView = nil
+        }
+
+        contentContainer.removeFromSuperview()
+        addSubview(contentContainer)
+        NSLayoutConstraint.activate([
+            contentContainer.leadingAnchor.constraint(equalTo: leadingAnchor),
+            contentContainer.trailingAnchor.constraint(equalTo: trailingAnchor),
+            contentContainer.topAnchor.constraint(equalTo: topAnchor),
+            contentContainer.bottomAnchor.constraint(equalTo: bottomAnchor),
+        ])
     }
 
     @available(macOS 26.0, *)
@@ -262,10 +273,22 @@ final class PanelSurfaceView: NSView {
         glassSurface.translatesAutoresizingMaskIntoConstraints = false
         glassSurface.style = .clear
         glassSurface.cornerRadius = 0
-        glassSurface.wantsLayer = true
-        glassSurface.layer?.borderWidth = 0
-        glassSurface.layer?.borderColor = NSColor.clear.cgColor
         glassSurfaceStorage = glassSurface
         return glassSurface
+    }
+
+    @available(macOS 26.0, *)
+    private func configureModernGlassSurface(
+        _ glassSurface: NSGlassEffectView,
+        style: NSGlassEffectView.Style,
+        tintColor: NSColor
+    ) {
+        if glassSurface.contentView !== contentContainer {
+            contentContainer.removeFromSuperview()
+            glassSurface.contentView = contentContainer
+        }
+
+        glassSurface.style = style
+        glassSurface.tintColor = tintColor
     }
 }
