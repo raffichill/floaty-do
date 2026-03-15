@@ -431,10 +431,6 @@ extension AppPreferences {
         panelBackgroundColor.withAlphaComponent(translucentSurfaceOpacity)
     }
 
-    var panelSurfaceColor: NSColor {
-        panelBackgroundColor.withAlphaComponent(clampedWindowOpacity)
-    }
-
     var fallbackGlassTintColor: NSColor {
         let alpha = palette.usesLightText ? 0.74 : 0.64
         return panelBackgroundColor.withAlphaComponent(alpha)
@@ -492,13 +488,13 @@ extension AppPreferences {
     }
 
     var usesTranslucentSurface: Bool {
-        glassEnabled
+        true
     }
 
     var translucentSurfaceOpacity: Double {
         let normalized = (clampedWindowOpacity - LayoutMetrics.minWindowOpacity) / (1.0 - LayoutMetrics.minWindowOpacity)
         let eased = min(max(normalized, 0), 1)
-        return 0.82 + (0.18 * eased * eased)
+        return 0.82 + (0.14 * eased * eased)
     }
 
     var maximumCornerRadius: Double {

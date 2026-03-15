@@ -177,7 +177,7 @@ final class PanelSurfaceView: NSView {
         switch resolvedSurfaceMode(for: preferences) {
         case .solid:
             installSurface(solidSurface)
-            solidSurface.layer?.backgroundColor = preferences.panelSurfaceColor.cgColor
+            solidSurface.layer?.backgroundColor = preferences.panelBackgroundColor.cgColor
         case .translucent:
             installSurface(translucentSurface)
             translucentSurface.material = preferences.usesLightText ? .hudWindow : .underWindowBackground
@@ -203,7 +203,7 @@ final class PanelSurfaceView: NSView {
             return .translucent
         }
 
-        return .solid
+        return preferences.usesTranslucentSurface ? .translucent : .solid
     }
 
     private func installSurface(_ surface: NSView) {
