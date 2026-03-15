@@ -2461,6 +2461,7 @@ fileprivate final class TodoRowView: NSView {
     }
 
     private let backgroundView = NSView()
+    private let selectionWashLayer = CALayer()
     private let circleView = NSImageView()
     private let textLabel = NSTextField(labelWithString: "")
     private let editingTextView = EditingTextDisplayView()
@@ -2502,6 +2503,11 @@ fileprivate final class TodoRowView: NSView {
 
         backgroundView.wantsLayer = true
         backgroundView.layer?.cornerRadius = CGFloat(preferences.cornerRadius)
+        backgroundView.layer?.masksToBounds = true
+        selectionWashLayer.backgroundColor = NSColor.clear.cgColor
+        selectionWashLayer.compositingFilter = nil
+        selectionWashLayer.cornerRadius = CGFloat(preferences.cornerRadius)
+        backgroundView.layer?.addSublayer(selectionWashLayer)
         addSubview(backgroundView)
 
         circleView.wantsLayer = true
@@ -2524,6 +2530,7 @@ fileprivate final class TodoRowView: NSView {
         super.layout()
 
         backgroundView.frame = bounds.insetBy(dx: LayoutMetrics.rowBackgroundInset, dy: LayoutMetrics.rowVerticalInset)
+        selectionWashLayer.frame = backgroundView.bounds
 
         let checkboxRect = self.checkboxRect
         let circleX = checkboxRect.minX + ((checkboxRect.width - LayoutMetrics.circleSize) / 2)
@@ -2562,6 +2569,7 @@ fileprivate final class TodoRowView: NSView {
         textLabel.font = preferences.appFont()
         editingTextView.font = preferences.appFont()
         backgroundView.layer?.cornerRadius = CGFloat(preferences.cornerRadius)
+        selectionWashLayer.cornerRadius = CGFloat(preferences.cornerRadius)
 
         updateAppearance()
         needsLayout = true
@@ -2723,6 +2731,7 @@ fileprivate final class TodoRowView: NSView {
             : CGFloat(model.textOpacity)
 
         let backgroundColor: CGColor
+        let selectionWashColor: CGColor
         let borderColor: CGColor
         let borderWidth: CGFloat
         let compositingFilter: Any?
@@ -2730,21 +2739,25 @@ fileprivate final class TodoRowView: NSView {
         shouldAnimateNextSelectionFill = false
         if isDraggingRow {
             backgroundColor = NSColor.clear.cgColor
+            selectionWashColor = NSColor.clear.cgColor
             borderColor = preferences.subtleStrokeColor.cgColor
             borderWidth = 1.0
             compositingFilter = nil
         } else if model.isSelectable && isFocusedRow {
             backgroundColor = activeFillColor.cgColor
+            selectionWashColor = preferences.selectionWashFillColor.cgColor
             borderColor = NSColor.clear.cgColor
             borderWidth = 0.0
             compositingFilter = preferences.selectionOverlayBlendMode
         } else if model.isSelectable && isRangeSelected {
             backgroundColor = secondarySelectionFillColor.cgColor
+            selectionWashColor = preferences.selectionWashFillColor.cgColor
             borderColor = NSColor.clear.cgColor
             borderWidth = 0.0
             compositingFilter = preferences.selectionOverlayBlendMode
         } else {
             backgroundColor = NSColor.clear.cgColor
+            selectionWashColor = NSColor.clear.cgColor
             borderColor = NSColor.clear.cgColor
             borderWidth = 0.0
             compositingFilter = nil
@@ -2752,6 +2765,7 @@ fileprivate final class TodoRowView: NSView {
 
         updateBackgroundAppearance(
             backgroundColor: backgroundColor,
+            selectionWashColor: selectionWashColor,
             borderColor: borderColor,
             borderWidth: borderWidth,
             compositingFilter: compositingFilter,
@@ -2788,6 +2802,7 @@ fileprivate final class TodoRowView: NSView {
 
     private func updateBackgroundAppearance(
         backgroundColor: CGColor,
+        selectionWashColor: CGColor,
         borderColor: CGColor,
         borderWidth: CGFloat,
         compositingFilter: Any?,
@@ -2798,6 +2813,7 @@ fileprivate final class TodoRowView: NSView {
         let currentBackground = layer.presentation()?.backgroundColor ?? layer.backgroundColor
         let currentBorderColor = layer.presentation()?.borderColor ?? layer.borderColor
         let currentBorderWidth = layer.presentation()?.borderWidth ?? layer.borderWidth
+        let currentSelectionWash = selectionWashLayer.presentation()?.backgroundColor ?? selectionWashLayer.backgroundColor
 
         let shouldAnimate = animate && window != nil && !isDraggingRow
 
@@ -2828,12 +2844,22 @@ fileprivate final class TodoRowView: NSView {
             layer.add(animation, forKey: "rowBorderWidth")
         }
 
+        if shouldAnimate, let currentSelectionWash {
+            let animation = CABasicAnimation(keyPath: "backgroundColor")
+            animation.fromValue = currentSelectionWash
+            animation.toValue = selectionWashColor
+            animation.duration = preferences.motion.collapse
+            animation.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            selectionWashLayer.add(animation, forKey: "rowSelectionWashColor")
+        }
+
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         layer.backgroundColor = backgroundColor
         layer.borderColor = borderColor
         layer.borderWidth = borderWidth
         layer.compositingFilter = compositingFilter
+        selectionWashLayer.backgroundColor = selectionWashColor
         CATransaction.commit()
     }
 

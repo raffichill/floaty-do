@@ -377,6 +377,10 @@ extension AppPreferences {
         min(max(windowOpacity, LayoutMetrics.minWindowOpacity), 1.0)
     }
 
+    var selectedBuiltInTheme: BuiltInTheme {
+        BuiltInTheme.nearest(to: themeColor)
+    }
+
     var palette: ThemePalette {
         if themeColor == .default {
             return ThemePalette(
@@ -453,6 +457,15 @@ extension AppPreferences {
         palette.usesLightText
             ? NSColor.white.withAlphaComponent(0.30)
             : NSColor.black.withAlphaComponent(0.25)
+    }
+
+    var selectionWashFillColor: NSColor {
+        if palette.usesLightText {
+            let alpha = selectedBuiltInTheme == .theme1 ? 0.27 : 0.22
+            return NSColor.white.withAlphaComponent(alpha)
+        }
+
+        return NSColor.black.withAlphaComponent(0.22)
     }
 
     var selectionOverlayBlendMode: String {
