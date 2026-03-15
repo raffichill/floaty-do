@@ -29,7 +29,7 @@ public final class FloatingPanel: NSWindow {
         // Unified dark background — title bar blends with content
         appearance = NSAppearance(named: .darkAqua)
         isOpaque = false
-        backgroundColor = AppPreferences.default.panelBackgroundColor
+        backgroundColor = .clear
         hasShadow = true
 
         // Configure custom field editor
@@ -71,7 +71,8 @@ public final class FloatingPanel: NSWindow {
 
     public func applyTheme(preferences: AppPreferences) {
         appearance = NSAppearance(named: preferences.usesLightText ? .darkAqua : .aqua)
-        backgroundColor = preferences.panelBackgroundColor
+        backgroundColor = .clear
+        alphaValue = 1.0
         invalidateShadow()
         contentView?.needsDisplay = true
     }
@@ -106,5 +107,130 @@ public final class FloatingPanel: NSWindow {
             button.setFrameOrigin(NSPoint(x: currentX, y: buttonY))
             currentX += button.frame.width + spacing
         }
+    }
+}
+
+final class PanelSurfaceView: NSView {
+    private enum SurfaceMode: Equatable {
+        case solid
+        case translucent
+        case glass
+    }
+
+    private let contentContainer = NSView()
+    private let solidSurface = NSView()
+    private let translucentSurface = NSVisualEffectView()
+    private let translucentTintOverlay = NSView()
+    private var activeSurface: NSView?
+    private var glassSurfaceStorage: NSView?
+
+    var contentView: NSView {
+        contentContainer
+    }
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        translatesAutoresizingMaskIntoConstraints = false
+
+        contentContainer.translatesAutoresizingMaskIntoConstraints = false
+        contentContainer.wantsLayer = false
+
+        solidSurface.translatesAutoresizingMaskIntoConstraints = false
+        solidSurface.wantsLayer = true
+
+        translucentSurface.translatesAutoresizingMaskIntoConstraints = false
+        translucentSurface.state = .active
+        translucentSurface.blendingMode = .behindWindow
+        translucentSurface.material = .hudWindow
+        translucentSurface.isEmphasized = true
+        translucentSurface.wantsLayer = true
+        translucentSurface.layer?.backgroundColor = NSColor.clear.cgColor
+
+        translucentTintOverlay.translatesAutoresizingMaskIntoConstraints = false
+        translucentTintOverlay.wantsLayer = true
+        translucentSurface.addSubview(translucentTintOverlay)
+        NSLayoutConstraint.activate([
+            translucentTintOverlay.leadingAnchor.constraint(equalTo: translucentSurface.leadingAnchor),
+            translucentTintOverlay.trailingAnchor.constraint(equalTo: translucentSurface.trailingAnchor),
+            translucentTintOverlay.topAnchor.constraint(equalTo: translucentSurface.topAnchor),
+            translucentTintOverlay.bottomAnchor.constraint(equalTo: translucentSurface.bottomAnchor),
+        ])
+
+        addSubview(contentContainer)
+        NSLayoutConstraint.activate([
+            contentContainer.leadingAnchor.constraint(equalTo: leadingAnchor),
+            contentContainer.trailingAnchor.constraint(equalTo: trailingAnchor),
+            contentContainer.topAnchor.constraint(equalTo: topAnchor),
+            contentContainer.bottomAnchor.constraint(equalTo: bottomAnchor),
+        ])
+
+        installSurface(solidSurface)
+        apply(preferences: .default)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    func apply(preferences: AppPreferences) {
+        switch resolvedSurfaceMode(for: preferences) {
+        case .solid:
+            installSurface(solidSurface)
+            solidSurface.layer?.backgroundColor = preferences.panelSurfaceColor.cgColor
+        case .translucent:
+            installSurface(translucentSurface)
+            translucentSurface.material = preferences.usesLightText ? .hudWindow : .underWindowBackground
+            translucentTintOverlay.layer?.backgroundColor = preferences.translucentSurfaceTintColor.cgColor
+        case .glass:
+            if #available(macOS 26.0, *) {
+                let glassSurface = resolvedGlassSurface()
+                glassSurface.tintColor = preferences.glassTintColor
+                installSurface(glassSurface)
+            } else {
+                installSurface(translucentSurface)
+                translucentSurface.material = preferences.usesLightText ? .hudWindow : .underWindowBackground
+                translucentTintOverlay.layer?.backgroundColor = preferences.fallbackGlassTintColor.cgColor
+            }
+        }
+    }
+
+    private func resolvedSurfaceMode(for preferences: AppPreferences) -> SurfaceMode {
+        if preferences.glassEnabled {
+            if #available(macOS 26.0, *) {
+                return .glass
+            }
+            return .translucent
+        }
+
+        return .solid
+    }
+
+    private func installSurface(_ surface: NSView) {
+        if activeSurface !== surface {
+            activeSurface?.removeFromSuperview()
+            addSubview(surface, positioned: .below, relativeTo: contentContainer)
+            NSLayoutConstraint.activate([
+                surface.leadingAnchor.constraint(equalTo: leadingAnchor),
+                surface.trailingAnchor.constraint(equalTo: trailingAnchor),
+                surface.topAnchor.constraint(equalTo: topAnchor),
+                surface.bottomAnchor.constraint(equalTo: bottomAnchor),
+            ])
+            activeSurface = surface
+        }
+    }
+
+    @available(macOS 26.0, *)
+    private func resolvedGlassSurface() -> NSGlassEffectView {
+        if let glassSurface = glassSurfaceStorage as? NSGlassEffectView {
+            return glassSurface
+        }
+
+        let glassSurface = NSGlassEffectView()
+        glassSurface.translatesAutoresizingMaskIntoConstraints = false
+        glassSurface.style = .regular
+        glassSurface.cornerRadius = 0
+        glassSurfaceStorage = glassSurface
+        return glassSurface
     }
 }

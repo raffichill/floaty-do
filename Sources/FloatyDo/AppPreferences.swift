@@ -176,6 +176,8 @@ public struct AppPreferences: Codable, Equatable {
     public var fontStyle: FontStylePreset
     public var fontSize: Double
     public var cornerRadius: Double
+    public var windowOpacity: Double
+    public var glassEnabled: Bool
 
     private enum CodingKeys: String, CodingKey {
         case rowHeight
@@ -187,6 +189,8 @@ public struct AppPreferences: Codable, Equatable {
         case fontStyle
         case fontSize
         case cornerRadius
+        case windowOpacity
+        case glassEnabled
     }
 
     public static let `default` = AppPreferences(
@@ -198,7 +202,9 @@ public struct AppPreferences: Codable, Equatable {
         themeColor: .default,
         fontStyle: .system,
         fontSize: LayoutMetrics.defaultFontSize,
-        cornerRadius: 10
+        cornerRadius: 10,
+        windowOpacity: 1.0,
+        glassEnabled: false
     )
 
     public init(
@@ -210,7 +216,9 @@ public struct AppPreferences: Codable, Equatable {
         themeColor: ThemeColor = .default,
         fontStyle: FontStylePreset = .system,
         fontSize: Double = 13,
-        cornerRadius: Double = 10
+        cornerRadius: Double = 10,
+        windowOpacity: Double = 1.0,
+        glassEnabled: Bool = false
     ) {
         self.rowHeight = rowHeight
         self.panelWidth = panelWidth
@@ -221,6 +229,8 @@ public struct AppPreferences: Codable, Equatable {
         self.fontStyle = fontStyle
         self.fontSize = fontSize
         self.cornerRadius = cornerRadius
+        self.windowOpacity = windowOpacity
+        self.glassEnabled = glassEnabled
     }
 
     public init(from decoder: Decoder) throws {
@@ -236,6 +246,8 @@ public struct AppPreferences: Codable, Equatable {
         fontStyle = try container.decodeIfPresent(FontStylePreset.self, forKey: .fontStyle) ?? fallback.fontStyle
         fontSize = try container.decodeIfPresent(Double.self, forKey: .fontSize) ?? fallback.fontSize
         cornerRadius = try container.decodeIfPresent(Double.self, forKey: .cornerRadius) ?? fallback.cornerRadius
+        windowOpacity = try container.decodeIfPresent(Double.self, forKey: .windowOpacity) ?? fallback.windowOpacity
+        glassEnabled = try container.decodeIfPresent(Bool.self, forKey: .glassEnabled) ?? fallback.glassEnabled
     }
 
     var motion: MotionProfile { animationPreset.motion }
@@ -361,6 +373,10 @@ extension FontStylePreset {
 }
 
 extension AppPreferences {
+    var clampedWindowOpacity: Double {
+        min(max(windowOpacity, LayoutMetrics.minWindowOpacity), 1.0)
+    }
+
     var palette: ThemePalette {
         if themeColor == .default {
             return ThemePalette(
@@ -411,12 +427,40 @@ extension AppPreferences {
         palette.background
     }
 
+    var translucentSurfaceTintColor: NSColor {
+        panelBackgroundColor.withAlphaComponent(translucentSurfaceOpacity)
+    }
+
+    var panelSurfaceColor: NSColor {
+        panelBackgroundColor.withAlphaComponent(clampedWindowOpacity)
+    }
+
+    var fallbackGlassTintColor: NSColor {
+        let alpha = palette.usesLightText ? 0.74 : 0.64
+        return panelBackgroundColor.withAlphaComponent(alpha)
+    }
+
+    @available(macOS 26.0, *)
+    var glassTintColor: NSColor {
+        fallbackGlassTintColor
+    }
+
     var activeFillColor: NSColor {
-        palette.highlight
+        selectionOverlayFillColor
     }
 
     var secondarySelectionFillColor: NSColor {
         activeFillColor
+    }
+
+    var selectionOverlayFillColor: NSColor {
+        palette.usesLightText
+            ? NSColor.white.withAlphaComponent(0.30)
+            : NSColor.black.withAlphaComponent(0.25)
+    }
+
+    var selectionOverlayBlendMode: String {
+        "overlayBlendMode"
     }
 
     var primaryTextColor: NSColor {
@@ -447,6 +491,16 @@ extension AppPreferences {
         palette.usesLightText
     }
 
+    var usesTranslucentSurface: Bool {
+        glassEnabled
+    }
+
+    var translucentSurfaceOpacity: Double {
+        let normalized = (clampedWindowOpacity - LayoutMetrics.minWindowOpacity) / (1.0 - LayoutMetrics.minWindowOpacity)
+        let eased = min(max(normalized, 0), 1)
+        return 0.82 + (0.18 * eased * eased)
+    }
+
     var maximumCornerRadius: Double {
         LayoutMetrics.maximumCornerRadius(forRowHeight: rowHeight)
     }
@@ -473,6 +527,7 @@ enum LayoutMetrics {
     static let maxFontSize: Double = fontSizeOptions.last ?? 16
     static let minCornerRadius: Double = 4
     static let maxCornerRadius: Double = 24
+    static let minWindowOpacity: Double = 0.5
     static let rowHorizontalInset: Double = 12
     static let textInset: Double = 8
     static let rowBackgroundInset: Double = 8

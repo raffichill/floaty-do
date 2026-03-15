@@ -537,6 +537,28 @@ final class TodoStoreTests: XCTestCase {
         XCTAssertEqual(store.preferences.snapPadding, 40)
     }
 
+    func testPreferencesClampWindowOpacityAndPersistGlassToggle() {
+        let store = TodoStore()
+        let updatedPreferences = AppPreferences(
+            rowHeight: 36,
+            panelWidth: 400,
+            hoverHighlightsEnabled: true,
+            animationPreset: .balanced,
+            snapPadding: 40,
+            themeColor: .default,
+            fontStyle: .system,
+            fontSize: 14,
+            cornerRadius: 10,
+            windowOpacity: 0.2,
+            glassEnabled: true
+        )
+
+        store.updatePreferences(updatedPreferences)
+
+        XCTAssertEqual(store.preferences.windowOpacity, 0.5)
+        XCTAssertTrue(store.preferences.glassEnabled)
+    }
+
     func testLegacyPreferencesDecodeUsesNewFieldDefaults() throws {
         let legacyPreferences: [String: Any] = [
             "rowHeight": 42.0,
@@ -559,6 +581,8 @@ final class TodoStoreTests: XCTestCase {
         XCTAssertEqual(store.preferences.fontStyle, .system)
         XCTAssertEqual(store.preferences.fontSize, 14.0)
         XCTAssertEqual(store.preferences.cornerRadius, 10.0)
+        XCTAssertEqual(store.preferences.windowOpacity, 1.0)
+        XCTAssertFalse(store.preferences.glassEnabled)
     }
 
     func testRestoreStateReplacesItemsArchiveAndPreferences() {
@@ -610,5 +634,6 @@ final class TodoStoreTests: XCTestCase {
         XCTAssertEqual(store.preferences.snapPadding, 32)
         XCTAssertEqual(store.preferences.fontSize, 14)
         XCTAssertEqual(store.preferences.cornerRadius, 16)
+        XCTAssertEqual(store.preferences.windowOpacity, 1.0)
     }
 }

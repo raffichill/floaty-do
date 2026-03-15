@@ -1,5 +1,10 @@
 import AppKit
 
+private final class SettingsPanel: NSPanel {
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { false }
+}
+
 final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     private enum ChromeMetrics {
         static let trafficLightInset: CGFloat = 18
@@ -15,11 +20,12 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     var onWindowVisibilityChange: ((Bool) -> Void)?
 
     private let settingsViewController: SettingsViewController
+    private weak var parentWindow: NSWindow?
 
     init(preferences: AppPreferences) {
         self.settingsViewController = SettingsViewController(preferences: preferences)
 
-        let window = NSWindow(
+        let window = SettingsPanel(
             contentRect: NSRect(x: 0, y: 0, width: 880, height: 660),
             styleMask: [.titled, .closable, .miniaturizable, .fullSizeContentView],
             backing: .buffered,
@@ -29,6 +35,8 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true
         window.isReleasedWhenClosed = false
+        window.isFloatingPanel = true
+        window.hidesOnDeactivate = false
         window.center()
         window.minSize = NSSize(width: 820, height: 620)
         window.contentViewController = settingsViewController
@@ -52,9 +60,13 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         fatalError("init(coder:) has not been implemented")
     }
 
-    func present() {
+    func present(attachedTo parentWindow: NSWindow?) {
+        self.parentWindow = parentWindow
         showWindow(nil)
         window?.center()
+        if let window, let parentWindow, window.parent !== parentWindow {
+            parentWindow.addChildWindow(window, ordered: .above)
+        }
         window?.makeKeyAndOrderFront(nil)
         applyWindowChromeLayout()
         DispatchQueue.main.async { [weak self] in
@@ -69,6 +81,9 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     }
 
     func windowWillClose(_ notification: Notification) {
+        if let window, let parent = window.parent {
+            parent.removeChildWindow(window)
+        }
         onWindowVisibilityChange?(false)
     }
 

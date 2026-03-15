@@ -66,6 +66,10 @@ final class SettingsViewController: NSViewController {
     private let iconStatusLabel = NSTextField(labelWithString: "")
     private let applyIconButton = NSButton(title: "Apply & Relaunch", target: nil, action: nil)
     private var themeButtons: [ThemePresetButton] = []
+    private let transparencySlider = NSSlider()
+    private let transparencyValueLabel = NSTextField(labelWithString: "")
+    private let resetTransparencyButton = NSButton(title: "Reset", target: nil, action: nil)
+    private let glassToggle = NSSwitch()
     private let fontPopup = NSPopUpButton()
     private let resetFontButton = NSButton(title: "Reset", target: nil, action: nil)
     private let fontSizeSlider = NSSlider()
@@ -170,6 +174,8 @@ final class SettingsViewController: NSViewController {
 
     private func configureControls() {
         configureThemeButtons()
+        configureTransparencySlider()
+        configureGlassToggle()
         configureIconApplyControls()
         configureFontPopup()
         configureFontSizeSlider()
@@ -210,6 +216,8 @@ final class SettingsViewController: NSViewController {
     private func makeAppearancePage() -> NSView {
         let contentStack = NSStackView(views: [
             makeFormRow(title: "Background", control: makeThemeControl()),
+            makeFormRow(title: "Transparency", control: makeTransparencyControl()),
+            makeFormRow(title: "Glass", control: makeGlassControl()),
             makeFormRow(title: "App Icon", control: makeAppIconControl()),
             makeFormRow(title: "Font", control: makeFontControl()),
             makeFormRow(title: "Font Size", control: makeFontSizeControl()),
@@ -324,6 +332,30 @@ final class SettingsViewController: NSViewController {
         applyIconButton.widthAnchor.constraint(equalToConstant: Metrics.iconButtonWidth).isActive = true
     }
 
+    private func configureTransparencySlider() {
+        transparencySlider.minValue = LayoutMetrics.minWindowOpacity * 100.0
+        transparencySlider.maxValue = 100.0
+        transparencySlider.isContinuous = true
+        transparencySlider.sendAction(on: [.leftMouseDown, .leftMouseDragged, .leftMouseUp])
+        transparencySlider.target = self
+        transparencySlider.action = #selector(transparencyChanged(_:))
+        transparencySlider.translatesAutoresizingMaskIntoConstraints = false
+        transparencySlider.widthAnchor.constraint(equalToConstant: Metrics.sliderWidth).isActive = true
+
+        configureValueLabel(transparencyValueLabel)
+
+        resetTransparencyButton.target = self
+        resetTransparencyButton.action = #selector(resetTransparency(_:))
+        configureResetButton(resetTransparencyButton)
+    }
+
+    private func configureGlassToggle() {
+        glassToggle.target = self
+        glassToggle.action = #selector(glassToggled(_:))
+        glassToggle.controlSize = .small
+        glassToggle.translatesAutoresizingMaskIntoConstraints = false
+    }
+
     private func configureFontPopup() {
         fontPopup.removeAllItems()
         fontPopup.addItems(withTitles: FontStylePreset.allCases.map(\.displayName))
@@ -398,6 +430,33 @@ final class SettingsViewController: NSViewController {
         stack.orientation = .horizontal
         stack.alignment = .centerY
         stack.spacing = 16
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        stack.widthAnchor.constraint(equalToConstant: Metrics.controlWidth).isActive = true
+        return stack
+    }
+
+    private func makeTransparencyControl() -> NSView {
+        let sliderGroup = NSStackView(views: [transparencySlider, transparencyValueLabel])
+        sliderGroup.orientation = .horizontal
+        sliderGroup.alignment = .centerY
+        sliderGroup.spacing = Metrics.sliderValueSpacing
+        sliderGroup.translatesAutoresizingMaskIntoConstraints = false
+        sliderGroup.widthAnchor.constraint(equalToConstant: Metrics.sliderGroupWidth).isActive = true
+
+        let stack = NSStackView(views: [sliderGroup, resetTransparencyButton])
+        stack.orientation = .horizontal
+        stack.alignment = .centerY
+        stack.spacing = 12
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        stack.widthAnchor.constraint(equalToConstant: Metrics.controlWidth).isActive = true
+        return stack
+    }
+
+    private func makeGlassControl() -> NSView {
+        let stack = NSStackView(views: [glassToggle])
+        stack.orientation = .horizontal
+        stack.alignment = .centerY
+        stack.spacing = 12
         stack.translatesAutoresizingMaskIntoConstraints = false
         stack.widthAnchor.constraint(equalToConstant: Metrics.controlWidth).isActive = true
         return stack
@@ -582,6 +641,13 @@ final class SettingsViewController: NSViewController {
             button.isSelected = BuiltInTheme.allCases[index] == selectedTheme
         }
 
+        let displayedTransparency = preferences.glassEnabled ? 100.0 : (preferences.clampedWindowOpacity * 100.0)
+        transparencySlider.doubleValue = displayedTransparency
+        transparencySlider.isEnabled = !preferences.glassEnabled
+        resetTransparencyButton.isEnabled = !preferences.glassEnabled && preferences.clampedWindowOpacity < 0.999
+        transparencyValueLabel.stringValue = "\(Int(round(displayedTransparency)))%"
+        glassToggle.state = preferences.glassEnabled ? .on : .off
+
         if let index = FontStylePreset.allCases.firstIndex(of: preferences.fontStyle) {
             fontPopup.selectItem(at: index)
         }
@@ -618,6 +684,35 @@ final class SettingsViewController: NSViewController {
         guard !isUpdatingControls else { return }
         commitPreferenceChange { updated in
             updated.themeColor = BuiltInTheme.theme1.color
+        }
+    }
+
+    @objc private func transparencyChanged(_ sender: NSSlider) {
+        guard !isUpdatingControls else { return }
+        let snappedValue = round(sender.doubleValue)
+        if sender.doubleValue != snappedValue {
+            sender.doubleValue = snappedValue
+        }
+        commitPreferenceChange { updated in
+            updated.windowOpacity = snappedValue / 100.0
+            updated.glassEnabled = false
+        }
+    }
+
+    @objc private func resetTransparency(_ sender: NSButton) {
+        guard !isUpdatingControls else { return }
+        commitPreferenceChange { updated in
+            updated.windowOpacity = 1.0
+        }
+    }
+
+    @objc private func glassToggled(_ sender: NSButton) {
+        guard !isUpdatingControls else { return }
+        commitPreferenceChange { updated in
+            updated.glassEnabled = sender.state == .on
+            if updated.glassEnabled {
+                updated.windowOpacity = 1.0
+            }
         }
     }
 

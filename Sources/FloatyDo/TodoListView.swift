@@ -1009,30 +1009,36 @@ final class TodoRowView: NSView {
         let backgroundColor: CGColor
         let borderColor: CGColor
         let borderWidth: CGFloat
+        let compositingFilter: Any?
         let animateSelectionFill = shouldAnimateNextSelectionFill && model.isSelectable && isFocusedRow
         shouldAnimateNextSelectionFill = false
         if isDraggingRow {
             backgroundColor = NSColor.clear.cgColor
             borderColor = preferences.subtleStrokeColor.cgColor
             borderWidth = 1.0
+            compositingFilter = nil
         } else if model.isSelectable && isFocusedRow {
             backgroundColor = activeFillColor.cgColor
             borderColor = NSColor.clear.cgColor
             borderWidth = 0.0
+            compositingFilter = preferences.selectionOverlayBlendMode
         } else if model.isSelectable && isRangeSelected {
             backgroundColor = secondarySelectionFillColor.cgColor
             borderColor = NSColor.clear.cgColor
             borderWidth = 0.0
+            compositingFilter = preferences.selectionOverlayBlendMode
         } else {
             backgroundColor = NSColor.clear.cgColor
             borderColor = NSColor.clear.cgColor
             borderWidth = 0.0
+            compositingFilter = nil
         }
 
         updateBackgroundAppearance(
             backgroundColor: backgroundColor,
             borderColor: borderColor,
             borderWidth: borderWidth,
+            compositingFilter: compositingFilter,
             animate: animateSelectionFill
         )
         circleView.contentTintColor = baseTextColor.withAlphaComponent(circleAlpha)
@@ -1068,6 +1074,7 @@ final class TodoRowView: NSView {
         backgroundColor: CGColor,
         borderColor: CGColor,
         borderWidth: CGFloat,
+        compositingFilter: Any?,
         animate: Bool
     ) {
         guard let layer = backgroundView.layer else { return }
@@ -1110,6 +1117,7 @@ final class TodoRowView: NSView {
         layer.backgroundColor = backgroundColor
         layer.borderColor = borderColor
         layer.borderWidth = borderWidth
+        layer.compositingFilter = compositingFilter
         CATransaction.commit()
     }
 

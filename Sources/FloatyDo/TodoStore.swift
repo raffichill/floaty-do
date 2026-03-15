@@ -210,7 +210,9 @@ public final class TodoStore: ObservableObject {
             themeColor: newPreferences.themeColor.clamped(),
             fontStyle: newPreferences.fontStyle,
             fontSize: LayoutMetrics.nearestFontSizeOption(to: newPreferences.fontSize),
-            cornerRadius: clampedCornerRadius
+            cornerRadius: clampedCornerRadius,
+            windowOpacity: min(max(newPreferences.windowOpacity, LayoutMetrics.minWindowOpacity), 1.0),
+            glassEnabled: newPreferences.glassEnabled
         )
     }
 

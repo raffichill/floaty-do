@@ -51,6 +51,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
     private var settingsButton: HoverTrackingButton!
     private var settingsWindowController: SettingsWindowController?
     private var isAnimating = false
+    private weak var surfaceView: PanelSurfaceView?
     private weak var containerView: NSView?
     private var tabBarHeightConstraint: NSLayoutConstraint?
     private var listTopConstraint: NSLayoutConstraint?
@@ -58,10 +59,12 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
     private let historyManager = UndoManager()
     private var isApplyingSettingsPreferenceChange = false
     private var nativeFullScreenState = false
+    private var appliedPreferences: AppPreferences
 
     public init(store: TodoStore) {
         self.store = store
         self.taskDraft = TaskDraftState(insertionIndex: store.items.count, text: "")
+        self.appliedPreferences = store.preferences
         super.init(nibName: nil, bundle: nil)
         historyManager.levelsOfUndo = 100
     }
@@ -110,10 +113,10 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
     }
 
     public override func loadView() {
-        let container = NSView(frame: NSRect(x: 0, y: 0, width: panelWidth, height: 240))
-        container.wantsLayer = true
-        container.layer?.backgroundColor = store.preferences.panelBackgroundColor.cgColor
-        container.autoresizingMask = [.width, .height]
+        let panelSurface = PanelSurfaceView(frame: NSRect(x: 0, y: 0, width: panelWidth, height: 240))
+        panelSurface.apply(preferences: store.preferences)
+        let container = panelSurface.contentView
+        self.surfaceView = panelSurface
         containerView = container
 
         tasksTabButton = makeTabButton(symbolName: "checklist.unchecked", action: #selector(switchToTasks))
@@ -157,7 +160,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
             listView.bottomAnchor.constraint(equalTo: container.bottomAnchor),
         ])
 
-        self.view = container
+        self.view = panelSurface
         updateTabAppearance()
     }
 
@@ -358,6 +361,9 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
     }
 
     private func preferencesDidChange(_ preferences: AppPreferences) {
+        let previousPreferences = appliedPreferences
+        appliedPreferences = preferences
+
         sharedEditor.font = preferences.appFont()
         if !isApplyingSettingsPreferenceChange {
             settingsWindowController?.updatePreferences(preferences)
@@ -365,10 +371,12 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         if let panel = view.window as? FloatingPanel {
             panel.applyTheme(preferences: preferences)
         }
-        containerView?.layer?.backgroundColor = preferences.panelBackgroundColor.cgColor
+        surfaceView?.apply(preferences: preferences)
         updateHeaderLayoutInsets()
         updateTabAppearance()
-        refreshRows(preferences: preferences, animateResize: false)
+        if preferencesRequireRowRefresh(old: previousPreferences, new: preferences) {
+            refreshRows(preferences: preferences, animateResize: false)
+        }
         view.window?.layoutIfNeeded()
         view.window?.displayIfNeeded()
         settingsWindowController?.window?.displayIfNeeded()
@@ -384,7 +392,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
             return defaultHeaderHeight
         }
 
-        let safeAreaTop = containerView?.safeAreaInsets.top ?? view.safeAreaInsets.top
+        let safeAreaTop = surfaceView?.safeAreaInsets.top ?? view.safeAreaInsets.top
         let layoutChromeHeight: CGFloat
         if let window {
             layoutChromeHeight = max(0, window.frame.height - window.contentLayoutRect.height)
@@ -404,6 +412,15 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         let headerHeight = effectiveHeaderHeight(for: view.window)
         tabBarHeightConstraint?.constant = headerHeight
         listTopConstraint?.constant = headerHeight + CGFloat(LayoutMetrics.contentTopPadding)
+    }
+
+    private func preferencesRequireRowRefresh(old: AppPreferences, new: AppPreferences) -> Bool {
+        old.rowHeight != new.rowHeight ||
+        old.panelWidth != new.panelWidth ||
+        old.themeColor != new.themeColor ||
+        old.fontStyle != new.fontStyle ||
+        old.fontSize != new.fontSize ||
+        old.cornerRadius != new.cornerRadius
     }
 
     private func makeTabButton(symbolName: String, action: Selector) -> NSButton {
@@ -489,7 +506,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         controller.updatePreferences(store.preferences)
         settingsWindowController = controller
         updateTabAppearance()
-        controller.present()
+        controller.present(attachedTo: view.window)
     }
 
     func resetWindowSize() {
@@ -2708,30 +2725,36 @@ fileprivate final class TodoRowView: NSView {
         let backgroundColor: CGColor
         let borderColor: CGColor
         let borderWidth: CGFloat
+        let compositingFilter: Any?
         let animateSelectionFill = shouldAnimateNextSelectionFill && model.isSelectable && isFocusedRow
         shouldAnimateNextSelectionFill = false
         if isDraggingRow {
             backgroundColor = NSColor.clear.cgColor
             borderColor = preferences.subtleStrokeColor.cgColor
             borderWidth = 1.0
+            compositingFilter = nil
         } else if model.isSelectable && isFocusedRow {
             backgroundColor = activeFillColor.cgColor
             borderColor = NSColor.clear.cgColor
             borderWidth = 0.0
+            compositingFilter = preferences.selectionOverlayBlendMode
         } else if model.isSelectable && isRangeSelected {
             backgroundColor = secondarySelectionFillColor.cgColor
             borderColor = NSColor.clear.cgColor
             borderWidth = 0.0
+            compositingFilter = preferences.selectionOverlayBlendMode
         } else {
             backgroundColor = NSColor.clear.cgColor
             borderColor = NSColor.clear.cgColor
             borderWidth = 0.0
+            compositingFilter = nil
         }
 
         updateBackgroundAppearance(
             backgroundColor: backgroundColor,
             borderColor: borderColor,
             borderWidth: borderWidth,
+            compositingFilter: compositingFilter,
             animate: animateSelectionFill
         )
         circleView.contentTintColor = baseTextColor.withAlphaComponent(circleAlpha)
@@ -2767,6 +2790,7 @@ fileprivate final class TodoRowView: NSView {
         backgroundColor: CGColor,
         borderColor: CGColor,
         borderWidth: CGFloat,
+        compositingFilter: Any?,
         animate: Bool
     ) {
         guard let layer = backgroundView.layer else { return }
@@ -2809,6 +2833,7 @@ fileprivate final class TodoRowView: NSView {
         layer.backgroundColor = backgroundColor
         layer.borderColor = borderColor
         layer.borderWidth = borderWidth
+        layer.compositingFilter = compositingFilter
         CATransaction.commit()
     }
 
