@@ -142,19 +142,53 @@ public enum BuiltInTheme: String, Codable, CaseIterable {
     case theme4
     case theme5
 
-    public var color: ThemeColor {
+    public var style: BuiltInThemeStyle {
         switch self {
         case .theme1:
-            return ThemeColor(hex: "#14141F")
+            return BuiltInThemeStyle(
+                backgroundColor: ThemeColor(hex: "#14141F"),
+                selectionColor: ThemeColor(hex: "#D7DCEF"),
+                selectionOpacity: 0.14,
+                contentColor: ThemeColor(hex: "#FFFFFF"),
+                contentOpacity: 0.94
+            )
         case .theme2:
-            return ThemeColor(hex: "#1B2130")
+            return BuiltInThemeStyle(
+                backgroundColor: ThemeColor(hex: "#1B2130"),
+                selectionColor: ThemeColor(hex: "#D2DBF0"),
+                selectionOpacity: 0.13,
+                contentColor: ThemeColor(hex: "#F7FAFF"),
+                contentOpacity: 0.92
+            )
         case .theme3:
-            return ThemeColor(hex: "#1F2724")
+            return BuiltInThemeStyle(
+                backgroundColor: ThemeColor(hex: "#1F2724"),
+                selectionColor: ThemeColor(hex: "#DDE8DE"),
+                selectionOpacity: 0.12,
+                contentColor: ThemeColor(hex: "#F8FBF8"),
+                contentOpacity: 0.92
+            )
         case .theme4:
-            return ThemeColor(hex: "#2A1E28")
+            return BuiltInThemeStyle(
+                backgroundColor: ThemeColor(hex: "#2A1E28"),
+                selectionColor: ThemeColor(hex: "#E7D9E5"),
+                selectionOpacity: 0.14,
+                contentColor: ThemeColor(hex: "#FFF9FF"),
+                contentOpacity: 0.94
+            )
         case .theme5:
-            return ThemeColor(hex: "#E6E0D6")
+            return BuiltInThemeStyle(
+                backgroundColor: ThemeColor(hex: "#E6E0D6"),
+                selectionColor: ThemeColor(hex: "#17181C"),
+                selectionOpacity: 0.11,
+                contentColor: ThemeColor(hex: "#111112"),
+                contentOpacity: 0.82
+            )
         }
+    }
+
+    public var color: ThemeColor {
+        style.backgroundColor
     }
 
     public static func nearest(to color: ThemeColor) -> BuiltInTheme {
@@ -170,6 +204,14 @@ public enum BuiltInTheme: String, Codable, CaseIterable {
         let db = lhs.blue - rhs.blue
         return (dr * dr) + (dg * dg) + (db * db)
     }
+}
+
+public struct BuiltInThemeStyle: Equatable {
+    public let backgroundColor: ThemeColor
+    public let selectionColor: ThemeColor
+    public let selectionOpacity: Double
+    public let contentColor: ThemeColor
+    public let contentOpacity: Double
 }
 
 public struct ThemeColor: Codable, Equatable {
@@ -226,6 +268,7 @@ public struct AppPreferences: Codable, Equatable {
     public var fontStyle: FontStylePreset
     public var fontSize: Double
     public var cornerRadius: Double
+    public var blurEnabled: Bool
     public var windowOpacity: Double
     public var blurMaterial: BlurMaterialPreset
     public var glassEnabled: Bool
@@ -240,6 +283,7 @@ public struct AppPreferences: Codable, Equatable {
         case fontStyle
         case fontSize
         case cornerRadius
+        case blurEnabled
         case windowOpacity
         case blurMaterial
         case glassEnabled
@@ -255,6 +299,7 @@ public struct AppPreferences: Codable, Equatable {
         fontStyle: .system,
         fontSize: LayoutMetrics.defaultFontSize,
         cornerRadius: 10,
+        blurEnabled: true,
         windowOpacity: 1.0,
         blurMaterial: .underWindowBackground,
         glassEnabled: false
@@ -270,6 +315,7 @@ public struct AppPreferences: Codable, Equatable {
         fontStyle: FontStylePreset = .system,
         fontSize: Double = 13,
         cornerRadius: Double = 10,
+        blurEnabled: Bool = true,
         windowOpacity: Double = 1.0,
         blurMaterial: BlurMaterialPreset = .underWindowBackground,
         glassEnabled: Bool = false
@@ -283,6 +329,7 @@ public struct AppPreferences: Codable, Equatable {
         self.fontStyle = fontStyle
         self.fontSize = fontSize
         self.cornerRadius = cornerRadius
+        self.blurEnabled = blurEnabled
         self.windowOpacity = windowOpacity
         self.blurMaterial = blurMaterial
         self.glassEnabled = glassEnabled
@@ -301,6 +348,7 @@ public struct AppPreferences: Codable, Equatable {
         fontStyle = try container.decodeIfPresent(FontStylePreset.self, forKey: .fontStyle) ?? fallback.fontStyle
         fontSize = try container.decodeIfPresent(Double.self, forKey: .fontSize) ?? fallback.fontSize
         cornerRadius = try container.decodeIfPresent(Double.self, forKey: .cornerRadius) ?? fallback.cornerRadius
+        blurEnabled = try container.decodeIfPresent(Bool.self, forKey: .blurEnabled) ?? fallback.blurEnabled
         windowOpacity = try container.decodeIfPresent(Double.self, forKey: .windowOpacity) ?? fallback.windowOpacity
         blurMaterial = try container.decodeIfPresent(BlurMaterialPreset.self, forKey: .blurMaterial) ?? fallback.blurMaterial
         glassEnabled = try container.decodeIfPresent(Bool.self, forKey: .glassEnabled) ?? fallback.glassEnabled
@@ -347,8 +395,10 @@ extension BlurMaterialPreset {
 
 struct ThemePalette {
     let background: NSColor
-    let highlight: NSColor
-    let text: NSColor
+    let selectionColor: NSColor
+    let selectionOpacity: CGFloat
+    let contentColor: NSColor
+    let contentOpacity: CGFloat
     let usesLightText: Bool
 }
 
@@ -392,50 +442,6 @@ private extension NSColor {
         )
     }
 
-    func blended(toward other: NSColor, amount: CGFloat) -> NSColor {
-        let lhs = resolvedSRGB
-        let rhs = other.resolvedSRGB
-        let factor = min(max(amount, 0), 1)
-
-        return NSColor(
-            srgbRed: lhs.redComponent + ((rhs.redComponent - lhs.redComponent) * factor),
-            green: lhs.greenComponent + ((rhs.greenComponent - lhs.greenComponent) * factor),
-            blue: lhs.blueComponent + ((rhs.blueComponent - lhs.blueComponent) * factor),
-            alpha: lhs.alphaComponent + ((rhs.alphaComponent - lhs.alphaComponent) * factor)
-        )
-    }
-
-    func shiftedHSB(
-        hueOffset: CGFloat = 0,
-        saturationMultiplier: CGFloat = 1,
-        brightnessMultiplier: CGFloat = 1,
-        brightnessDelta: CGFloat = 0,
-        brightnessOverride: CGFloat? = nil
-    ) -> NSColor {
-        let color = resolvedSRGB.usingColorSpace(.deviceRGB) ?? resolvedSRGB
-        var hue: CGFloat = 0
-        var saturation: CGFloat = 0
-        var brightness: CGFloat = 0
-        var alpha: CGFloat = 0
-
-        color.getHue(&hue, saturation: &saturation, brightness: &brightness, alpha: &alpha)
-
-        let shiftedHue = hueOffset == 0
-            ? hue
-            : ((hue + hueOffset).truncatingRemainder(dividingBy: 1) + 1).truncatingRemainder(dividingBy: 1)
-        let shiftedSaturation = min(max(saturation * saturationMultiplier, 0), 1)
-        let shiftedBrightness = min(
-            max(brightnessOverride ?? ((brightness * brightnessMultiplier) + brightnessDelta), 0),
-            1
-        )
-
-        return NSColor(
-            hue: shiftedHue,
-            saturation: shiftedSaturation,
-            brightness: shiftedBrightness,
-            alpha: alpha
-        )
-    }
 }
 
 extension FontStylePreset {
@@ -464,6 +470,15 @@ extension FontStylePreset {
 }
 
 extension AppPreferences {
+    private var glassNeutralTintColor: NSColor {
+        NSColor(
+            srgbRed: 0.58,
+            green: 0.60,
+            blue: 0.64,
+            alpha: 1.0
+        )
+    }
+
     var clampedWindowOpacity: Double {
         min(max(windowOpacity, LayoutMetrics.minWindowOpacity), 1.0)
     }
@@ -473,48 +488,16 @@ extension AppPreferences {
     }
 
     var palette: ThemePalette {
-        if themeColor == .default {
-            return ThemePalette(
-                background: themeColor.nsColor,
-                highlight: NSColor(
-                    srgbRed: 42.0 / 255.0,
-                    green: 42.0 / 255.0,
-                    blue: 61.0 / 255.0,
-                    alpha: 1.0
-                ),
-                text: .white,
-                usesLightText: true
-            )
-        }
-
-        let background = themeColor.nsColor.resolvedSRGB
-        let luminance = background.relativeLuminance
-
-        if luminance < 0.42 {
-            return ThemePalette(
-                background: background,
-                highlight: background.shiftedHSB(
-                    hueOffset: 0.012,
-                    saturationMultiplier: 0.94,
-                    brightnessDelta: 0.12
-                ),
-                text: .white,
-                usesLightText: true
-            )
-        }
-
-        let text = background.shiftedHSB(
-            hueOffset: 0.028,
-            saturationMultiplier: 0.72,
-            brightnessOverride: 0.12
-        )
-        let highlight = background.blended(toward: text, amount: 0.14)
-
+        let style = selectedBuiltInTheme.style
+        let background = style.backgroundColor.nsColor.resolvedSRGB
+        let contentColor = style.contentColor.nsColor.resolvedSRGB
         return ThemePalette(
             background: background,
-            highlight: highlight,
-            text: text,
-            usesLightText: false
+            selectionColor: style.selectionColor.nsColor.resolvedSRGB,
+            selectionOpacity: CGFloat(min(max(style.selectionOpacity, 0), 1)),
+            contentColor: contentColor,
+            contentOpacity: CGFloat(min(max(style.contentOpacity, 0), 1)),
+            usesLightText: contentColor.relativeLuminance > background.relativeLuminance
         )
     }
 
@@ -527,7 +510,7 @@ extension AppPreferences {
     }
 
     var glassBackdropTintColor: NSColor {
-        panelBackgroundColor.withAlphaComponent(0.30)
+        glassNeutralTintColor.withAlphaComponent(0.34)
     }
 
     var fallbackGlassTintColor: NSColor {
@@ -536,67 +519,69 @@ extension AppPreferences {
 
     @available(macOS 26.0, *)
     var glassTintColor: NSColor {
-        let alpha = palette.usesLightText ? 0.015 : 0.01
-        return panelBackgroundColor.withAlphaComponent(alpha)
+        glassNeutralTintColor.withAlphaComponent(0.14)
     }
 
     var activeFillColor: NSColor {
-        selectionOverlayFillColor
-    }
-
-    var secondarySelectionFillColor: NSColor {
-        activeFillColor
-    }
-
-    var selectionOverlayFillColor: NSColor {
-        palette.usesLightText
-            ? NSColor.white.withAlphaComponent(0.30)
-            : NSColor.black.withAlphaComponent(0.25)
-    }
-
-    var selectionWashFillColor: NSColor {
-        if palette.usesLightText {
-            let alpha = selectedBuiltInTheme == .theme1 ? 0.27 : 0.22
-            return NSColor.white.withAlphaComponent(alpha)
+        if glassEnabled {
+            return NSColor.white.withAlphaComponent(0.12)
         }
-
-        return NSColor.black.withAlphaComponent(0.22)
-    }
-
-    var selectionOverlayBlendMode: String {
-        "overlayBlendMode"
+        return palette.selectionColor.withAlphaComponent(palette.selectionOpacity)
     }
 
     var primaryTextColor: NSColor {
-        palette.text
+        resolvedContentColor()
     }
 
     var secondaryTextColor: NSColor {
-        palette.text.withAlphaComponent(0.56)
+        if glassEnabled {
+            return NSColor.white.withAlphaComponent(0.68)
+        }
+        return resolvedContentColor(multiplier: 0.72)
     }
 
     var subtleStrokeColor: NSColor {
-        palette.text.withAlphaComponent(0.15)
+        if glassEnabled {
+            return NSColor.white.withAlphaComponent(0.24)
+        }
+        return palette.contentColor.withAlphaComponent(max(0.12, palette.contentOpacity * 0.22))
     }
 
     var strikethroughColor: NSColor {
-        palette.text.withAlphaComponent(0.5)
+        if glassEnabled {
+            return NSColor.white.withAlphaComponent(0.55)
+        }
+        return resolvedContentColor(multiplier: 0.60)
     }
 
     var selectionOverlayColor: NSColor {
-        palette.text.withAlphaComponent(palette.usesLightText ? 0.18 : 0.14)
+        if glassEnabled {
+            return NSColor.white.withAlphaComponent(0.22)
+        }
+        let highlightOpacity = min(max(Double(palette.selectionOpacity) + 0.08, 0.14), 0.30)
+        return palette.selectionColor.withAlphaComponent(highlightOpacity)
     }
 
     var caretColor: NSColor {
-        palette.text.withAlphaComponent(0.95)
+        if glassEnabled {
+            return NSColor.white.withAlphaComponent(0.96)
+        }
+        return palette.contentColor.withAlphaComponent(min(max(Double(palette.contentOpacity) + 0.06, 0), 1))
     }
 
     var usesLightText: Bool {
-        palette.usesLightText
+        if glassEnabled {
+            return true
+        }
+        return palette.usesLightText
     }
 
     var usesTranslucentSurface: Bool {
-        true
+        blurEnabled
+    }
+
+    var contentBaseColor: NSColor {
+        glassEnabled ? .white : palette.contentColor
     }
 
     var translucentSurfaceOpacity: Double {
@@ -627,6 +612,12 @@ extension AppPreferences {
 
     func appFont(weight: NSFont.Weight = .regular) -> NSFont {
         fontStyle.font(ofSize: CGFloat(fontSize), weight: weight)
+    }
+
+    func resolvedContentColor(multiplier: CGFloat = 1.0) -> NSColor {
+        let baseOpacity = glassEnabled ? CGFloat(1.0) : palette.contentOpacity
+        let alpha = min(max(baseOpacity * multiplier, 0), 1)
+        return contentBaseColor.withAlphaComponent(alpha)
     }
 }
 #endif

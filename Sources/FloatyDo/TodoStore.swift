@@ -201,6 +201,8 @@ public final class TodoStore: ObservableObject {
             max(newPreferences.cornerRadius, LayoutMetrics.minCornerRadius),
             LayoutMetrics.maximumCornerRadius(forRowHeight: clampedRowHeight)
         )
+        let glassEnabled = newPreferences.glassEnabled
+        let blurEnabled = newPreferences.blurEnabled || glassEnabled
         return AppPreferences(
             rowHeight: clampedRowHeight,
             panelWidth: clampedPanelWidth,
@@ -211,9 +213,10 @@ public final class TodoStore: ObservableObject {
             fontStyle: newPreferences.fontStyle,
             fontSize: LayoutMetrics.nearestFontSizeOption(to: newPreferences.fontSize),
             cornerRadius: clampedCornerRadius,
+            blurEnabled: blurEnabled,
             windowOpacity: min(max(newPreferences.windowOpacity, LayoutMetrics.minWindowOpacity), 1.0),
-            blurMaterial: newPreferences.blurMaterial,
-            glassEnabled: newPreferences.glassEnabled
+            blurMaterial: .underWindowBackground,
+            glassEnabled: glassEnabled
         )
     }
 

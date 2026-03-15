@@ -67,11 +67,10 @@ final class SettingsViewController: NSViewController {
     private let iconStatusLabel = NSTextField(labelWithString: "")
     private let applyIconButton = NSButton(title: "Apply & Relaunch", target: nil, action: nil)
     private var themeButtons: [ThemePresetButton] = []
+    private let blurToggle = NSSwitch()
     private let transparencySlider = NSSlider()
     private let transparencyValueLabel = NSTextField(labelWithString: "")
     private let resetTransparencyButton = NSButton(title: "Reset", target: nil, action: nil)
-    private let blurMaterialPopup = NSPopUpButton()
-    private let resetBlurMaterialButton = NSButton(title: "Reset", target: nil, action: nil)
     private let glassToggle = NSSwitch()
     private let fontPopup = NSPopUpButton()
     private let resetFontButton = NSButton(title: "Reset", target: nil, action: nil)
@@ -177,8 +176,8 @@ final class SettingsViewController: NSViewController {
 
     private func configureControls() {
         configureThemeButtons()
+        configureBlurToggle()
         configureTransparencySlider()
-        configureBlurMaterialPopup()
         configureGlassToggle()
         configureIconApplyControls()
         configureFontPopup()
@@ -220,8 +219,8 @@ final class SettingsViewController: NSViewController {
     private func makeAppearancePage() -> NSView {
         let contentStack = NSStackView(views: [
             makeFormRow(title: "Background", control: makeThemeControl()),
-            makeFormRow(title: "Transparency", control: makeTransparencyControl()),
-            makeFormRow(title: "Blur", control: makeBlurMaterialControl()),
+            makeFormRow(title: "Blur", control: makeBlurControl()),
+            makeFormRow(title: "Opacity", control: makeTransparencyControl()),
             makeFormRow(title: "Glass", control: makeGlassControl()),
             makeFormRow(title: "App Icon", control: makeAppIconControl()),
             makeFormRow(title: "Font", control: makeFontControl()),
@@ -357,26 +356,18 @@ final class SettingsViewController: NSViewController {
         configureResetButton(resetTransparencyButton)
     }
 
+    private func configureBlurToggle() {
+        blurToggle.target = self
+        blurToggle.action = #selector(blurToggled(_:))
+        blurToggle.controlSize = .small
+        blurToggle.translatesAutoresizingMaskIntoConstraints = false
+    }
+
     private func configureGlassToggle() {
         glassToggle.target = self
         glassToggle.action = #selector(glassToggled(_:))
         glassToggle.controlSize = .small
         glassToggle.translatesAutoresizingMaskIntoConstraints = false
-    }
-
-    private func configureBlurMaterialPopup() {
-        blurMaterialPopup.removeAllItems()
-        blurMaterialPopup.addItems(withTitles: BlurMaterialPreset.allCases.map(\.displayName))
-        blurMaterialPopup.target = self
-        blurMaterialPopup.action = #selector(blurMaterialChanged(_:))
-        blurMaterialPopup.controlSize = .small
-        blurMaterialPopup.font = .systemFont(ofSize: 12)
-        blurMaterialPopup.translatesAutoresizingMaskIntoConstraints = false
-        blurMaterialPopup.widthAnchor.constraint(equalToConstant: Metrics.popupWidth).isActive = true
-
-        resetBlurMaterialButton.target = self
-        resetBlurMaterialButton.action = #selector(resetBlurMaterial(_:))
-        configureResetButton(resetBlurMaterialButton)
     }
 
     private func configureFontPopup() {
@@ -458,6 +449,16 @@ final class SettingsViewController: NSViewController {
         return stack
     }
 
+    private func makeBlurControl() -> NSView {
+        let stack = NSStackView(views: [blurToggle])
+        stack.orientation = .horizontal
+        stack.alignment = .centerY
+        stack.spacing = 12
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        stack.widthAnchor.constraint(equalToConstant: Metrics.controlWidth).isActive = true
+        return stack
+    }
+
     private func makeTransparencyControl() -> NSView {
         let sliderGroup = NSStackView(views: [transparencySlider, transparencyValueLabel])
         sliderGroup.orientation = .horizontal
@@ -477,16 +478,6 @@ final class SettingsViewController: NSViewController {
 
     private func makeGlassControl() -> NSView {
         let stack = NSStackView(views: [glassToggle])
-        stack.orientation = .horizontal
-        stack.alignment = .centerY
-        stack.spacing = 12
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        stack.widthAnchor.constraint(equalToConstant: Metrics.controlWidth).isActive = true
-        return stack
-    }
-
-    private func makeBlurMaterialControl() -> NSView {
-        let stack = NSStackView(views: [blurMaterialPopup, resetBlurMaterialButton])
         stack.orientation = .horizontal
         stack.alignment = .centerY
         stack.spacing = 12
@@ -674,15 +665,15 @@ final class SettingsViewController: NSViewController {
             button.isSelected = BuiltInTheme.allCases[index] == selectedTheme
         }
 
-        let displayedTransparency = preferences.glassEnabled ? 100.0 : (preferences.clampedWindowOpacity * 100.0)
+        let opacityControlsEnabled = preferences.blurEnabled && !preferences.glassEnabled
+        let displayedTransparency = opacityControlsEnabled ? (preferences.clampedWindowOpacity * 100.0) : 100.0
+        blurToggle.state = preferences.blurEnabled ? .on : .off
         transparencySlider.doubleValue = displayedTransparency
-        transparencySlider.isEnabled = !preferences.glassEnabled
-        resetTransparencyButton.isEnabled = !preferences.glassEnabled && preferences.clampedWindowOpacity < 0.999
-        transparencyValueLabel.stringValue = "\(Int(round(displayedTransparency)))%"
-        if let index = BlurMaterialPreset.allCases.firstIndex(of: preferences.blurMaterial) {
-            blurMaterialPopup.selectItem(at: index)
-        }
-        resetBlurMaterialButton.isEnabled = preferences.blurMaterial != .underWindowBackground
+        transparencySlider.isEnabled = opacityControlsEnabled
+        resetTransparencyButton.isEnabled = opacityControlsEnabled && preferences.clampedWindowOpacity < 0.999
+        transparencyValueLabel.stringValue = opacityDisplayText(
+            for: opacityControlsEnabled ? preferences.clampedWindowOpacity : 1.0
+        )
         glassToggle.state = preferences.glassEnabled ? .on : .off
 
         if let index = FontStylePreset.allCases.firstIndex(of: preferences.fontStyle) {
@@ -708,6 +699,22 @@ final class SettingsViewController: NSViewController {
         onPreferencesChange?(updated)
     }
 
+    private func opacityDisplayText(for opacity: Double) -> String {
+        let normalized = (opacity - LayoutMetrics.minWindowOpacity) / (1.0 - LayoutMetrics.minWindowOpacity)
+        switch normalized {
+        case ..<0.125:
+            return "Min"
+        case ..<0.375:
+            return "Low"
+        case ..<0.625:
+            return "Mid"
+        case ..<0.875:
+            return "High"
+        default:
+            return "Max"
+        }
+    }
+
     @objc private func themePresetSelected(_ sender: ThemePresetButton) {
         guard !isUpdatingControls else { return }
         guard BuiltInTheme.allCases.indices.contains(sender.tag) else { return }
@@ -731,6 +738,7 @@ final class SettingsViewController: NSViewController {
             sender.doubleValue = snappedValue
         }
         commitPreferenceChange { updated in
+            updated.blurEnabled = true
             updated.windowOpacity = snappedValue / 100.0
             updated.glassEnabled = false
         }
@@ -748,23 +756,20 @@ final class SettingsViewController: NSViewController {
         commitPreferenceChange { updated in
             updated.glassEnabled = sender.state == .on
             if updated.glassEnabled {
+                updated.blurEnabled = true
                 updated.windowOpacity = 1.0
             }
         }
     }
 
-    @objc private func blurMaterialChanged(_ sender: NSPopUpButton) {
-        guard !isUpdatingControls else { return }
-        guard BlurMaterialPreset.allCases.indices.contains(sender.indexOfSelectedItem) else { return }
-        commitPreferenceChange { updated in
-            updated.blurMaterial = BlurMaterialPreset.allCases[sender.indexOfSelectedItem]
-        }
-    }
-
-    @objc private func resetBlurMaterial(_ sender: NSButton) {
+    @objc private func blurToggled(_ sender: NSButton) {
         guard !isUpdatingControls else { return }
         commitPreferenceChange { updated in
-            updated.blurMaterial = .underWindowBackground
+            let isEnabled = sender.state == .on
+            updated.blurEnabled = isEnabled
+            if !isEnabled {
+                updated.glassEnabled = false
+            }
         }
     }
 

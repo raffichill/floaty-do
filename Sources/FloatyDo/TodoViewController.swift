@@ -2461,7 +2461,6 @@ fileprivate final class TodoRowView: NSView {
     }
 
     private let backgroundView = NSView()
-    private let selectionWashLayer = CALayer()
     private let circleView = NSImageView()
     private let textLabel = NSTextField(labelWithString: "")
     private let editingTextView = EditingTextDisplayView()
@@ -2504,10 +2503,6 @@ fileprivate final class TodoRowView: NSView {
         backgroundView.wantsLayer = true
         backgroundView.layer?.cornerRadius = CGFloat(preferences.cornerRadius)
         backgroundView.layer?.masksToBounds = true
-        selectionWashLayer.backgroundColor = NSColor.clear.cgColor
-        selectionWashLayer.compositingFilter = nil
-        selectionWashLayer.cornerRadius = CGFloat(preferences.cornerRadius)
-        backgroundView.layer?.addSublayer(selectionWashLayer)
         addSubview(backgroundView)
 
         circleView.wantsLayer = true
@@ -2530,7 +2525,6 @@ fileprivate final class TodoRowView: NSView {
         super.layout()
 
         backgroundView.frame = bounds.insetBy(dx: LayoutMetrics.rowBackgroundInset, dy: LayoutMetrics.rowVerticalInset)
-        selectionWashLayer.frame = backgroundView.bounds
 
         let checkboxRect = self.checkboxRect
         let circleX = checkboxRect.minX + ((checkboxRect.width - LayoutMetrics.circleSize) / 2)
@@ -2568,7 +2562,6 @@ fileprivate final class TodoRowView: NSView {
         textLabel.font = preferences.appFont()
         editingTextView.font = preferences.appFont()
         backgroundView.layer?.cornerRadius = CGFloat(preferences.cornerRadius)
-        selectionWashLayer.cornerRadius = CGFloat(preferences.cornerRadius)
 
         updateAppearance()
         needsLayout = true
@@ -2687,7 +2680,7 @@ fileprivate final class TodoRowView: NSView {
             let config = NSImage.SymbolConfiguration(pointSize: 14, weight: .regular)
             let checkImage = NSImage(systemSymbolName: "checkmark.circle.fill", accessibilityDescription: nil)!
             self.circleView.image = checkImage.withSymbolConfiguration(config)
-            self.circleView.contentTintColor = self.preferences.primaryTextColor
+            self.circleView.contentTintColor = self.preferences.resolvedContentColor()
 
             circleLayer.removeAnimation(forKey: "shrinkOut")
             centerAnchor()
@@ -2719,8 +2712,6 @@ fileprivate final class TodoRowView: NSView {
 
     private func updateAppearance() {
         let activeFillColor = preferences.activeFillColor
-        let secondarySelectionFillColor = preferences.secondarySelectionFillColor
-        let baseTextColor = preferences.primaryTextColor
         let isAnySelected = (isFocusedRow || isRangeSelected) && model.isSelectable
         let circleAlpha = isAnySelected
             ? max(CGFloat(model.circleOpacity), model.isDone ? CGFloat(model.textOpacity) : 0.86)
@@ -2730,49 +2721,33 @@ fileprivate final class TodoRowView: NSView {
             : CGFloat(model.textOpacity)
 
         let backgroundColor: CGColor
-        let selectionWashColor: CGColor
         let borderColor: CGColor
         let borderWidth: CGFloat
-        let compositingFilter: Any?
         let animateSelectionFill = shouldAnimateNextSelectionFill && model.isSelectable && isFocusedRow
         shouldAnimateNextSelectionFill = false
         if isDraggingRow {
             backgroundColor = NSColor.clear.cgColor
-            selectionWashColor = NSColor.clear.cgColor
             borderColor = preferences.subtleStrokeColor.cgColor
             borderWidth = 1.0
-            compositingFilter = nil
-        } else if model.isSelectable && isFocusedRow {
+        } else if model.isSelectable && (isFocusedRow || isRangeSelected) {
             backgroundColor = activeFillColor.cgColor
-            selectionWashColor = preferences.selectionWashFillColor.cgColor
             borderColor = NSColor.clear.cgColor
             borderWidth = 0.0
-            compositingFilter = preferences.selectionOverlayBlendMode
-        } else if model.isSelectable && isRangeSelected {
-            backgroundColor = secondarySelectionFillColor.cgColor
-            selectionWashColor = preferences.selectionWashFillColor.cgColor
-            borderColor = NSColor.clear.cgColor
-            borderWidth = 0.0
-            compositingFilter = preferences.selectionOverlayBlendMode
         } else {
             backgroundColor = NSColor.clear.cgColor
-            selectionWashColor = NSColor.clear.cgColor
             borderColor = NSColor.clear.cgColor
             borderWidth = 0.0
-            compositingFilter = nil
         }
 
         updateBackgroundAppearance(
             backgroundColor: backgroundColor,
-            selectionWashColor: selectionWashColor,
             borderColor: borderColor,
             borderWidth: borderWidth,
-            compositingFilter: compositingFilter,
             animate: animateSelectionFill
         )
-        circleView.contentTintColor = baseTextColor.withAlphaComponent(circleAlpha)
-        textLabel.attributedStringValue = attributedText(alpha: textAlpha)
-        editingTextView.textColor = baseTextColor.withAlphaComponent(textAlpha)
+        circleView.contentTintColor = preferences.resolvedContentColor(multiplier: circleAlpha)
+        textLabel.attributedStringValue = attributedText(alphaMultiplier: textAlpha)
+        editingTextView.textColor = preferences.resolvedContentColor(multiplier: textAlpha)
         editingTextView.selectionColor = preferences.selectionOverlayColor
         editingTextView.caretColor = preferences.caretColor
         let showsEditorHost = isEditingRow && model.isEditable
@@ -2801,10 +2776,8 @@ fileprivate final class TodoRowView: NSView {
 
     private func updateBackgroundAppearance(
         backgroundColor: CGColor,
-        selectionWashColor: CGColor,
         borderColor: CGColor,
         borderWidth: CGFloat,
-        compositingFilter: Any?,
         animate: Bool
     ) {
         guard let layer = backgroundView.layer else { return }
@@ -2812,7 +2785,6 @@ fileprivate final class TodoRowView: NSView {
         let currentBackground = layer.presentation()?.backgroundColor ?? layer.backgroundColor
         let currentBorderColor = layer.presentation()?.borderColor ?? layer.borderColor
         let currentBorderWidth = layer.presentation()?.borderWidth ?? layer.borderWidth
-        let currentSelectionWash = selectionWashLayer.presentation()?.backgroundColor ?? selectionWashLayer.backgroundColor
 
         let shouldAnimate = animate && window != nil && !isDraggingRow
 
@@ -2843,28 +2815,17 @@ fileprivate final class TodoRowView: NSView {
             layer.add(animation, forKey: "rowBorderWidth")
         }
 
-        if shouldAnimate, let currentSelectionWash {
-            let animation = CABasicAnimation(keyPath: "backgroundColor")
-            animation.fromValue = currentSelectionWash
-            animation.toValue = selectionWashColor
-            animation.duration = preferences.motion.collapse
-            animation.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-            selectionWashLayer.add(animation, forKey: "rowSelectionWashColor")
-        }
-
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         layer.backgroundColor = backgroundColor
         layer.borderColor = borderColor
         layer.borderWidth = borderWidth
-        layer.compositingFilter = compositingFilter
-        selectionWashLayer.backgroundColor = selectionWashColor
         CATransaction.commit()
     }
 
-    private func attributedText(alpha: CGFloat) -> NSAttributedString {
+    private func attributedText(alphaMultiplier: CGFloat) -> NSAttributedString {
         let attributes: [NSAttributedString.Key: Any] = [
-            .foregroundColor: preferences.primaryTextColor.withAlphaComponent(alpha),
+            .foregroundColor: preferences.resolvedContentColor(multiplier: alphaMultiplier),
             .font: preferences.appFont(),
             .strikethroughStyle: model.showsStrikethrough ? NSUnderlineStyle.single.rawValue : 0,
         ]
