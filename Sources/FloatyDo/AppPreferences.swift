@@ -85,56 +85,144 @@ public enum FontStylePreset: String, Codable, CaseIterable {
     }
 }
 
+public struct BuiltInThemeDefinition: Equatable {
+    public let theme: BuiltInTheme
+    public let style: BuiltInThemeStyle
+    public let supportsPrimaryAppIcon: Bool
+
+    public init(
+        theme: BuiltInTheme,
+        style: BuiltInThemeStyle,
+        supportsPrimaryAppIcon: Bool
+    ) {
+        self.theme = theme
+        self.style = style
+        self.supportsPrimaryAppIcon = supportsPrimaryAppIcon
+    }
+}
+
 public enum BuiltInTheme: String, Codable, CaseIterable {
     case theme1
     case theme2
     case theme3
     case theme4
     case theme5
+    case barbie
+    case matcha
+    case nasaOrange
 
-    public var style: BuiltInThemeStyle {
-        switch self {
-        case .theme1:
-            return BuiltInThemeStyle(
+    // Keep theme order and styling in one place so adding a new preset is
+    // just a single catalog entry plus an optional icon asset later.
+    public static let allCases: [BuiltInTheme] = catalog.map(\.theme)
+
+    public static let catalog: [BuiltInThemeDefinition] = [
+        BuiltInThemeDefinition(
+            theme: .theme1,
+            style: BuiltInThemeStyle(
                 backgroundColor: ThemeColor(hex: "#14141F"),
                 selectionColor: ThemeColor(hex: "#D7DCEF"),
                 selectionOpacity: 0.14,
                 contentColor: ThemeColor(hex: "#FFFFFF"),
                 contentOpacity: 0.94
-            )
-        case .theme2:
-            return BuiltInThemeStyle(
+            ),
+            supportsPrimaryAppIcon: true
+        ),
+        BuiltInThemeDefinition(
+            theme: .theme2,
+            style: BuiltInThemeStyle(
                 backgroundColor: ThemeColor(hex: "#1B2130"),
                 selectionColor: ThemeColor(hex: "#D2DBF0"),
                 selectionOpacity: 0.13,
                 contentColor: ThemeColor(hex: "#F7FAFF"),
                 contentOpacity: 0.92
-            )
-        case .theme3:
-            return BuiltInThemeStyle(
+            ),
+            supportsPrimaryAppIcon: true
+        ),
+        BuiltInThemeDefinition(
+            theme: .theme3,
+            style: BuiltInThemeStyle(
                 backgroundColor: ThemeColor(hex: "#1F2724"),
                 selectionColor: ThemeColor(hex: "#DDE8DE"),
                 selectionOpacity: 0.12,
                 contentColor: ThemeColor(hex: "#F8FBF8"),
                 contentOpacity: 0.92
-            )
-        case .theme4:
-            return BuiltInThemeStyle(
+            ),
+            supportsPrimaryAppIcon: true
+        ),
+        BuiltInThemeDefinition(
+            theme: .theme4,
+            style: BuiltInThemeStyle(
                 backgroundColor: ThemeColor(hex: "#2A1E28"),
                 selectionColor: ThemeColor(hex: "#E7D9E5"),
                 selectionOpacity: 0.14,
                 contentColor: ThemeColor(hex: "#FFF9FF"),
                 contentOpacity: 0.94
-            )
-        case .theme5:
-            return BuiltInThemeStyle(
+            ),
+            supportsPrimaryAppIcon: true
+        ),
+        BuiltInThemeDefinition(
+            theme: .nasaOrange,
+            style: BuiltInThemeStyle(
+                backgroundColor: ThemeColor(hex: "#C65F2E"),
+                selectionColor: ThemeColor(hex: "#FFF1E8"),
+                selectionOpacity: 0.12,
+                contentColor: ThemeColor(hex: "#FFF8F2"),
+                contentOpacity: 0.94
+            ),
+            supportsPrimaryAppIcon: false
+        ),
+        BuiltInThemeDefinition(
+            theme: .barbie,
+            style: BuiltInThemeStyle(
+                backgroundColor: ThemeColor(hex: "#C86995"),
+                selectionColor: ThemeColor(hex: "#FFF4FA"),
+                selectionOpacity: 0.12,
+                contentColor: ThemeColor(hex: "#FFF8FC"),
+                contentOpacity: 0.94
+            ),
+            supportsPrimaryAppIcon: false
+        ),
+        BuiltInThemeDefinition(
+            theme: .matcha,
+            style: BuiltInThemeStyle(
+                backgroundColor: ThemeColor(hex: "#B6C59A"),
+                selectionColor: ThemeColor(hex: "#171B14"),
+                selectionOpacity: 0.10,
+                contentColor: ThemeColor(hex: "#141713"),
+                contentOpacity: 0.84
+            ),
+            supportsPrimaryAppIcon: false
+        ),
+        BuiltInThemeDefinition(
+            theme: .theme5,
+            style: BuiltInThemeStyle(
                 backgroundColor: ThemeColor(hex: "#E6E0D6"),
                 selectionColor: ThemeColor(hex: "#17181C"),
                 selectionOpacity: 0.11,
                 contentColor: ThemeColor(hex: "#111112"),
                 contentOpacity: 0.82
-            )
+            ),
+            supportsPrimaryAppIcon: true
+        ),
+    ]
+
+    private static let catalogByTheme: [BuiltInTheme: BuiltInThemeDefinition] = Dictionary(
+        uniqueKeysWithValues: catalog.map { ($0.theme, $0) }
+    )
+
+    public var definition: BuiltInThemeDefinition {
+        guard let definition = Self.catalogByTheme[self] else {
+            preconditionFailure("Missing theme definition for \(rawValue)")
         }
+        return definition
+    }
+
+    public var style: BuiltInThemeStyle {
+        definition.style
+    }
+
+    public var supportsPrimaryAppIcon: Bool {
+        definition.supportsPrimaryAppIcon
     }
 
     public var color: ThemeColor {
@@ -145,7 +233,7 @@ public enum BuiltInTheme: String, Codable, CaseIterable {
         let resolved = color.clamped()
         return allCases.min(by: { lhs, rhs in
             colorDistance(between: resolved, and: lhs.color) < colorDistance(between: resolved, and: rhs.color)
-        }) ?? .theme1
+        }) ?? allCases.first ?? .theme1
     }
 
     private static func colorDistance(between lhs: ThemeColor, and rhs: ThemeColor) -> Double {
@@ -514,26 +602,104 @@ enum LayoutMetrics {
     static let dividerHeight: Double = 0.5
     static let contentBottomPadding: Double = 16.5
 
+    // Edit these tables directly when tuning vertical text placement.
+    // Keys are the discrete font size options defined above.
+    private static let manualTextVerticalOffsetTable: [FontStylePreset: [Double: Double]] = [
+        .system: [
+            12: -1.0,
+            13: -0.5,
+            14: -0.5,
+            15: -1.0,
+            16: -2.0,
+        ],
+        .rounded: [
+            12: -0.5,
+            13: -0.5,
+            14: -0.5,
+            15: -1.0,
+            16: -2.0,
+        ],
+        .serif: [
+            12: -2.0,
+            13: -2.0,
+            14: -2.0,
+            15: -2.0,
+            16: -2.0,
+        ],
+        .monospaced: [
+            12: -1.0,
+            13: -0.5,
+            14: -0.5,
+            15: -0.5,
+            16: -1.5,
+        ],
+    ]
+
+    private static let displayTextVerticalOffsetTable: [FontStylePreset: [Double: Double]] = [
+        .system: [
+            12: 1.5,
+            13: 1.5,
+            14: 1.5,
+            15: 2.0,
+            16: 2.5,
+        ],
+        .rounded: [
+            12: 1.5,
+            13: 1.5,
+            14: 1.5,
+            15: 2.0,
+            16: 2.5,
+        ],
+        .serif: [
+            12: 2.5,
+            13: 2.5,
+            14: 2.5,
+            15: 2.5,
+            16: 2.5,
+        ],
+        .monospaced: [
+            12: 1.0,
+            13: 1.0,
+            14: 1.5,
+            15: 1.5,
+            16: 1.5,
+        ],
+    ]
+
     static func maximumCornerRadius(forRowHeight rowHeight: Double) -> Double {
         let visibleRowHeight = max(0, rowHeight - (rowVerticalInset * 2.0))
         return min(maxCornerRadius, visibleRowHeight / 2.0)
     }
 
     static func manualTextVerticalOffset(fontStyle: FontStylePreset, fontSize: Double) -> Double {
-        _ = fontStyle
-        _ = fontSize
-        return 0
+        offset(
+            for: fontStyle,
+            fontSize: fontSize,
+            table: manualTextVerticalOffsetTable,
+            fallback: 0
+        )
     }
 
     static func displayTextVerticalOffset(fontStyle: FontStylePreset, fontSize: Double) -> Double {
-        let resolvedFontSize = nearestFontSizeOption(to: fontSize)
-        if fontStyle == .serif || resolvedFontSize == 16 {
-            return 0
-        }
-        return 1
+        offset(
+            for: fontStyle,
+            fontSize: fontSize,
+            table: displayTextVerticalOffsetTable,
+            fallback: 0
+        )
     }
 
     static func nearestFontSizeOption(to value: Double) -> Double {
         fontSizeOptions.min(by: { abs($0 - value) < abs($1 - value) }) ?? defaultFontSize
+    }
+
+    private static func offset(
+        for fontStyle: FontStylePreset,
+        fontSize: Double,
+        table: [FontStylePreset: [Double: Double]],
+        fallback: Double
+    ) -> Double {
+        let resolvedFontSize = nearestFontSizeOption(to: fontSize)
+        return table[fontStyle]?[resolvedFontSize] ?? fallback
     }
 }
