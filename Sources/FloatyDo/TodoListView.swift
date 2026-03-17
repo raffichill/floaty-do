@@ -724,6 +724,7 @@ final class TodoRowView: NSView {
         static let pressedScale: CGFloat = 0.99
         static let pressAnimationDuration: CFTimeInterval = 0.08
         static let showsDebugGeometry = false
+        static let textVerticalBreathingRoom: CGFloat = 4
     }
 
     private let backgroundView = NSView()
@@ -804,7 +805,7 @@ final class TodoRowView: NSView {
 
         let textFrame = contentTextRect(for: checkboxRect)
         textLabel.frame = textFrame
-        editingTextView.frame = textFrame
+        editingTextView.frame = textFrame.insetBy(dx: 0, dy: -AppearanceMetrics.textVerticalBreathingRoom / 2)
         editorHostView.frame = textFrame
         cursorShieldView.frame = textFrame
         if AppearanceMetrics.showsDebugGeometry {
@@ -1365,12 +1366,7 @@ final class EditingTextDisplayView: NSView {
             }
         }
 
-        let drawRect = NSRect(
-            x: contentRect.minX - horizontalOffset,
-            y: contentRect.minY,
-            width: max(contentRect.width + horizontalOffset, 1),
-            height: contentRect.height
-        )
+        let drawRect = textDrawingRect(for: contentRect)
         NSAttributedString(string: text, attributes: textAttributes())
             .draw(with: drawRect, options: [.usesLineFragmentOrigin, .usesFontLeading, .truncatesLastVisibleLine])
 
@@ -1384,6 +1380,16 @@ final class EditingTextDisplayView: NSView {
         }
 
         NSGraphicsContext.current?.restoreGraphicsState()
+    }
+
+    private func textDrawingRect(for contentRect: NSRect) -> NSRect {
+        let descenderPadding = max(0, bounds.maxY - contentRect.maxY)
+        return NSRect(
+            x: contentRect.minX - horizontalOffset,
+            y: contentRect.minY,
+            width: max(contentRect.width + horizontalOffset, 1),
+            height: contentRect.height + descenderPadding
+        )
     }
 
     private func updateHorizontalOffset() {

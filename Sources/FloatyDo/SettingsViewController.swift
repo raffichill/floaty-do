@@ -22,6 +22,11 @@ final class SettingsViewController: NSViewController {
         static let sliderValueSpacing: CGFloat = 8
         static let iconStatusWidth: CGFloat = 190
         static let actionButtonWidth: CGFloat = 88
+        static let themeSwatchContainerWidth: CGFloat = 176
+        static let themeSwatchContainerHeight: CGFloat = 42
+        static let themeSwatchLeadingInset: CGFloat = 12
+        static let themeSwatchSpacing: CGFloat = 12
+        static let themeSwatchButtonSize: CGFloat = 24
         static let shortcutsColumnWidth: CGFloat = 220
         static let shortcutsColumnGap: CGFloat = 16
         static let shortcutsRowSpacing: CGFloat = 14
@@ -71,6 +76,7 @@ final class SettingsViewController: NSViewController {
     private let iconStatusLabel = NSTextField(labelWithString: "")
     private let applyIconButton = NSButton(title: "Relaunch", target: nil, action: nil)
     private var themeButtons: [ThemePresetButton] = []
+    private let themeSwatchContainer = NSView()
     private let blurToggle = NSSwitch()
     private let transparencySlider = NSSlider()
     private let transparencyValueLabel = NSTextField(labelWithString: "")
@@ -112,7 +118,7 @@ final class SettingsViewController: NSViewController {
     override func loadView() {
         let root = NSView()
         root.wantsLayer = true
-        root.layer?.backgroundColor = preferences.panelBackgroundColor.cgColor
+        root.layer?.backgroundColor = NSColor.clear.cgColor
 
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
         titleLabel.font = .systemFont(ofSize: 13, weight: .semibold)
@@ -324,12 +330,20 @@ final class SettingsViewController: NSViewController {
 
     private func configureThemeButtons() {
         themeButtons = BuiltInTheme.allCases.enumerated().map { index, theme in
-            let button = ThemePresetButton(color: theme.color.nsColor)
+            let button = ThemePresetButton(
+                color: theme.color.nsColor,
+                size: Metrics.themeSwatchButtonSize
+            )
             button.tag = index
             button.target = self
             button.action = #selector(themePresetSelected(_:))
             return button
         }
+
+        themeSwatchContainer.wantsLayer = true
+        themeSwatchContainer.translatesAutoresizingMaskIntoConstraints = false
+        themeSwatchContainer.widthAnchor.constraint(equalToConstant: Metrics.themeSwatchContainerWidth).isActive = true
+        themeSwatchContainer.heightAnchor.constraint(equalToConstant: Metrics.themeSwatchContainerHeight).isActive = true
 
         resetThemeButton.target = self
         resetThemeButton.action = #selector(resetThemeColor(_:))
@@ -446,9 +460,17 @@ final class SettingsViewController: NSViewController {
         let swatchRow = NSStackView(views: themeButtons)
         swatchRow.orientation = .horizontal
         swatchRow.alignment = .centerY
-        swatchRow.spacing = 14
+        swatchRow.spacing = Metrics.themeSwatchSpacing
+        swatchRow.translatesAutoresizingMaskIntoConstraints = false
 
-        let stack = NSStackView(views: [swatchRow, resetThemeButton])
+        themeSwatchContainer.subviews.forEach { $0.removeFromSuperview() }
+        themeSwatchContainer.addSubview(swatchRow)
+        NSLayoutConstraint.activate([
+            swatchRow.leadingAnchor.constraint(equalTo: themeSwatchContainer.leadingAnchor, constant: Metrics.themeSwatchLeadingInset),
+            swatchRow.centerYAnchor.constraint(equalTo: themeSwatchContainer.centerYAnchor),
+        ])
+
+        let stack = NSStackView(views: [themeSwatchContainer, resetThemeButton])
         stack.orientation = .horizontal
         stack.alignment = .centerY
         stack.spacing = 16
@@ -869,8 +891,10 @@ final class SettingsViewController: NSViewController {
     }
 
     private func applyThemeAppearance() {
-        view.layer?.backgroundColor = preferences.panelBackgroundColor.cgColor
+        view.layer?.backgroundColor = NSColor.clear.cgColor
         divider.layer?.backgroundColor = preferences.subtleStrokeColor.cgColor
+        themeSwatchContainer.layer?.backgroundColor = preferences.activeFillColor.cgColor
+        themeSwatchContainer.layer?.cornerRadius = 10
 
         primaryLabels.forEach { $0.textColor = preferences.primaryTextColor }
         secondaryLabels.forEach { $0.textColor = preferences.secondaryTextColor }
@@ -938,13 +962,15 @@ final class SettingsViewController: NSViewController {
 private final class ThemePresetButton: NSButton {
     private let outerCircle = NSView()
     private let innerCircle = NSView()
+    private let buttonSize: CGFloat
 
     var isSelected = false {
         didSet { updateAppearance() }
     }
 
-    init(color: NSColor) {
-        super.init(frame: NSRect(x: 0, y: 0, width: 28, height: 28))
+    init(color: NSColor, size: CGFloat) {
+        self.buttonSize = size
+        super.init(frame: NSRect(x: 0, y: 0, width: size, height: size))
         setButtonType(.momentaryChange)
         title = ""
         isBordered = false
@@ -952,19 +978,20 @@ private final class ThemePresetButton: NSButton {
         focusRingType = .none
         wantsLayer = true
         translatesAutoresizingMaskIntoConstraints = false
-        widthAnchor.constraint(equalToConstant: 28).isActive = true
-        heightAnchor.constraint(equalToConstant: 28).isActive = true
+        widthAnchor.constraint(equalToConstant: size).isActive = true
+        heightAnchor.constraint(equalToConstant: size).isActive = true
 
         outerCircle.wantsLayer = true
         outerCircle.translatesAutoresizingMaskIntoConstraints = false
         outerCircle.layer?.backgroundColor = color.cgColor
-        outerCircle.layer?.cornerRadius = 14
+        outerCircle.layer?.cornerRadius = size / 2
         addSubview(outerCircle)
 
         innerCircle.wantsLayer = true
         innerCircle.translatesAutoresizingMaskIntoConstraints = false
         innerCircle.layer?.backgroundColor = NSColor.white.cgColor
-        innerCircle.layer?.cornerRadius = 6.5
+        let innerCircleSize = round(size * 0.46)
+        innerCircle.layer?.cornerRadius = innerCircleSize / 2
         addSubview(innerCircle)
 
         NSLayoutConstraint.activate([
@@ -975,8 +1002,8 @@ private final class ThemePresetButton: NSButton {
 
             innerCircle.centerXAnchor.constraint(equalTo: centerXAnchor),
             innerCircle.centerYAnchor.constraint(equalTo: centerYAnchor),
-            innerCircle.widthAnchor.constraint(equalToConstant: 13),
-            innerCircle.heightAnchor.constraint(equalToConstant: 13),
+            innerCircle.widthAnchor.constraint(equalToConstant: innerCircleSize),
+            innerCircle.heightAnchor.constraint(equalToConstant: innerCircleSize),
         ])
 
         updateAppearance()

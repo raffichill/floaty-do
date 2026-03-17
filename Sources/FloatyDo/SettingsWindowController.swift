@@ -13,16 +13,21 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
 
     var onPreferencesChange: ((AppPreferences) -> Void)? {
         didSet {
-            settingsViewController.onPreferencesChange = onPreferencesChange
+            installPreferencesChangeHandler()
         }
     }
 
     var onWindowVisibilityChange: ((Bool) -> Void)?
 
     private let settingsViewController: SettingsViewController
+    private let surfaceViewController: SettingsSurfaceViewController
 
     init(preferences: AppPreferences) {
         self.settingsViewController = SettingsViewController(preferences: preferences)
+        self.surfaceViewController = SettingsSurfaceViewController(
+            preferences: preferences,
+            contentViewController: settingsViewController
+        )
 
         let window = SettingsPanel(
             contentRect: NSRect(x: 0, y: 0, width: 880, height: 660),
@@ -38,7 +43,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         window.hidesOnDeactivate = false
         window.center()
         window.minSize = NSSize(width: 820, height: 620)
-        window.contentViewController = settingsViewController
+        window.contentViewController = surfaceViewController
 
         let toolbar = NSToolbar(identifier: "settings")
         toolbar.showsBaselineSeparator = false
@@ -52,9 +57,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         if let window = self.window {
             applyWindowTheme(preferences, to: window)
         }
-        settingsViewController.onPreferencesChange = { [weak self] preferences in
-            self?.onPreferencesChange?(preferences)
-        }
+        installPreferencesChangeHandler()
     }
 
     @available(*, unavailable)
@@ -63,10 +66,14 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     }
 
     func present(attachedTo parentWindow: NSWindow?) {
-        if let window, let parentWindow, !window.isVisible {
+        if let window, !window.isVisible {
+            let visibleFrame = parentWindow?.screen?.visibleFrame
+                ?? NSScreen.main?.visibleFrame
+                ?? window.screen?.visibleFrame
+                ?? window.frame
             let origin = NSPoint(
-                x: parentWindow.frame.midX - (window.frame.width / 2.0),
-                y: parentWindow.frame.midY - (window.frame.height / 2.0)
+                x: visibleFrame.midX - (window.frame.width / 2.0),
+                y: visibleFrame.midY - (window.frame.height / 2.0)
             )
             window.setFrameOrigin(origin)
         }
@@ -82,9 +89,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
 
     func updatePreferences(_ preferences: AppPreferences) {
         settingsViewController.updatePreferences(preferences)
-        if let window {
-            applyWindowTheme(preferences, to: window)
-        }
+        applyDynamicTheme(preferences)
     }
 
     func windowWillClose(_ notification: Notification) {
@@ -129,6 +134,61 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     private func applyWindowTheme(_ preferences: AppPreferences, to window: NSWindow) {
         window.appearance = NSAppearance(named: preferences.usesLightText ? .darkAqua : .aqua)
         window.isOpaque = false
-        window.backgroundColor = preferences.panelBackgroundColor
+        window.backgroundColor = .clear
+        window.hasShadow = false
+    }
+
+    private func applyDynamicTheme(_ preferences: AppPreferences) {
+        surfaceViewController.apply(preferences: preferences)
+        if let window {
+            applyWindowTheme(preferences, to: window)
+        }
+    }
+
+    private func installPreferencesChangeHandler() {
+        settingsViewController.onPreferencesChange = { [weak self] preferences in
+            guard let self else { return }
+            self.applyDynamicTheme(preferences)
+            self.onPreferencesChange?(preferences)
+        }
+    }
+}
+
+private final class SettingsSurfaceViewController: NSViewController {
+    private let preferences: AppPreferences
+    private let hostedViewController: SettingsViewController
+    private let panelSurface: PanelSurfaceView
+
+    init(preferences: AppPreferences, contentViewController: SettingsViewController) {
+        self.preferences = preferences
+        self.hostedViewController = contentViewController
+        self.panelSurface = PanelSurfaceView(frame: NSRect(x: 0, y: 0, width: 880, height: 660))
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func loadView() {
+        panelSurface.apply(preferences: preferences)
+        let container = panelSurface.contentView
+        let hostedView = hostedViewController.view
+        addChild(hostedViewController)
+        hostedView.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(hostedView)
+        NSLayoutConstraint.activate([
+            hostedView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            hostedView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            hostedView.topAnchor.constraint(equalTo: container.topAnchor),
+            hostedView.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+        ])
+        view = panelSurface
+    }
+
+    func apply(preferences: AppPreferences) {
+        guard isViewLoaded else { return }
+        panelSurface.apply(preferences: preferences)
     }
 }
