@@ -723,7 +723,7 @@ final class TodoRowView: NSView {
     private enum AppearanceMetrics {
         static let pressedScale: CGFloat = 0.99
         static let pressAnimationDuration: CFTimeInterval = 0.08
-        static let showsDebugGeometry = true
+        static let showsDebugGeometry = false
     }
 
     private let backgroundView = NSView()
@@ -1042,6 +1042,7 @@ final class TodoRowView: NSView {
         editingTextView.showsStrikethrough = model.showsStrikethrough
         editingTextView.selectionColor = preferences.selectionOverlayColor
         editingTextView.caretColor = preferences.caretColor
+        editingTextView.visualVerticalOffset = CGFloat(preferences.displayTextVerticalOffset)
         let showsEditorHost = isEditingRow && model.isEditable
         if !showsEditorHost {
             editingTextView.selectionRange = NSRange(location: 0, length: 0)
@@ -1294,6 +1295,10 @@ final class EditingTextDisplayView: NSView {
         didSet { needsDisplay = true }
     }
 
+    var visualVerticalOffset: CGFloat = 0 {
+        didSet { needsDisplay = true }
+    }
+
     private var horizontalOffset: CGFloat = 0
 
     func restoreDisplayState(text: String, showsStrikethrough: Bool) {
@@ -1343,7 +1348,7 @@ final class EditingTextDisplayView: NSView {
         let clampedLocation = max(0, min(selectionRange.location, nsText.length))
         let clampedLength = max(0, min(selectionRange.length, nsText.length - clampedLocation))
         let selectionEnd = clampedLocation + clampedLength
-        let contentRect = alignedContentRect()
+        let contentRect = visualContentRect
         let startX = contentRect.minX + width(toUTF16Index: clampedLocation) - horizontalOffset
         let endX = contentRect.minX + width(toUTF16Index: selectionEnd) - horizontalOffset
 
@@ -1410,6 +1415,10 @@ final class EditingTextDisplayView: NSView {
 
     var debugContentRect: NSRect {
         alignedContentRect()
+    }
+
+    var visualContentRect: NSRect {
+        alignedContentRect().offsetBy(dx: 0, dy: visualVerticalOffset)
     }
 
     private func textAttributes() -> [NSAttributedString.Key: Any] {

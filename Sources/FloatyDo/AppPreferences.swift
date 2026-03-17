@@ -470,6 +470,10 @@ extension AppPreferences {
         LayoutMetrics.manualTextVerticalOffset(fontStyle: fontStyle, fontSize: fontSize)
     }
 
+    var displayTextVerticalOffset: Double {
+        LayoutMetrics.displayTextVerticalOffset(fontStyle: fontStyle, fontSize: fontSize)
+    }
+
     func appFont(weight: NSFont.Weight = .regular) -> NSFont {
         fontStyle.font(ofSize: CGFloat(fontSize), weight: weight)
     }
@@ -519,6 +523,14 @@ enum LayoutMetrics {
         _ = fontStyle
         _ = fontSize
         return 0
+    }
+
+    static func displayTextVerticalOffset(fontStyle: FontStylePreset, fontSize: Double) -> Double {
+        let resolvedFontSize = nearestFontSizeOption(to: fontSize)
+        if fontStyle == .serif || resolvedFontSize == 16 {
+            return 0
+        }
+        return 1
     }
 
     static func nearestFontSizeOption(to value: Double) -> Double {
