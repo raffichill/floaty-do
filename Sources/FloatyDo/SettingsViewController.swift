@@ -21,7 +21,7 @@ final class SettingsViewController: NSViewController {
         static let valueWidth: CGFloat = 44
         static let sliderValueSpacing: CGFloat = 8
         static let iconStatusWidth: CGFloat = 190
-        static let iconButtonWidth: CGFloat = 158
+        static let actionButtonWidth: CGFloat = 88
         static let shortcutsColumnWidth: CGFloat = 220
         static let shortcutsColumnGap: CGFloat = 16
         static let shortcutsRowSpacing: CGFloat = 14
@@ -57,21 +57,24 @@ final class SettingsViewController: NSViewController {
 
     private let titleLabel = NSTextField(labelWithString: "Settings")
     private let tabStack = NSStackView()
-    private let divider = NSBox()
+    private let divider = NSView()
     private let contentHostView = NSView()
+    private var primaryLabels: [NSTextField] = []
+    private var secondaryLabels: [NSTextField] = []
+    private var keycapLabels: [NSTextField] = []
+    private var keycapBackgroundViews: [NSView] = []
 
     private var tabButtons: [SettingsTab: SettingsTabButton] = [:]
     private var pageViews: [SettingsTab: NSView] = [:]
 
     private let resetThemeButton = NSButton(title: "Reset", target: nil, action: nil)
     private let iconStatusLabel = NSTextField(labelWithString: "")
-    private let applyIconButton = NSButton(title: "Apply & Relaunch", target: nil, action: nil)
+    private let applyIconButton = NSButton(title: "Relaunch", target: nil, action: nil)
     private var themeButtons: [ThemePresetButton] = []
     private let blurToggle = NSSwitch()
     private let transparencySlider = NSSlider()
     private let transparencyValueLabel = NSTextField(labelWithString: "")
     private let resetTransparencyButton = NSButton(title: "Reset", target: nil, action: nil)
-    private let glassToggle = NSSwitch()
     private let fontPopup = NSPopUpButton()
     private let resetFontButton = NSButton(title: "Reset", target: nil, action: nil)
     private let fontSizeSlider = NSSlider()
@@ -83,6 +86,18 @@ final class SettingsViewController: NSViewController {
 
     private var currentAppliedIconTheme: BuiltInTheme
     private var isApplyingPrimaryIconChange = false
+
+    private var themeableButtons: [NSButton] {
+        [
+            resetThemeButton,
+            applyIconButton,
+            resetTransparencyButton,
+            resetFontButton,
+            resetFontSizeButton,
+            resetRadiusButton,
+        ]
+    }
+
     init(preferences: AppPreferences) {
         self.preferences = preferences
         self.currentAppliedIconTheme = PrimaryAppIconRelaunchController.shared.currentTheme()
@@ -97,20 +112,20 @@ final class SettingsViewController: NSViewController {
     override func loadView() {
         let root = NSView()
         root.wantsLayer = true
-        root.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+        root.layer?.backgroundColor = preferences.panelBackgroundColor.cgColor
 
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
         titleLabel.font = .systemFont(ofSize: 13, weight: .semibold)
-        titleLabel.textColor = .labelColor
         titleLabel.alignment = .center
+        primaryLabels.append(titleLabel)
 
         tabStack.orientation = .horizontal
         tabStack.alignment = .centerY
         tabStack.spacing = 4
         tabStack.translatesAutoresizingMaskIntoConstraints = false
 
-        divider.boxType = .separator
         divider.translatesAutoresizingMaskIntoConstraints = false
+        divider.wantsLayer = true
 
         contentHostView.translatesAutoresizingMaskIntoConstraints = false
 
@@ -129,6 +144,7 @@ final class SettingsViewController: NSViewController {
             divider.topAnchor.constraint(equalTo: root.topAnchor, constant: Metrics.dividerTopInset),
             divider.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             divider.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            divider.heightAnchor.constraint(equalToConstant: 1),
 
             contentHostView.topAnchor.constraint(equalTo: divider.bottomAnchor, constant: Metrics.contentTopInset),
             contentHostView.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: Metrics.outerPadding.left),
@@ -178,7 +194,6 @@ final class SettingsViewController: NSViewController {
         configureThemeButtons()
         configureBlurToggle()
         configureTransparencySlider()
-        configureGlassToggle()
         configureIconApplyControls()
         configureFontPopup()
         configureFontSizeSlider()
@@ -219,9 +234,8 @@ final class SettingsViewController: NSViewController {
     private func makeAppearancePage() -> NSView {
         let contentStack = NSStackView(views: [
             makeFormRow(title: "Background", control: makeThemeControl()),
-            makeFormRow(title: "Blur", control: makeBlurControl()),
+            makeFormRow(title: "Transparent", control: makeBlurControl()),
             makeFormRow(title: "Opacity", control: makeTransparencyControl()),
-            makeFormRow(title: "Glass", control: makeGlassControl()),
             makeFormRow(title: "App Icon", control: makeAppIconControl()),
             makeFormRow(title: "Font", control: makeFontControl()),
             makeFormRow(title: "Font Size", control: makeFontSizeControl()),
@@ -289,10 +303,10 @@ final class SettingsViewController: NSViewController {
     private func makeAboutPage() -> NSView {
         let label = NSTextField(wrappingLabelWithString: "paragraph goes here")
         label.font = .systemFont(ofSize: 13)
-        label.textColor = .secondaryLabelColor
         label.translatesAutoresizingMaskIntoConstraints = false
         label.maximumNumberOfLines = 0
         label.preferredMaxLayoutWidth = 420
+        secondaryLabels.append(label)
 
         let container = NSView()
         container.translatesAutoresizingMaskIntoConstraints = false
@@ -324,19 +338,15 @@ final class SettingsViewController: NSViewController {
 
     private func configureIconApplyControls() {
         iconStatusLabel.font = .systemFont(ofSize: 11)
-        iconStatusLabel.textColor = .secondaryLabelColor
         iconStatusLabel.alignment = .left
         iconStatusLabel.lineBreakMode = .byTruncatingTail
         iconStatusLabel.translatesAutoresizingMaskIntoConstraints = false
         iconStatusLabel.widthAnchor.constraint(equalToConstant: Metrics.iconStatusWidth).isActive = true
+        secondaryLabels.append(iconStatusLabel)
 
         applyIconButton.target = self
         applyIconButton.action = #selector(applyIconAndRelaunch(_:))
-        applyIconButton.bezelStyle = .rounded
-        applyIconButton.controlSize = .small
-        applyIconButton.font = .systemFont(ofSize: 12)
-        applyIconButton.translatesAutoresizingMaskIntoConstraints = false
-        applyIconButton.widthAnchor.constraint(equalToConstant: Metrics.iconButtonWidth).isActive = true
+        configureResetButton(applyIconButton)
     }
 
     private func configureTransparencySlider() {
@@ -350,6 +360,7 @@ final class SettingsViewController: NSViewController {
         transparencySlider.widthAnchor.constraint(equalToConstant: Metrics.sliderWidth).isActive = true
 
         configureValueLabel(transparencyValueLabel)
+        secondaryLabels.append(transparencyValueLabel)
 
         resetTransparencyButton.target = self
         resetTransparencyButton.action = #selector(resetTransparency(_:))
@@ -361,13 +372,6 @@ final class SettingsViewController: NSViewController {
         blurToggle.action = #selector(blurToggled(_:))
         blurToggle.controlSize = .small
         blurToggle.translatesAutoresizingMaskIntoConstraints = false
-    }
-
-    private func configureGlassToggle() {
-        glassToggle.target = self
-        glassToggle.action = #selector(glassToggled(_:))
-        glassToggle.controlSize = .small
-        glassToggle.translatesAutoresizingMaskIntoConstraints = false
     }
 
     private func configureFontPopup() {
@@ -398,6 +402,7 @@ final class SettingsViewController: NSViewController {
         fontSizeSlider.widthAnchor.constraint(equalToConstant: Metrics.sliderWidth).isActive = true
 
         configureValueLabel(fontSizeDetailLabel)
+        secondaryLabels.append(fontSizeDetailLabel)
 
         resetFontSizeButton.target = self
         resetFontSizeButton.action = #selector(resetFontSize(_:))
@@ -414,6 +419,7 @@ final class SettingsViewController: NSViewController {
         borderRadiusSlider.widthAnchor.constraint(equalToConstant: Metrics.sliderWidth).isActive = true
 
         configureValueLabel(borderRadiusValueLabel)
+        secondaryLabels.append(borderRadiusValueLabel)
 
         resetRadiusButton.target = self
         resetRadiusButton.action = #selector(resetRadius(_:))
@@ -432,6 +438,8 @@ final class SettingsViewController: NSViewController {
         button.bezelStyle = .rounded
         button.controlSize = .small
         button.font = .systemFont(ofSize: 11, weight: .medium)
+        button.translatesAutoresizingMaskIntoConstraints = false
+        button.widthAnchor.constraint(equalToConstant: Metrics.actionButtonWidth).isActive = true
     }
 
     private func makeThemeControl() -> NSView {
@@ -468,16 +476,6 @@ final class SettingsViewController: NSViewController {
         sliderGroup.widthAnchor.constraint(equalToConstant: Metrics.sliderGroupWidth).isActive = true
 
         let stack = NSStackView(views: [sliderGroup, resetTransparencyButton])
-        stack.orientation = .horizontal
-        stack.alignment = .centerY
-        stack.spacing = 12
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        stack.widthAnchor.constraint(equalToConstant: Metrics.controlWidth).isActive = true
-        return stack
-    }
-
-    private func makeGlassControl() -> NSView {
-        let stack = NSStackView(views: [glassToggle])
         stack.orientation = .horizontal
         stack.alignment = .centerY
         stack.spacing = 12
@@ -543,10 +541,10 @@ final class SettingsViewController: NSViewController {
     private func makeFormRow(title: String, control: NSView) -> NSView {
         let label = NSTextField(labelWithString: title)
         label.font = .systemFont(ofSize: 12, weight: .regular)
-        label.textColor = .labelColor
         label.alignment = .right
         label.translatesAutoresizingMaskIntoConstraints = false
         label.widthAnchor.constraint(equalToConstant: Metrics.labelWidth).isActive = true
+        primaryLabels.append(label)
 
         let controlContainer = NSView()
         controlContainer.translatesAutoresizingMaskIntoConstraints = false
@@ -572,10 +570,10 @@ final class SettingsViewController: NSViewController {
     private func makeShortcutRow(label: String, shortcut: [String]) -> NSView {
         let descriptionLabel = NSTextField(labelWithString: label)
         descriptionLabel.font = .systemFont(ofSize: 12)
-        descriptionLabel.textColor = NSColor.labelColor.withAlphaComponent(0.72)
         descriptionLabel.alignment = .right
         descriptionLabel.translatesAutoresizingMaskIntoConstraints = false
         descriptionLabel.widthAnchor.constraint(equalToConstant: Metrics.shortcutsColumnWidth).isActive = true
+        secondaryLabels.append(descriptionLabel)
 
         let keysRow = NSStackView(views: shortcut.map(makeKeycap))
         keysRow.orientation = .horizontal
@@ -605,18 +603,13 @@ final class SettingsViewController: NSViewController {
     private func makeKeycap(_ text: String) -> NSView {
         let label = NSTextField(labelWithString: keycapDisplayText(for: text))
         label.font = .systemFont(ofSize: 11, weight: .regular)
-        label.textColor = NSColor(
-            calibratedRed: 128.0 / 255.0,
-            green: 128.0 / 255.0,
-            blue: 128.0 / 255.0,
-            alpha: 1.0
-        )
+        keycapLabels.append(label)
 
         let container = NSView()
         container.wantsLayer = true
-        container.layer?.backgroundColor = NSColor(calibratedWhite: 0.949, alpha: 1.0).cgColor
         container.layer?.cornerRadius = 3
         container.translatesAutoresizingMaskIntoConstraints = false
+        keycapBackgroundViews.append(container)
 
         label.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(label)
@@ -665,16 +658,13 @@ final class SettingsViewController: NSViewController {
             button.isSelected = BuiltInTheme.allCases[index] == selectedTheme
         }
 
-        let opacityControlsEnabled = preferences.blurEnabled && !preferences.glassEnabled
-        let displayedTransparency = opacityControlsEnabled ? (preferences.clampedWindowOpacity * 100.0) : 100.0
+        let opacityControlsEnabled = preferences.blurEnabled
+        let displayedTransparency = preferences.clampedWindowOpacity * 100.0
         blurToggle.state = preferences.blurEnabled ? .on : .off
         transparencySlider.doubleValue = displayedTransparency
         transparencySlider.isEnabled = opacityControlsEnabled
         resetTransparencyButton.isEnabled = opacityControlsEnabled && preferences.clampedWindowOpacity < 0.999
-        transparencyValueLabel.stringValue = opacityDisplayText(
-            for: opacityControlsEnabled ? preferences.clampedWindowOpacity : 1.0
-        )
-        glassToggle.state = preferences.glassEnabled ? .on : .off
+        transparencyValueLabel.stringValue = opacityDisplayText(for: preferences.clampedWindowOpacity)
 
         if let index = FontStylePreset.allCases.firstIndex(of: preferences.fontStyle) {
             fontPopup.selectItem(at: index)
@@ -689,6 +679,7 @@ final class SettingsViewController: NSViewController {
         borderRadiusSlider.doubleValue = min(preferences.cornerRadius, preferences.maximumCornerRadius)
         borderRadiusValueLabel.stringValue = "\(Int(round(borderRadiusSlider.doubleValue))) px"
         updateAppIconControls()
+        applyThemeAppearance()
     }
 
     private func commitPreferenceChange(_ mutation: (inout AppPreferences) -> Void) {
@@ -740,7 +731,6 @@ final class SettingsViewController: NSViewController {
         commitPreferenceChange { updated in
             updated.blurEnabled = true
             updated.windowOpacity = snappedValue / 100.0
-            updated.glassEnabled = false
         }
     }
 
@@ -751,25 +741,10 @@ final class SettingsViewController: NSViewController {
         }
     }
 
-    @objc private func glassToggled(_ sender: NSButton) {
-        guard !isUpdatingControls else { return }
-        commitPreferenceChange { updated in
-            updated.glassEnabled = sender.state == .on
-            if updated.glassEnabled {
-                updated.blurEnabled = true
-                updated.windowOpacity = 1.0
-            }
-        }
-    }
-
     @objc private func blurToggled(_ sender: NSButton) {
         guard !isUpdatingControls else { return }
         commitPreferenceChange { updated in
-            let isEnabled = sender.state == .on
-            updated.blurEnabled = isEnabled
-            if !isEnabled {
-                updated.glassEnabled = false
-            }
+            updated.blurEnabled = sender.state == .on
         }
     }
 
@@ -862,7 +837,7 @@ final class SettingsViewController: NSViewController {
         let controller = PrimaryAppIconRelaunchController.shared
         guard controller.canApplyIconChanges() else {
             iconStatusLabel.stringValue = "Local build only."
-            applyIconButton.title = "Apply & Relaunch"
+            applyIconButton.title = "Relaunch"
             applyIconButton.isEnabled = false
             return
         }
@@ -876,7 +851,7 @@ final class SettingsViewController: NSViewController {
         }
 
         iconStatusLabel.stringValue = themeMatchesIcon ? "Icon matches this theme." : "Relaunch to apply current theme."
-        applyIconButton.title = themeMatchesIcon ? "Icon Is Current" : "Apply & Relaunch"
+        applyIconButton.title = themeMatchesIcon ? "Current" : "Relaunch"
         applyIconButton.isEnabled = !themeMatchesIcon
     }
 
@@ -891,6 +866,72 @@ final class SettingsViewController: NSViewController {
         } else {
             alert.runModal()
         }
+    }
+
+    private func applyThemeAppearance() {
+        view.layer?.backgroundColor = preferences.panelBackgroundColor.cgColor
+        divider.layer?.backgroundColor = preferences.subtleStrokeColor.cgColor
+
+        primaryLabels.forEach { $0.textColor = preferences.primaryTextColor }
+        secondaryLabels.forEach { $0.textColor = preferences.secondaryTextColor }
+        keycapLabels.forEach { $0.textColor = preferences.secondaryTextColor }
+        keycapBackgroundViews.forEach {
+            $0.layer?.backgroundColor = preferences.activeFillColor.cgColor
+        }
+        themeableButtons.forEach { applyThemeStyle(to: $0) }
+        applyThemeStyle(to: fontPopup)
+
+        tabButtons.values.forEach {
+            $0.applyTheme(
+                selectedTint: preferences.primaryTextColor,
+                inactiveTint: preferences.secondaryTextColor,
+                selectedBackground: preferences.activeFillColor
+            )
+        }
+    }
+
+    private func applyThemeStyle(to button: NSButton) {
+        let titleColor = button.isEnabled
+            ? preferences.primaryTextColor
+            : preferences.primaryTextColor.withAlphaComponent(0.42)
+        let fillColor = button.isEnabled
+            ? preferences.activeFillColor
+            : preferences.activeFillColor.withAlphaComponent(max(0.12, preferences.activeFillColor.alphaComponent * 0.48))
+        let paragraphStyle = NSMutableParagraphStyle()
+        paragraphStyle.alignment = .center
+        button.attributedTitle = NSAttributedString(
+            string: button.title,
+            attributes: [
+                .foregroundColor: titleColor,
+                .font: button.font ?? .systemFont(ofSize: 11, weight: .medium),
+                .paragraphStyle: paragraphStyle,
+            ]
+        )
+        button.contentTintColor = titleColor
+        button.bezelColor = fillColor
+    }
+
+    private func applyThemeStyle(to popup: NSPopUpButton) {
+        let titleColor = popup.isEnabled
+            ? preferences.primaryTextColor
+            : preferences.primaryTextColor.withAlphaComponent(0.42)
+        let fillColor = popup.isEnabled
+            ? preferences.activeFillColor
+            : preferences.activeFillColor.withAlphaComponent(max(0.12, preferences.activeFillColor.alphaComponent * 0.48))
+        let font = popup.font ?? .systemFont(ofSize: 12)
+        let attributes: [NSAttributedString.Key: Any] = [
+            .foregroundColor: titleColor,
+            .font: font,
+        ]
+
+        popup.contentTintColor = titleColor
+        popup.bezelColor = fillColor
+        popup.itemArray.forEach { item in
+            item.attributedTitle = NSAttributedString(string: item.title, attributes: attributes)
+        }
+
+        let selectedTitle = popup.titleOfSelectedItem ?? ""
+        popup.attributedTitle = NSAttributedString(string: selectedTitle, attributes: attributes)
     }
 }
 
@@ -955,6 +996,9 @@ private final class SettingsTabButton: NSButton {
     private let container = NSView()
     private let imageView = NSImageView()
     private let titleField = NSTextField(labelWithString: "")
+    private var selectedTint: NSColor = .labelColor
+    private var inactiveTint: NSColor = .secondaryLabelColor
+    private var selectedBackgroundColor: NSColor = NSColor.black.withAlphaComponent(0.05)
 
     var isSelected = false {
         didSet { updateAppearance() }
@@ -1010,10 +1054,17 @@ private final class SettingsTabButton: NSButton {
         fatalError("init(coder:) has not been implemented")
     }
 
+    func applyTheme(selectedTint: NSColor, inactiveTint: NSColor, selectedBackground: NSColor) {
+        self.selectedTint = selectedTint
+        self.inactiveTint = inactiveTint
+        self.selectedBackgroundColor = selectedBackground
+        updateAppearance()
+    }
+
     private func updateAppearance() {
-        let tint = isSelected ? NSColor.labelColor : NSColor.secondaryLabelColor
+        let tint = isSelected ? selectedTint : inactiveTint
         container.layer?.backgroundColor = isSelected
-            ? NSColor.black.withAlphaComponent(0.05).cgColor
+            ? selectedBackgroundColor.cgColor
             : NSColor.clear.cgColor
         imageView.contentTintColor = tint
         titleField.textColor = tint

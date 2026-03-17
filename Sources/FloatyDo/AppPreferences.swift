@@ -85,56 +85,6 @@ public enum FontStylePreset: String, Codable, CaseIterable {
     }
 }
 
-public enum BlurMaterialPreset: String, Codable, CaseIterable {
-    case underWindowBackground
-    case popover
-    case hudWindow
-    case sheet
-    case windowBackground
-    case contentBackground
-    case underPageBackground
-    case sidebar
-    case headerView
-    case titlebar
-    case selection
-    case menu
-    case fullScreenUI
-    case toolTip
-
-    public var displayName: String {
-        switch self {
-        case .underWindowBackground:
-            return "Under Window"
-        case .popover:
-            return "Popover"
-        case .hudWindow:
-            return "HUD Window"
-        case .sheet:
-            return "Sheet"
-        case .windowBackground:
-            return "Window Background"
-        case .contentBackground:
-            return "Content Background"
-        case .underPageBackground:
-            return "Under Page"
-        case .sidebar:
-            return "Sidebar"
-        case .headerView:
-            return "Header View"
-        case .titlebar:
-            return "Titlebar"
-        case .selection:
-            return "Selection"
-        case .menu:
-            return "Menu"
-        case .fullScreenUI:
-            return "Fullscreen UI"
-        case .toolTip:
-            return "Tooltip"
-        }
-    }
-}
-
 public enum BuiltInTheme: String, Codable, CaseIterable {
     case theme1
     case theme2
@@ -270,8 +220,6 @@ public struct AppPreferences: Codable, Equatable {
     public var cornerRadius: Double
     public var blurEnabled: Bool
     public var windowOpacity: Double
-    public var blurMaterial: BlurMaterialPreset
-    public var glassEnabled: Bool
 
     private enum CodingKeys: String, CodingKey {
         case rowHeight
@@ -285,8 +233,6 @@ public struct AppPreferences: Codable, Equatable {
         case cornerRadius
         case blurEnabled
         case windowOpacity
-        case blurMaterial
-        case glassEnabled
     }
 
     public static let `default` = AppPreferences(
@@ -300,9 +246,7 @@ public struct AppPreferences: Codable, Equatable {
         fontSize: LayoutMetrics.defaultFontSize,
         cornerRadius: 10,
         blurEnabled: true,
-        windowOpacity: 1.0,
-        blurMaterial: .underWindowBackground,
-        glassEnabled: false
+        windowOpacity: 1.0
     )
 
     public init(
@@ -316,9 +260,7 @@ public struct AppPreferences: Codable, Equatable {
         fontSize: Double = 13,
         cornerRadius: Double = 10,
         blurEnabled: Bool = true,
-        windowOpacity: Double = 1.0,
-        blurMaterial: BlurMaterialPreset = .underWindowBackground,
-        glassEnabled: Bool = false
+        windowOpacity: Double = 1.0
     ) {
         self.rowHeight = rowHeight
         self.panelWidth = panelWidth
@@ -331,8 +273,6 @@ public struct AppPreferences: Codable, Equatable {
         self.cornerRadius = cornerRadius
         self.blurEnabled = blurEnabled
         self.windowOpacity = windowOpacity
-        self.blurMaterial = blurMaterial
-        self.glassEnabled = glassEnabled
     }
 
     public init(from decoder: Decoder) throws {
@@ -350,49 +290,12 @@ public struct AppPreferences: Codable, Equatable {
         cornerRadius = try container.decodeIfPresent(Double.self, forKey: .cornerRadius) ?? fallback.cornerRadius
         blurEnabled = try container.decodeIfPresent(Bool.self, forKey: .blurEnabled) ?? fallback.blurEnabled
         windowOpacity = try container.decodeIfPresent(Double.self, forKey: .windowOpacity) ?? fallback.windowOpacity
-        blurMaterial = try container.decodeIfPresent(BlurMaterialPreset.self, forKey: .blurMaterial) ?? fallback.blurMaterial
-        glassEnabled = try container.decodeIfPresent(Bool.self, forKey: .glassEnabled) ?? fallback.glassEnabled
     }
 
     var motion: MotionProfile { animationPreset.motion }
 }
 
 #if canImport(AppKit)
-extension BlurMaterialPreset {
-    var visualEffectMaterial: NSVisualEffectView.Material {
-        switch self {
-        case .titlebar:
-            return .titlebar
-        case .selection:
-            return .selection
-        case .menu:
-            return .menu
-        case .popover:
-            return .popover
-        case .sidebar:
-            return .sidebar
-        case .headerView:
-            return .headerView
-        case .sheet:
-            return .sheet
-        case .windowBackground:
-            return .windowBackground
-        case .hudWindow:
-            return .hudWindow
-        case .fullScreenUI:
-            return .fullScreenUI
-        case .toolTip:
-            return .toolTip
-        case .contentBackground:
-            return .contentBackground
-        case .underWindowBackground:
-            return .underWindowBackground
-        case .underPageBackground:
-            return .underPageBackground
-        }
-    }
-}
-
 struct ThemePalette {
     let background: NSColor
     let selectionColor: NSColor
@@ -470,15 +373,6 @@ extension FontStylePreset {
 }
 
 extension AppPreferences {
-    private var glassNeutralTintColor: NSColor {
-        NSColor(
-            srgbRed: 0.58,
-            green: 0.60,
-            blue: 0.64,
-            alpha: 1.0
-        )
-    }
-
     var clampedWindowOpacity: Double {
         min(max(windowOpacity, LayoutMetrics.minWindowOpacity), 1.0)
     }
@@ -509,23 +403,7 @@ extension AppPreferences {
         panelBackgroundColor.withAlphaComponent(translucentSurfaceOpacity)
     }
 
-    var glassBackdropTintColor: NSColor {
-        glassNeutralTintColor.withAlphaComponent(0.34)
-    }
-
-    var fallbackGlassTintColor: NSColor {
-        glassBackdropTintColor
-    }
-
-    @available(macOS 26.0, *)
-    var glassTintColor: NSColor {
-        glassNeutralTintColor.withAlphaComponent(0.14)
-    }
-
     var activeFillColor: NSColor {
-        if glassEnabled {
-            return NSColor.white.withAlphaComponent(0.12)
-        }
         return palette.selectionColor.withAlphaComponent(palette.selectionOpacity)
     }
 
@@ -534,45 +412,27 @@ extension AppPreferences {
     }
 
     var secondaryTextColor: NSColor {
-        if glassEnabled {
-            return NSColor.white.withAlphaComponent(0.68)
-        }
         return resolvedContentColor(multiplier: 0.72)
     }
 
     var subtleStrokeColor: NSColor {
-        if glassEnabled {
-            return NSColor.white.withAlphaComponent(0.24)
-        }
         return palette.contentColor.withAlphaComponent(max(0.12, palette.contentOpacity * 0.22))
     }
 
     var strikethroughColor: NSColor {
-        if glassEnabled {
-            return NSColor.white.withAlphaComponent(0.55)
-        }
         return resolvedContentColor(multiplier: 0.60)
     }
 
     var selectionOverlayColor: NSColor {
-        if glassEnabled {
-            return NSColor.white.withAlphaComponent(0.22)
-        }
         let highlightOpacity = min(max(Double(palette.selectionOpacity) + 0.08, 0.14), 0.30)
         return palette.selectionColor.withAlphaComponent(highlightOpacity)
     }
 
     var caretColor: NSColor {
-        if glassEnabled {
-            return NSColor.white.withAlphaComponent(0.96)
-        }
         return palette.contentColor.withAlphaComponent(min(max(Double(palette.contentOpacity) + 0.06, 0), 1))
     }
 
     var usesLightText: Bool {
-        if glassEnabled {
-            return true
-        }
         return palette.usesLightText
     }
 
@@ -581,7 +441,7 @@ extension AppPreferences {
     }
 
     var contentBaseColor: NSColor {
-        glassEnabled ? .white : palette.contentColor
+        palette.contentColor
     }
 
     var translucentSurfaceOpacity: Double {
@@ -615,7 +475,7 @@ extension AppPreferences {
     }
 
     func resolvedContentColor(multiplier: CGFloat = 1.0) -> NSColor {
-        let baseOpacity = glassEnabled ? CGFloat(1.0) : palette.contentOpacity
+        let baseOpacity = palette.contentOpacity
         let alpha = min(max(baseOpacity * multiplier, 0), 1)
         return contentBaseColor.withAlphaComponent(alpha)
     }

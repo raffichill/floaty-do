@@ -538,29 +538,30 @@ final class TodoStoreTests: XCTestCase {
         XCTAssertEqual(store.preferences.snapPadding, 40)
     }
 
-    func testPreferencesClampWindowOpacityAndPersistGlassToggle() {
+    func testPreferencesClampWindowOpacityAndIgnoreLegacyGlassFields() throws {
         let store = TodoStore()
-        let updatedPreferences = AppPreferences(
-            rowHeight: 36,
-            panelWidth: 400,
-            hoverHighlightsEnabled: true,
-            animationPreset: .balanced,
-            snapPadding: 40,
-            themeColor: .default,
-            fontStyle: .system,
-            fontSize: 14,
-            cornerRadius: 10,
-            blurEnabled: false,
-            windowOpacity: 0.2,
-            glassEnabled: true
-        )
+        let payload: [String: Any] = [
+            "rowHeight": 36.0,
+            "panelWidth": 400.0,
+            "hoverHighlightsEnabled": true,
+            "animationPreset": "balanced",
+            "snapPadding": 40.0,
+            "themeColor": ["red": 0.0784313725, "green": 0.0784313725, "blue": 0.1215686275, "alpha": 1.0],
+            "fontStyle": "system",
+            "fontSize": 14.0,
+            "cornerRadius": 10.0,
+            "blurEnabled": false,
+            "windowOpacity": 0.2,
+            "blurMaterial": "popover",
+            "glassEnabled": true
+        ]
+        let data = try JSONSerialization.data(withJSONObject: payload)
+        let updatedPreferences = try JSONDecoder().decode(AppPreferences.self, from: data)
 
         store.updatePreferences(updatedPreferences)
 
         XCTAssertEqual(store.preferences.windowOpacity, 0.3)
-        XCTAssertTrue(store.preferences.blurEnabled)
-        XCTAssertEqual(store.preferences.blurMaterial, .underWindowBackground)
-        XCTAssertTrue(store.preferences.glassEnabled)
+        XCTAssertFalse(store.preferences.blurEnabled)
     }
 
     func testLegacyPreferencesDecodeUsesNewFieldDefaults() throws {
@@ -587,8 +588,6 @@ final class TodoStoreTests: XCTestCase {
         XCTAssertEqual(store.preferences.cornerRadius, 10.0)
         XCTAssertTrue(store.preferences.blurEnabled)
         XCTAssertEqual(store.preferences.windowOpacity, 1.0)
-        XCTAssertEqual(store.preferences.blurMaterial, .underWindowBackground)
-        XCTAssertFalse(store.preferences.glassEnabled)
     }
 
     func testRestoreStateReplacesItemsArchiveAndPreferences() {

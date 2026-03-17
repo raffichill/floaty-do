@@ -20,7 +20,6 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     var onWindowVisibilityChange: ((Bool) -> Void)?
 
     private let settingsViewController: SettingsViewController
-    private weak var parentWindow: NSWindow?
 
     init(preferences: AppPreferences) {
         self.settingsViewController = SettingsViewController(preferences: preferences)
@@ -50,6 +49,9 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
 
         shouldCascadeWindows = false
         self.window?.delegate = self
+        if let window = self.window {
+            applyWindowTheme(preferences, to: window)
+        }
         settingsViewController.onPreferencesChange = { [weak self] preferences in
             self?.onPreferencesChange?(preferences)
         }
@@ -61,12 +63,14 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     }
 
     func present(attachedTo parentWindow: NSWindow?) {
-        self.parentWindow = parentWindow
-        showWindow(nil)
-        window?.center()
-        if let window, let parentWindow, window.parent !== parentWindow {
-            parentWindow.addChildWindow(window, ordered: .above)
+        if let window, let parentWindow, !window.isVisible {
+            let origin = NSPoint(
+                x: parentWindow.frame.midX - (window.frame.width / 2.0),
+                y: parentWindow.frame.midY - (window.frame.height / 2.0)
+            )
+            window.setFrameOrigin(origin)
         }
+        showWindow(nil)
         window?.makeKeyAndOrderFront(nil)
         applyWindowChromeLayout()
         DispatchQueue.main.async { [weak self] in
@@ -78,12 +82,12 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
 
     func updatePreferences(_ preferences: AppPreferences) {
         settingsViewController.updatePreferences(preferences)
+        if let window {
+            applyWindowTheme(preferences, to: window)
+        }
     }
 
     func windowWillClose(_ notification: Notification) {
-        if let window, let parent = window.parent {
-            parent.removeChildWindow(window)
-        }
         onWindowVisibilityChange?(false)
     }
 
@@ -120,5 +124,11 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
             button.setFrameOrigin(NSPoint(x: currentX, y: buttonY))
             currentX += button.frame.width + spacing
         }
+    }
+
+    private func applyWindowTheme(_ preferences: AppPreferences, to window: NSWindow) {
+        window.appearance = NSAppearance(named: preferences.usesLightText ? .darkAqua : .aqua)
+        window.isOpaque = false
+        window.backgroundColor = preferences.panelBackgroundColor
     }
 }
