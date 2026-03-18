@@ -3,7 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "FloatyDo",
-    platforms: [.macOS(.v14)],
+    platforms: [.macOS("15.0")],
     products: [
         .library(name: "FloatyDoLib", targets: ["FloatyDoLib"]),
     ],
