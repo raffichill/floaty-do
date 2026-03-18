@@ -505,10 +505,11 @@ final class TodoStoreTests: XCTestCase {
             hoverHighlightsEnabled: false,
             animationPreset: .snappy,
             snapPadding: 32,
-            themeColor: ThemeColor(red: 0.12, green: 0.45, blue: 0.73, alpha: 1),
+            theme: .barbie,
             fontStyle: .rounded,
             fontSize: 16,
-            cornerRadius: 18
+            cornerRadius: 18,
+            blurEnabled: false
         )
         store1.updatePreferences(updatedPreferences)
 
@@ -524,7 +525,7 @@ final class TodoStoreTests: XCTestCase {
             hoverHighlightsEnabled: true,
             animationPreset: .balanced,
             snapPadding: 40,
-            themeColor: .default,
+            theme: .theme1,
             fontStyle: .system,
             fontSize: 13.6,
             cornerRadius: 99
@@ -535,6 +536,33 @@ final class TodoStoreTests: XCTestCase {
         XCTAssertEqual(store.preferences.fontSize, 14)
         XCTAssertEqual(store.preferences.cornerRadius, 16)
         XCTAssertEqual(store.preferences.snapPadding, 40)
+    }
+
+    func testPreferencesClampWindowOpacityAndIgnoreLegacyGlassFields() throws {
+        let store = TodoStore()
+        let payload: [String: Any] = [
+            "rowHeight": 36.0,
+            "panelWidth": 400.0,
+            "hoverHighlightsEnabled": true,
+            "animationPreset": "balanced",
+            "snapPadding": 40.0,
+            "themeColor": ["red": 0.0784313725, "green": 0.0784313725, "blue": 0.1215686275, "alpha": 1.0],
+            "fontStyle": "system",
+            "fontSize": 14.0,
+            "cornerRadius": 10.0,
+            "blurEnabled": false,
+            "windowOpacity": 0.2,
+            "blurMaterial": "popover",
+            "glassEnabled": true
+        ]
+        let data = try JSONSerialization.data(withJSONObject: payload)
+        let updatedPreferences = try JSONDecoder().decode(AppPreferences.self, from: data)
+
+        store.updatePreferences(updatedPreferences)
+
+        XCTAssertEqual(store.preferences.windowOpacity, 0.3)
+        XCTAssertFalse(store.preferences.blurEnabled)
+        XCTAssertEqual(store.preferences.theme, .theme1)
     }
 
     func testLegacyPreferencesDecodeUsesNewFieldDefaults() throws {
@@ -555,10 +583,12 @@ final class TodoStoreTests: XCTestCase {
         XCTAssertFalse(store.preferences.hoverHighlightsEnabled)
         XCTAssertEqual(store.preferences.animationPreset, .relaxed)
         XCTAssertEqual(store.preferences.snapPadding, 32.0)
-        XCTAssertEqual(store.preferences.themeColor, .default)
+        XCTAssertEqual(store.preferences.theme, .theme1)
         XCTAssertEqual(store.preferences.fontStyle, .system)
         XCTAssertEqual(store.preferences.fontSize, 14.0)
         XCTAssertEqual(store.preferences.cornerRadius, 10.0)
+        XCTAssertTrue(store.preferences.blurEnabled)
+        XCTAssertEqual(store.preferences.windowOpacity, 1.0)
     }
 
     func testRestoreStateReplacesItemsArchiveAndPreferences() {
@@ -574,7 +604,7 @@ final class TodoStoreTests: XCTestCase {
             hoverHighlightsEnabled: false,
             animationPreset: .snappy,
             snapPadding: 48,
-            themeColor: ThemeColor(red: 0.2, green: 0.3, blue: 0.4, alpha: 1),
+            theme: .theme4,
             fontStyle: .rounded,
             fontSize: 15,
             cornerRadius: 14
@@ -599,7 +629,7 @@ final class TodoStoreTests: XCTestCase {
             hoverHighlightsEnabled: true,
             animationPreset: .balanced,
             snapPadding: 12,
-            themeColor: .default,
+            theme: .theme1,
             fontStyle: .system,
             fontSize: 14.4,
             cornerRadius: 99
@@ -610,5 +640,6 @@ final class TodoStoreTests: XCTestCase {
         XCTAssertEqual(store.preferences.snapPadding, 32)
         XCTAssertEqual(store.preferences.fontSize, 14)
         XCTAssertEqual(store.preferences.cornerRadius, 16)
+        XCTAssertEqual(store.preferences.windowOpacity, 1.0)
     }
 }

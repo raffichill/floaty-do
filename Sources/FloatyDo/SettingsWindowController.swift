@@ -1,5 +1,10 @@
 import AppKit
 
+private final class SettingsPanel: NSPanel {
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { false }
+}
+
 final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     private enum ChromeMetrics {
         static let trafficLightInset: CGFloat = 18
@@ -8,18 +13,24 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
 
     var onPreferencesChange: ((AppPreferences) -> Void)? {
         didSet {
-            settingsViewController.onPreferencesChange = onPreferencesChange
+            installPreferencesChangeHandler()
         }
     }
 
     var onWindowVisibilityChange: ((Bool) -> Void)?
 
     private let settingsViewController: SettingsViewController
+    private let surfaceViewController: PanelSurfaceHostingViewController<SettingsViewController>
 
     init(preferences: AppPreferences) {
         self.settingsViewController = SettingsViewController(preferences: preferences)
+        self.surfaceViewController = PanelSurfaceHostingViewController(
+            preferences: preferences,
+            contentViewController: settingsViewController,
+            frame: NSRect(x: 0, y: 0, width: 880, height: 660)
+        )
 
-        let window = NSWindow(
+        let window = SettingsPanel(
             contentRect: NSRect(x: 0, y: 0, width: 880, height: 660),
             styleMask: [.titled, .closable, .miniaturizable, .fullSizeContentView],
             backing: .buffered,
@@ -29,9 +40,11 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true
         window.isReleasedWhenClosed = false
+        window.isFloatingPanel = true
+        window.hidesOnDeactivate = false
         window.center()
         window.minSize = NSSize(width: 820, height: 620)
-        window.contentViewController = settingsViewController
+        window.contentViewController = surfaceViewController
 
         let toolbar = NSToolbar(identifier: "settings")
         toolbar.showsBaselineSeparator = false
@@ -42,9 +55,10 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
 
         shouldCascadeWindows = false
         self.window?.delegate = self
-        settingsViewController.onPreferencesChange = { [weak self] preferences in
-            self?.onPreferencesChange?(preferences)
+        if let window = self.window {
+            applyWindowTheme(preferences, to: window)
         }
+        installPreferencesChangeHandler()
     }
 
     @available(*, unavailable)
@@ -52,9 +66,19 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         fatalError("init(coder:) has not been implemented")
     }
 
-    func present() {
+    func present(attachedTo parentWindow: NSWindow?) {
+        if let window, !window.isVisible {
+            let visibleFrame = parentWindow?.screen?.visibleFrame
+                ?? NSScreen.main?.visibleFrame
+                ?? window.screen?.visibleFrame
+                ?? window.frame
+            let origin = NSPoint(
+                x: visibleFrame.midX - (window.frame.width / 2.0),
+                y: visibleFrame.midY - (window.frame.height / 2.0)
+            )
+            window.setFrameOrigin(origin)
+        }
         showWindow(nil)
-        window?.center()
         window?.makeKeyAndOrderFront(nil)
         applyWindowChromeLayout()
         DispatchQueue.main.async { [weak self] in
@@ -66,6 +90,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
 
     func updatePreferences(_ preferences: AppPreferences) {
         settingsViewController.updatePreferences(preferences)
+        applyDynamicTheme(preferences)
     }
 
     func windowWillClose(_ notification: Notification) {
@@ -104,6 +129,28 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         for button in buttons {
             button.setFrameOrigin(NSPoint(x: currentX, y: buttonY))
             currentX += button.frame.width + spacing
+        }
+    }
+
+    private func applyWindowTheme(_ preferences: AppPreferences, to window: NSWindow) {
+        window.appearance = NSAppearance(named: preferences.usesLightText ? .darkAqua : .aqua)
+        window.isOpaque = false
+        window.backgroundColor = .clear
+        window.hasShadow = false
+    }
+
+    private func applyDynamicTheme(_ preferences: AppPreferences) {
+        surfaceViewController.apply(preferences: preferences)
+        if let window {
+            applyWindowTheme(preferences, to: window)
+        }
+    }
+
+    private func installPreferencesChangeHandler() {
+        settingsViewController.onPreferencesChange = { [weak self] preferences in
+            guard let self else { return }
+            self.applyDynamicTheme(preferences)
+            self.onPreferencesChange?(preferences)
         }
     }
 }

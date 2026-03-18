@@ -201,16 +201,19 @@ public final class TodoStore: ObservableObject {
             max(newPreferences.cornerRadius, LayoutMetrics.minCornerRadius),
             LayoutMetrics.maximumCornerRadius(forRowHeight: clampedRowHeight)
         )
+        let blurEnabled = newPreferences.blurEnabled
         return AppPreferences(
             rowHeight: clampedRowHeight,
             panelWidth: clampedPanelWidth,
             hoverHighlightsEnabled: newPreferences.hoverHighlightsEnabled,
             animationPreset: newPreferences.animationPreset,
             snapPadding: max(Self.minimumSnapPadding, newPreferences.snapPadding),
-            themeColor: newPreferences.themeColor.clamped(),
+            theme: newPreferences.theme,
             fontStyle: newPreferences.fontStyle,
             fontSize: LayoutMetrics.nearestFontSizeOption(to: newPreferences.fontSize),
-            cornerRadius: clampedCornerRadius
+            cornerRadius: clampedCornerRadius,
+            blurEnabled: blurEnabled,
+            windowOpacity: min(max(newPreferences.windowOpacity, LayoutMetrics.minWindowOpacity), 1.0)
         )
     }
 
