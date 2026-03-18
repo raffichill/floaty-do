@@ -724,6 +724,7 @@ final class TodoRowView: NSView {
         static let pressedScale: CGFloat = 0.99
         static let pressAnimationDuration: CFTimeInterval = 0.08
         static let showsDebugGeometry = false
+        static let textVerticalBreathingRoom: CGFloat = 4
     }
 
     private let backgroundView = NSView()
@@ -769,6 +770,7 @@ final class TodoRowView: NSView {
 
         backgroundView.wantsLayer = true
         backgroundView.layer?.cornerRadius = CGFloat(preferences.cornerRadius)
+        backgroundView.layer?.masksToBounds = true
         addSubview(backgroundView)
 
         circleView.wantsLayer = true
@@ -779,6 +781,7 @@ final class TodoRowView: NSView {
         textLabel.wantsLayer = true
         addSubview(textLabel)
 
+        editingTextView.wantsLayer = true
         addSubview(editingTextView)
         addSubview(editorHostView)
         addSubview(cursorShieldView)
@@ -802,7 +805,7 @@ final class TodoRowView: NSView {
 
         let textFrame = contentTextRect(for: checkboxRect)
         textLabel.frame = textFrame
-        editingTextView.frame = textFrame
+        editingTextView.frame = textFrame.insetBy(dx: 0, dy: -AppearanceMetrics.textVerticalBreathingRoom / 2)
         editorHostView.frame = textFrame
         cursorShieldView.frame = textFrame
         if AppearanceMetrics.showsDebugGeometry {
@@ -811,6 +814,8 @@ final class TodoRowView: NSView {
             debugOverlayView.backgroundFrame = backgroundView.frame
             debugOverlayView.checkboxFrame = checkboxRect
             debugOverlayView.textFrame = textFrame
+            debugOverlayView.labelContentFrame = convertedLabelContentFrame()
+            debugOverlayView.editorContentFrame = editingTextView.convert(editingTextView.debugContentRect, to: self)
             debugOverlayView.centerlineY = checkboxRect.midY
             debugOverlayView.needsDisplay = true
         }
@@ -849,6 +854,9 @@ final class TodoRowView: NSView {
 
     func setEditing(_ editing: Bool) {
         isEditingRow = editing && model.isEditable
+        if !isEditingRow {
+            editingTextView.restoreDisplayState(text: model.text, showsStrikethrough: model.showsStrikethrough)
+        }
     }
 
     func setPressed(_ pressed: Bool) {
@@ -871,9 +879,7 @@ final class TodoRowView: NSView {
     }
 
     func clearEditingPresentation() {
-        editingTextView.selectionRange = NSRange(location: 0, length: 0)
-        editingTextView.showsCaret = false
-        editingTextView.needsDisplay = true
+        editingTextView.restoreDisplayState(text: model.text, showsStrikethrough: model.showsStrikethrough)
     }
 
     func hitZone(at point: NSPoint) -> TodoListView.HitZone {
@@ -892,13 +898,14 @@ final class TodoRowView: NSView {
         setEditing(false)
         layoutSubtreeIfNeeded()
 
-        if !textLabel.stringValue.isEmpty {
-            let textWidth = (textLabel.stringValue as NSString).size(withAttributes: [.font: textLabel.font!]).width
+        let textContentFrame = editingTextView.convert(editingTextView.debugContentRect, to: self)
+        if !model.text.isEmpty {
+            let textWidth = min((model.text as NSString).size(withAttributes: [.font: preferences.appFont()]).width, textContentFrame.width)
             let strikeLayer = CAShapeLayer()
-            let midY = textLabel.frame.midY
+            let midY = textContentFrame.midY
             let path = CGMutablePath()
-            path.move(to: CGPoint(x: textLabel.frame.minX, y: midY))
-            path.addLine(to: CGPoint(x: textLabel.frame.minX + textWidth, y: midY))
+            path.move(to: CGPoint(x: textContentFrame.minX, y: midY))
+            path.addLine(to: CGPoint(x: textContentFrame.minX + textWidth, y: midY))
             strikeLayer.path = path
             strikeLayer.strokeColor = preferences.strikethroughColor.cgColor
             strikeLayer.lineWidth = 1.0
@@ -921,7 +928,7 @@ final class TodoRowView: NSView {
             fadeText.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
             fadeText.fillMode = .forwards
             fadeText.isRemovedOnCompletion = false
-            textLabel.layer?.add(fadeText, forKey: "fadeText")
+            editingTextView.layer?.add(fadeText, forKey: "fadeText")
         }
 
         func centerAnchor() {
@@ -954,7 +961,7 @@ final class TodoRowView: NSView {
             let config = NSImage.SymbolConfiguration(pointSize: 14, weight: .regular)
             let checkImage = NSImage(systemSymbolName: "checkmark.circle.fill", accessibilityDescription: nil)!
             self.circleView.image = checkImage.withSymbolConfiguration(config)
-            self.circleView.contentTintColor = self.preferences.primaryTextColor
+            self.circleView.contentTintColor = self.preferences.resolvedContentColor()
 
             circleLayer.removeAnimation(forKey: "shrinkOut")
             centerAnchor()
@@ -996,8 +1003,6 @@ final class TodoRowView: NSView {
 
     private func updateAppearance() {
         let activeFillColor = preferences.activeFillColor
-        let secondarySelectionFillColor = preferences.secondarySelectionFillColor
-        let baseTextColor = preferences.primaryTextColor
         let isAnySelected = (isFocusedRow || isRangeSelected) && model.isSelectable
         let circleAlpha = isAnySelected
             ? max(CGFloat(model.circleOpacity), model.isDone ? CGFloat(model.textOpacity) : 0.86)
@@ -1015,12 +1020,8 @@ final class TodoRowView: NSView {
             backgroundColor = NSColor.clear.cgColor
             borderColor = preferences.subtleStrokeColor.cgColor
             borderWidth = 1.0
-        } else if model.isSelectable && isFocusedRow {
+        } else if model.isSelectable && (isFocusedRow || isRangeSelected) {
             backgroundColor = activeFillColor.cgColor
-            borderColor = NSColor.clear.cgColor
-            borderWidth = 0.0
-        } else if model.isSelectable && isRangeSelected {
-            backgroundColor = secondarySelectionFillColor.cgColor
             borderColor = NSColor.clear.cgColor
             borderWidth = 0.0
         } else {
@@ -1035,17 +1036,21 @@ final class TodoRowView: NSView {
             borderWidth: borderWidth,
             animate: animateSelectionFill
         )
-        circleView.contentTintColor = baseTextColor.withAlphaComponent(circleAlpha)
-        textLabel.attributedStringValue = attributedText(alpha: textAlpha)
-        editingTextView.textColor = baseTextColor.withAlphaComponent(textAlpha)
+        circleView.contentTintColor = preferences.resolvedContentColor(multiplier: circleAlpha)
+        textLabel.attributedStringValue = attributedText(alphaMultiplier: textAlpha)
+        editingTextView.text = model.text
+        editingTextView.textColor = preferences.resolvedContentColor(multiplier: textAlpha)
+        editingTextView.showsStrikethrough = model.showsStrikethrough
         editingTextView.selectionColor = preferences.selectionOverlayColor
         editingTextView.caretColor = preferences.caretColor
+        editingTextView.visualVerticalOffset = CGFloat(preferences.displayTextVerticalOffset)
         let showsEditorHost = isEditingRow && model.isEditable
-        if showsEditorHost {
-            editingTextView.text = model.text
+        if !showsEditorHost {
+            editingTextView.selectionRange = NSRange(location: 0, length: 0)
+            editingTextView.showsCaret = false
         }
-        textLabel.isHidden = showsEditorHost
-        editingTextView.isHidden = !showsEditorHost
+        textLabel.isHidden = true
+        editingTextView.isHidden = false
         editorHostView.isHidden = true
         cursorShieldView.isHidden = true
 
@@ -1056,7 +1061,7 @@ final class TodoRowView: NSView {
             circleView.alphaValue = 0.0
         } else {
             backgroundView.alphaValue = 1.0
-            textLabel.alphaValue = 1.0
+            textLabel.alphaValue = 0.0
             editingTextView.alphaValue = 1.0
             circleView.alphaValue = 1.0
         }
@@ -1113,9 +1118,9 @@ final class TodoRowView: NSView {
         CATransaction.commit()
     }
 
-    private func attributedText(alpha: CGFloat) -> NSAttributedString {
+    private func attributedText(alphaMultiplier: CGFloat) -> NSAttributedString {
         let attributes: [NSAttributedString.Key: Any] = [
-            .foregroundColor: preferences.primaryTextColor.withAlphaComponent(alpha),
+            .foregroundColor: preferences.resolvedContentColor(multiplier: alphaMultiplier),
             .font: preferences.appFont(),
             .strikethroughStyle: model.showsStrikethrough ? NSUnderlineStyle.single.rawValue : 0,
         ]
@@ -1137,6 +1142,11 @@ final class TodoRowView: NSView {
         let scale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2.0
         guard scale > 0 else { return value }
         return round(value * scale * 2.0) / (scale * 2.0)
+    }
+
+    private func convertedLabelContentFrame() -> NSRect {
+        guard let cell = textLabel.cell as? NSTextFieldCell else { return textLabel.frame }
+        return textLabel.convert(cell.drawingRect(forBounds: textLabel.bounds), to: self)
     }
 
     private func updateScaleTransform() {
@@ -1184,6 +1194,8 @@ final class DebugGeometryOverlayView: NSView {
     var backgroundFrame: NSRect = .zero
     var checkboxFrame: NSRect = .zero
     var textFrame: NSRect = .zero
+    var labelContentFrame: NSRect = .zero
+    var editorContentFrame: NSRect = .zero
     var centerlineY: CGFloat = 0
 
     override init(frame frameRect: NSRect) {
@@ -1207,6 +1219,8 @@ final class DebugGeometryOverlayView: NSView {
         draw(rect: backgroundFrame, color: NSColor.systemGreen.withAlphaComponent(0.8))
         draw(rect: checkboxFrame, color: NSColor.systemYellow.withAlphaComponent(0.8))
         draw(rect: textFrame, color: NSColor.systemCyan.withAlphaComponent(0.9))
+        draw(rect: labelContentFrame, color: NSColor.systemBlue.withAlphaComponent(0.95))
+        draw(rect: editorContentFrame, color: NSColor.systemPurple.withAlphaComponent(0.95))
 
         let centerlinePath = NSBezierPath()
         centerlinePath.move(to: NSPoint(x: rowFrame.minX, y: centerlineY))
@@ -1239,8 +1253,6 @@ final class PassiveEditorHostView: NSView {
 }
 
 final class EditingTextDisplayView: NSView {
-    private let alignmentCell = NSTextFieldCell(textCell: "")
-
     var text: String = "" {
         didSet {
             updateHorizontalOffset()
@@ -1261,7 +1273,6 @@ final class EditingTextDisplayView: NSView {
 
     var font: NSFont = .systemFont(ofSize: 13) {
         didSet {
-            alignmentCell.font = font
             updateHorizontalOffset()
             needsDisplay = true
         }
@@ -1269,9 +1280,12 @@ final class EditingTextDisplayView: NSView {
 
     var textColor: NSColor = .white {
         didSet {
-            alignmentCell.textColor = textColor
             needsDisplay = true
         }
+    }
+
+    var showsStrikethrough = false {
+        didSet { needsDisplay = true }
     }
 
     var selectionColor: NSColor = NSColor.white.withAlphaComponent(0.18) {
@@ -1282,17 +1296,25 @@ final class EditingTextDisplayView: NSView {
         didSet { needsDisplay = true }
     }
 
+    var visualVerticalOffset: CGFloat = 0 {
+        didSet { needsDisplay = true }
+    }
+
     private var horizontalOffset: CGFloat = 0
+
+    func restoreDisplayState(text: String, showsStrikethrough: Bool) {
+        self.text = text
+        self.showsStrikethrough = showsStrikethrough
+        horizontalOffset = 0
+        selectionRange = NSRange(location: 0, length: 0)
+        showsCaret = false
+        needsDisplay = true
+    }
 
     override var mouseDownCanMoveWindow: Bool { false }
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
-        alignmentCell.font = font
-        alignmentCell.textColor = textColor
-        alignmentCell.lineBreakMode = .byTruncatingTail
-        alignmentCell.isScrollable = true
-        alignmentCell.usesSingleLineMode = true
     }
 
     required init?(coder: NSCoder) {
@@ -1327,7 +1349,7 @@ final class EditingTextDisplayView: NSView {
         let clampedLocation = max(0, min(selectionRange.location, nsText.length))
         let clampedLength = max(0, min(selectionRange.length, nsText.length - clampedLocation))
         let selectionEnd = clampedLocation + clampedLength
-        let contentRect = alignedContentRect()
+        let contentRect = visualContentRect
         let startX = contentRect.minX + width(toUTF16Index: clampedLocation) - horizontalOffset
         let endX = contentRect.minX + width(toUTF16Index: selectionEnd) - horizontalOffset
 
@@ -1344,14 +1366,9 @@ final class EditingTextDisplayView: NSView {
             }
         }
 
-        let drawRect = NSRect(
-            x: floor(contentRect.minX - horizontalOffset),
-            y: floor(contentRect.minY),
-            width: max(contentRect.width + horizontalOffset, 1),
-            height: contentRect.height
-        )
-        alignmentCell.title = text
-        alignmentCell.drawInterior(withFrame: drawRect, in: self)
+        let drawRect = textDrawingRect(for: contentRect)
+        NSAttributedString(string: text, attributes: textAttributes())
+            .draw(with: drawRect, options: [.usesLineFragmentOrigin, .usesFontLeading, .truncatesLastVisibleLine])
 
         if showsCaret {
             let caretX = contentRect.minX + width(toUTF16Index: clampedLocation) - horizontalOffset
@@ -1363,6 +1380,16 @@ final class EditingTextDisplayView: NSView {
         }
 
         NSGraphicsContext.current?.restoreGraphicsState()
+    }
+
+    private func textDrawingRect(for contentRect: NSRect) -> NSRect {
+        let descenderPadding = max(0, bounds.maxY - contentRect.maxY)
+        return NSRect(
+            x: contentRect.minX - horizontalOffset,
+            y: contentRect.minY,
+            width: max(contentRect.width + horizontalOffset, 1),
+            height: contentRect.height + descenderPadding
+        )
     }
 
     private func updateHorizontalOffset() {
@@ -1392,9 +1419,35 @@ final class EditingTextDisplayView: NSView {
         return ceil(width)
     }
 
+    var debugContentRect: NSRect {
+        alignedContentRect()
+    }
+
+    var visualContentRect: NSRect {
+        alignedContentRect().offsetBy(dx: 0, dy: visualVerticalOffset)
+    }
+
+    private func textAttributes() -> [NSAttributedString.Key: Any] {
+        let paragraphStyle = NSMutableParagraphStyle()
+        paragraphStyle.lineBreakMode = .byTruncatingTail
+        return [
+            .font: font,
+            .foregroundColor: textColor,
+            .paragraphStyle: paragraphStyle,
+            .strikethroughStyle: showsStrikethrough ? NSUnderlineStyle.single.rawValue : 0,
+        ]
+    }
+
     private func alignedContentRect() -> NSRect {
-        alignmentCell.title = text
-        return alignmentCell.drawingRect(forBounds: bounds)
+        let lineHeight = alignToHalfBackingPixel(font.ascender - font.descender + font.leading)
+        let y = alignToHalfBackingPixel((bounds.height - lineHeight) / 2)
+        return NSRect(x: 0, y: y, width: bounds.width, height: lineHeight)
+    }
+
+    private func alignToHalfBackingPixel(_ value: CGFloat) -> CGFloat {
+        let scale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2.0
+        guard scale > 0 else { return value }
+        return round(value * scale * 2.0) / (scale * 2.0)
     }
 }
 

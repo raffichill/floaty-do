@@ -51,6 +51,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
     private var settingsButton: HoverTrackingButton!
     private var settingsWindowController: SettingsWindowController?
     private var isAnimating = false
+    private weak var surfaceView: PanelSurfaceView?
     private weak var containerView: NSView?
     private var tabBarHeightConstraint: NSLayoutConstraint?
     private var listTopConstraint: NSLayoutConstraint?
@@ -58,10 +59,12 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
     private let historyManager = UndoManager()
     private var isApplyingSettingsPreferenceChange = false
     private var nativeFullScreenState = false
+    private var appliedPreferences: AppPreferences
 
     public init(store: TodoStore) {
         self.store = store
         self.taskDraft = TaskDraftState(insertionIndex: store.items.count, text: "")
+        self.appliedPreferences = store.preferences
         super.init(nibName: nil, bundle: nil)
         historyManager.levelsOfUndo = 100
     }
@@ -110,10 +113,10 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
     }
 
     public override func loadView() {
-        let container = NSView(frame: NSRect(x: 0, y: 0, width: panelWidth, height: 240))
-        container.wantsLayer = true
-        container.layer?.backgroundColor = store.preferences.panelBackgroundColor.cgColor
-        container.autoresizingMask = [.width, .height]
+        let panelSurface = PanelSurfaceView(frame: NSRect(x: 0, y: 0, width: panelWidth, height: 240))
+        panelSurface.apply(preferences: store.preferences)
+        let container = panelSurface.contentView
+        self.surfaceView = panelSurface
         containerView = container
 
         tasksTabButton = makeTabButton(symbolName: "checklist.unchecked", action: #selector(switchToTasks))
@@ -157,7 +160,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
             listView.bottomAnchor.constraint(equalTo: container.bottomAnchor),
         ])
 
-        self.view = container
+        self.view = panelSurface
         updateTabAppearance()
     }
 
@@ -358,6 +361,9 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
     }
 
     private func preferencesDidChange(_ preferences: AppPreferences) {
+        let previousPreferences = appliedPreferences
+        appliedPreferences = preferences
+
         sharedEditor.font = preferences.appFont()
         if !isApplyingSettingsPreferenceChange {
             settingsWindowController?.updatePreferences(preferences)
@@ -365,10 +371,12 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         if let panel = view.window as? FloatingPanel {
             panel.applyTheme(preferences: preferences)
         }
-        containerView?.layer?.backgroundColor = preferences.panelBackgroundColor.cgColor
+        surfaceView?.apply(preferences: preferences)
         updateHeaderLayoutInsets()
         updateTabAppearance()
-        refreshRows(preferences: preferences, animateResize: false)
+        if preferencesRequireRowRefresh(old: previousPreferences, new: preferences) {
+            refreshRows(preferences: preferences, animateResize: false)
+        }
         view.window?.layoutIfNeeded()
         view.window?.displayIfNeeded()
         settingsWindowController?.window?.displayIfNeeded()
@@ -384,7 +392,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
             return defaultHeaderHeight
         }
 
-        let safeAreaTop = containerView?.safeAreaInsets.top ?? view.safeAreaInsets.top
+        let safeAreaTop = surfaceView?.safeAreaInsets.top ?? view.safeAreaInsets.top
         let layoutChromeHeight: CGFloat
         if let window {
             layoutChromeHeight = max(0, window.frame.height - window.contentLayoutRect.height)
@@ -404,6 +412,15 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         let headerHeight = effectiveHeaderHeight(for: view.window)
         tabBarHeightConstraint?.constant = headerHeight
         listTopConstraint?.constant = headerHeight + CGFloat(LayoutMetrics.contentTopPadding)
+    }
+
+    private func preferencesRequireRowRefresh(old: AppPreferences, new: AppPreferences) -> Bool {
+        old.rowHeight != new.rowHeight ||
+        old.panelWidth != new.panelWidth ||
+        old.theme != new.theme ||
+        old.fontStyle != new.fontStyle ||
+        old.fontSize != new.fontSize ||
+        old.cornerRadius != new.cornerRadius
     }
 
     private func makeTabButton(symbolName: String, action: Selector) -> NSButton {
@@ -489,7 +506,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         controller.updatePreferences(store.preferences)
         settingsWindowController = controller
         updateTabAppearance()
-        controller.present()
+        controller.present(attachedTo: view.window)
     }
 
     func resetWindowSize() {
@@ -2441,6 +2458,7 @@ fileprivate final class TodoRowView: NSView {
     private enum AppearanceMetrics {
         static let pressedScale: CGFloat = 0.99
         static let pressAnimationDuration: CFTimeInterval = 0.08
+        static let showsDebugGeometry = false
     }
 
     private let backgroundView = NSView()
@@ -2449,6 +2467,7 @@ fileprivate final class TodoRowView: NSView {
     private let editingTextView = EditingTextDisplayView()
     let editorHostView = PassiveEditorHostView()
     private let cursorShieldView = CursorShieldView()
+    private let debugOverlayView = DebugGeometryOverlayView()
 
     private var preferences: AppPreferences
     private(set) var model: TodoRowModel
@@ -2485,6 +2504,7 @@ fileprivate final class TodoRowView: NSView {
 
         backgroundView.wantsLayer = true
         backgroundView.layer?.cornerRadius = CGFloat(preferences.cornerRadius)
+        backgroundView.layer?.masksToBounds = true
         addSubview(backgroundView)
 
         circleView.wantsLayer = true
@@ -2493,11 +2513,20 @@ fileprivate final class TodoRowView: NSView {
         textLabel.font = preferences.appFont()
         textLabel.lineBreakMode = .byTruncatingTail
         textLabel.wantsLayer = true
+        if let cell = textLabel.cell as? NSTextFieldCell {
+            cell.isScrollable = false
+            cell.usesSingleLineMode = true
+            cell.wraps = false
+        }
         addSubview(textLabel)
 
+        editingTextView.wantsLayer = true
         addSubview(editingTextView)
         addSubview(editorHostView)
         addSubview(cursorShieldView)
+        if AppearanceMetrics.showsDebugGeometry {
+            addSubview(debugOverlayView)
+        }
         configure(model: model, preferences: preferences)
     }
 
@@ -2513,16 +2542,22 @@ fileprivate final class TodoRowView: NSView {
         let circleY = checkboxRect.minY + ((checkboxRect.height - LayoutMetrics.circleSize) / 2)
         circleView.frame = NSRect(x: circleX, y: circleY, width: LayoutMetrics.circleSize, height: LayoutMetrics.circleSize)
 
-        let textX = checkboxRect.maxX + LayoutMetrics.textInset
-        let textWidth = max(0, bounds.width - textX - LayoutMetrics.rowHorizontalInset)
-        let textHeight = max(textLabel.intrinsicContentSize.height, (fontLineHeight(for: textLabel.font) + 2))
-        let textY = floor((bounds.height - textHeight) / 2)
-        let textFrame = NSRect(x: textX, y: textY, width: textWidth, height: textHeight)
-        let activeTextFrame = textFrame.offsetBy(dx: 0, dy: 2)
+        let textFrame = contentTextRect(for: checkboxRect)
         textLabel.frame = textFrame
-        editingTextView.frame = activeTextFrame
+        editingTextView.frame = textFrame
         editorHostView.frame = textFrame
         cursorShieldView.frame = textFrame
+        if AppearanceMetrics.showsDebugGeometry {
+            debugOverlayView.frame = bounds
+            debugOverlayView.rowFrame = bounds
+            debugOverlayView.backgroundFrame = backgroundView.frame
+            debugOverlayView.checkboxFrame = checkboxRect
+            debugOverlayView.textFrame = textFrame
+            debugOverlayView.labelContentFrame = convertedLabelContentFrame()
+            debugOverlayView.editorContentFrame = editingTextView.convert(editingTextView.debugContentRect, to: self)
+            debugOverlayView.centerlineY = checkboxRect.midY
+            debugOverlayView.needsDisplay = true
+        }
     }
 
     override func resetCursorRects() {
@@ -2558,6 +2593,9 @@ fileprivate final class TodoRowView: NSView {
 
     func setEditing(_ editing: Bool) {
         isEditingRow = editing && model.isEditable
+        if !isEditingRow {
+            editingTextView.restoreDisplayState(text: model.text, showsStrikethrough: model.showsStrikethrough)
+        }
     }
 
     func setPressed(_ pressed: Bool) {
@@ -2580,9 +2618,7 @@ fileprivate final class TodoRowView: NSView {
     }
 
     func clearEditingPresentation() {
-        editingTextView.selectionRange = NSRange(location: 0, length: 0)
-        editingTextView.showsCaret = false
-        editingTextView.needsDisplay = true
+        editingTextView.restoreDisplayState(text: model.text, showsStrikethrough: model.showsStrikethrough)
     }
 
     func hitZone(at point: NSPoint) -> TodoListView.HitZone {
@@ -2601,13 +2637,14 @@ fileprivate final class TodoRowView: NSView {
         setEditing(false)
         layoutSubtreeIfNeeded()
 
-        if !textLabel.stringValue.isEmpty {
-            let textWidth = (textLabel.stringValue as NSString).size(withAttributes: [.font: textLabel.font!]).width
+        let textContentFrame = editingTextView.convert(editingTextView.debugContentRect, to: self)
+        if !model.text.isEmpty {
+            let textWidth = min((model.text as NSString).size(withAttributes: [.font: preferences.appFont()]).width, textContentFrame.width)
             let strikeLayer = CAShapeLayer()
-            let midY = textLabel.frame.midY
+            let midY = textContentFrame.midY
             let path = CGMutablePath()
-            path.move(to: CGPoint(x: textLabel.frame.minX, y: midY))
-            path.addLine(to: CGPoint(x: textLabel.frame.minX + textWidth, y: midY))
+            path.move(to: CGPoint(x: textContentFrame.minX, y: midY))
+            path.addLine(to: CGPoint(x: textContentFrame.minX + textWidth, y: midY))
             strikeLayer.path = path
             strikeLayer.strokeColor = preferences.strikethroughColor.cgColor
             strikeLayer.lineWidth = 1.0
@@ -2630,7 +2667,7 @@ fileprivate final class TodoRowView: NSView {
             fadeText.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
             fadeText.fillMode = .forwards
             fadeText.isRemovedOnCompletion = false
-            textLabel.layer?.add(fadeText, forKey: "fadeText")
+            editingTextView.layer?.add(fadeText, forKey: "fadeText")
         }
 
         func centerAnchor() {
@@ -2663,7 +2700,7 @@ fileprivate final class TodoRowView: NSView {
             let config = NSImage.SymbolConfiguration(pointSize: 14, weight: .regular)
             let checkImage = NSImage(systemSymbolName: "checkmark.circle.fill", accessibilityDescription: nil)!
             self.circleView.image = checkImage.withSymbolConfiguration(config)
-            self.circleView.contentTintColor = self.preferences.primaryTextColor
+            self.circleView.contentTintColor = self.preferences.resolvedContentColor()
 
             circleLayer.removeAnimation(forKey: "shrinkOut")
             centerAnchor()
@@ -2693,10 +2730,18 @@ fileprivate final class TodoRowView: NSView {
         )
     }
 
+    private func contentTextRect(for checkboxRect: NSRect) -> NSRect {
+        let textX = checkboxRect.maxX + LayoutMetrics.textInset
+        let textWidth = max(0, bounds.width - textX - LayoutMetrics.rowHorizontalInset)
+        let font = textLabel.font ?? preferences.appFont()
+        let textHeight = fontLineHeight(for: font)
+        let centeredY = checkboxRect.midY - (textHeight / 2) + CGFloat(preferences.manualTextVerticalOffset)
+        let textY = alignToHalfBackingPixel(centeredY)
+        return NSRect(x: textX, y: textY, width: textWidth, height: textHeight)
+    }
+
     private func updateAppearance() {
         let activeFillColor = preferences.activeFillColor
-        let secondarySelectionFillColor = preferences.secondarySelectionFillColor
-        let baseTextColor = preferences.primaryTextColor
         let isAnySelected = (isFocusedRow || isRangeSelected) && model.isSelectable
         let circleAlpha = isAnySelected
             ? max(CGFloat(model.circleOpacity), model.isDone ? CGFloat(model.textOpacity) : 0.86)
@@ -2714,12 +2759,8 @@ fileprivate final class TodoRowView: NSView {
             backgroundColor = NSColor.clear.cgColor
             borderColor = preferences.subtleStrokeColor.cgColor
             borderWidth = 1.0
-        } else if model.isSelectable && isFocusedRow {
+        } else if model.isSelectable && (isFocusedRow || isRangeSelected) {
             backgroundColor = activeFillColor.cgColor
-            borderColor = NSColor.clear.cgColor
-            borderWidth = 0.0
-        } else if model.isSelectable && isRangeSelected {
-            backgroundColor = secondarySelectionFillColor.cgColor
             borderColor = NSColor.clear.cgColor
             borderWidth = 0.0
         } else {
@@ -2734,17 +2775,21 @@ fileprivate final class TodoRowView: NSView {
             borderWidth: borderWidth,
             animate: animateSelectionFill
         )
-        circleView.contentTintColor = baseTextColor.withAlphaComponent(circleAlpha)
-        textLabel.attributedStringValue = attributedText(alpha: textAlpha)
-        editingTextView.textColor = baseTextColor.withAlphaComponent(textAlpha)
+        circleView.contentTintColor = preferences.resolvedContentColor(multiplier: circleAlpha)
+        textLabel.attributedStringValue = attributedText(alphaMultiplier: textAlpha)
+        editingTextView.text = model.text
+        editingTextView.textColor = preferences.resolvedContentColor(multiplier: textAlpha)
+        editingTextView.showsStrikethrough = model.showsStrikethrough
         editingTextView.selectionColor = preferences.selectionOverlayColor
         editingTextView.caretColor = preferences.caretColor
+        editingTextView.visualVerticalOffset = CGFloat(preferences.displayTextVerticalOffset)
         let showsEditorHost = isEditingRow && model.isEditable
-        if showsEditorHost {
-            editingTextView.text = model.text
+        if !showsEditorHost {
+            editingTextView.selectionRange = NSRange(location: 0, length: 0)
+            editingTextView.showsCaret = false
         }
-        textLabel.isHidden = showsEditorHost
-        editingTextView.isHidden = !showsEditorHost
+        textLabel.isHidden = true
+        editingTextView.isHidden = false
         editorHostView.isHidden = true
         cursorShieldView.isHidden = true
 
@@ -2755,7 +2800,7 @@ fileprivate final class TodoRowView: NSView {
             circleView.alphaValue = 0.0
         } else {
             backgroundView.alphaValue = 1.0
-            textLabel.alphaValue = 1.0
+            textLabel.alphaValue = 0.0
             editingTextView.alphaValue = 1.0
             circleView.alphaValue = 1.0
         }
@@ -2812,9 +2857,9 @@ fileprivate final class TodoRowView: NSView {
         CATransaction.commit()
     }
 
-    private func attributedText(alpha: CGFloat) -> NSAttributedString {
+    private func attributedText(alphaMultiplier: CGFloat) -> NSAttributedString {
         let attributes: [NSAttributedString.Key: Any] = [
-            .foregroundColor: preferences.primaryTextColor.withAlphaComponent(alpha),
+            .foregroundColor: preferences.resolvedContentColor(multiplier: alphaMultiplier),
             .font: preferences.appFont(),
             .strikethroughStyle: model.showsStrikethrough ? NSUnderlineStyle.single.rawValue : 0,
         ]
@@ -2823,7 +2868,18 @@ fileprivate final class TodoRowView: NSView {
 
     private func fontLineHeight(for font: NSFont?) -> CGFloat {
         guard let font else { return 16 }
-        return ceil(font.ascender - font.descender + font.leading)
+        return alignToHalfBackingPixel(font.ascender - font.descender + font.leading)
+    }
+
+    private func alignToHalfBackingPixel(_ value: CGFloat) -> CGFloat {
+        let scale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2.0
+        guard scale > 0 else { return value }
+        return round(value * scale * 2.0) / (scale * 2.0)
+    }
+
+    private func convertedLabelContentFrame() -> NSRect {
+        guard let cell = textLabel.cell as? NSTextFieldCell else { return textLabel.frame }
+        return textLabel.convert(cell.drawingRect(forBounds: textLabel.bounds), to: self)
     }
 
     private func updateScaleTransform() {
@@ -2875,8 +2931,6 @@ private final class PassiveEditorHostView: NSView {
 }
 
 private final class EditingTextDisplayView: NSView {
-    private let alignmentCell = NSTextFieldCell(textCell: "")
-
     var text: String = "" {
         didSet {
             updateHorizontalOffset()
@@ -2897,7 +2951,6 @@ private final class EditingTextDisplayView: NSView {
 
     var font: NSFont = .systemFont(ofSize: 13) {
         didSet {
-            alignmentCell.font = font
             updateHorizontalOffset()
             needsDisplay = true
         }
@@ -2905,9 +2958,12 @@ private final class EditingTextDisplayView: NSView {
 
     var textColor: NSColor = .white {
         didSet {
-            alignmentCell.textColor = textColor
             needsDisplay = true
         }
+    }
+
+    var showsStrikethrough = false {
+        didSet { needsDisplay = true }
     }
 
     var selectionColor: NSColor = NSColor.white.withAlphaComponent(0.18) {
@@ -2918,17 +2974,25 @@ private final class EditingTextDisplayView: NSView {
         didSet { needsDisplay = true }
     }
 
+    var visualVerticalOffset: CGFloat = 0 {
+        didSet { needsDisplay = true }
+    }
+
     private var horizontalOffset: CGFloat = 0
+
+    func restoreDisplayState(text: String, showsStrikethrough: Bool) {
+        self.text = text
+        self.showsStrikethrough = showsStrikethrough
+        horizontalOffset = 0
+        selectionRange = NSRange(location: 0, length: 0)
+        showsCaret = false
+        needsDisplay = true
+    }
 
     override var mouseDownCanMoveWindow: Bool { false }
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
-        alignmentCell.font = font
-        alignmentCell.textColor = textColor
-        alignmentCell.lineBreakMode = .byTruncatingTail
-        alignmentCell.isScrollable = true
-        alignmentCell.usesSingleLineMode = true
     }
 
     required init?(coder: NSCoder) {
@@ -2963,7 +3027,7 @@ private final class EditingTextDisplayView: NSView {
         let clampedLocation = max(0, min(selectionRange.location, nsText.length))
         let clampedLength = max(0, min(selectionRange.length, nsText.length - clampedLocation))
         let selectionEnd = clampedLocation + clampedLength
-        let contentRect = alignedContentRect()
+        let contentRect = visualContentRect
         let startX = contentRect.minX + width(toUTF16Index: clampedLocation) - horizontalOffset
         let endX = contentRect.minX + width(toUTF16Index: selectionEnd) - horizontalOffset
 
@@ -2981,13 +3045,13 @@ private final class EditingTextDisplayView: NSView {
         }
 
         let drawRect = NSRect(
-            x: floor(contentRect.minX - horizontalOffset),
-            y: floor(contentRect.minY),
+            x: contentRect.minX - horizontalOffset,
+            y: contentRect.minY,
             width: max(contentRect.width + horizontalOffset, 1),
             height: contentRect.height
         )
-        alignmentCell.title = text
-        alignmentCell.drawInterior(withFrame: drawRect, in: self)
+        NSAttributedString(string: text, attributes: textAttributes())
+            .draw(with: drawRect, options: [.usesLineFragmentOrigin, .usesFontLeading, .truncatesLastVisibleLine])
 
         if showsCaret {
             let caretX = contentRect.minX + width(toUTF16Index: clampedLocation) - horizontalOffset
@@ -3028,13 +3092,35 @@ private final class EditingTextDisplayView: NSView {
         return ceil(width)
     }
 
-    private func fontLineHeight() -> CGFloat {
-        ceil(font.ascender - font.descender + font.leading)
+    var debugContentRect: NSRect {
+        alignedContentRect()
+    }
+
+    var visualContentRect: NSRect {
+        alignedContentRect().offsetBy(dx: 0, dy: visualVerticalOffset)
+    }
+
+    private func textAttributes() -> [NSAttributedString.Key: Any] {
+        let paragraphStyle = NSMutableParagraphStyle()
+        paragraphStyle.lineBreakMode = .byTruncatingTail
+        return [
+            .font: font,
+            .foregroundColor: textColor,
+            .paragraphStyle: paragraphStyle,
+            .strikethroughStyle: showsStrikethrough ? NSUnderlineStyle.single.rawValue : 0,
+        ]
     }
 
     private func alignedContentRect() -> NSRect {
-        alignmentCell.title = text
-        return alignmentCell.drawingRect(forBounds: bounds)
+        let lineHeight = alignToHalfBackingPixel(font.ascender - font.descender + font.leading)
+        let y = alignToHalfBackingPixel((bounds.height - lineHeight) / 2)
+        return NSRect(x: 0, y: y, width: bounds.width, height: lineHeight)
+    }
+
+    private func alignToHalfBackingPixel(_ value: CGFloat) -> CGFloat {
+        let scale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2.0
+        guard scale > 0 else { return value }
+        return round(value * scale * 2.0) / (scale * 2.0)
     }
 }
 

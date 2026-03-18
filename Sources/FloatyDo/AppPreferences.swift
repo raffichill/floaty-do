@@ -85,97 +85,18 @@ public enum FontStylePreset: String, Codable, CaseIterable {
     }
 }
 
-public enum BuiltInTheme: String, Codable, CaseIterable {
-    case theme1
-    case theme2
-    case theme3
-    case theme4
-    case theme5
-
-    public var color: ThemeColor {
-        switch self {
-        case .theme1:
-            return ThemeColor(hex: "#14141F")
-        case .theme2:
-            return ThemeColor(hex: "#1B2130")
-        case .theme3:
-            return ThemeColor(hex: "#1F2724")
-        case .theme4:
-            return ThemeColor(hex: "#2A1E28")
-        case .theme5:
-            return ThemeColor(hex: "#E6E0D6")
-        }
-    }
-
-    public static func nearest(to color: ThemeColor) -> BuiltInTheme {
-        let resolved = color.clamped()
-        return allCases.min(by: { lhs, rhs in
-            colorDistance(between: resolved, and: lhs.color) < colorDistance(between: resolved, and: rhs.color)
-        }) ?? .theme1
-    }
-
-    private static func colorDistance(between lhs: ThemeColor, and rhs: ThemeColor) -> Double {
-        let dr = lhs.red - rhs.red
-        let dg = lhs.green - rhs.green
-        let db = lhs.blue - rhs.blue
-        return (dr * dr) + (dg * dg) + (db * db)
-    }
-}
-
-public struct ThemeColor: Codable, Equatable {
-    public var red: Double
-    public var green: Double
-    public var blue: Double
-    public var alpha: Double
-
-    public static let `default` = ThemeColor(
-        red: 0.07843137,
-        green: 0.07843137,
-        blue: 0.12156863,
-        alpha: 1.0
-    )
-
-    public init(red: Double, green: Double, blue: Double, alpha: Double) {
-        self.red = red
-        self.green = green
-        self.blue = blue
-        self.alpha = alpha
-    }
-
-    func clamped() -> ThemeColor {
-        ThemeColor(
-            red: min(max(red, 0), 1),
-            green: min(max(green, 0), 1),
-            blue: min(max(blue, 0), 1),
-            alpha: min(max(alpha, 0), 1)
-        )
-    }
-}
-
-extension ThemeColor {
-    init(hex: String) {
-        let cleaned = hex.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "#", with: "")
-        let scanner = Scanner(string: cleaned)
-        var value: UInt64 = 0
-        scanner.scanHexInt64(&value)
-
-        let red = Double((value >> 16) & 0xFF) / 255.0
-        let green = Double((value >> 8) & 0xFF) / 255.0
-        let blue = Double(value & 0xFF) / 255.0
-        self.init(red: red, green: green, blue: blue, alpha: 1.0)
-    }
-}
-
 public struct AppPreferences: Codable, Equatable {
     public var rowHeight: Double
     public var panelWidth: Double
     public var hoverHighlightsEnabled: Bool
     public var animationPreset: AnimationPreset
     public var snapPadding: Double
-    public var themeColor: ThemeColor
+    public var theme: BuiltInTheme
     public var fontStyle: FontStylePreset
     public var fontSize: Double
     public var cornerRadius: Double
+    public var blurEnabled: Bool
+    public var windowOpacity: Double
 
     private enum CodingKeys: String, CodingKey {
         case rowHeight
@@ -183,10 +104,13 @@ public struct AppPreferences: Codable, Equatable {
         case hoverHighlightsEnabled
         case animationPreset
         case snapPadding
+        case theme
         case themeColor
         case fontStyle
         case fontSize
         case cornerRadius
+        case blurEnabled
+        case windowOpacity
     }
 
     public static let `default` = AppPreferences(
@@ -195,10 +119,12 @@ public struct AppPreferences: Codable, Equatable {
         hoverHighlightsEnabled: true,
         animationPreset: .balanced,
         snapPadding: 32,
-        themeColor: .default,
+        theme: .theme1,
         fontStyle: .system,
         fontSize: LayoutMetrics.defaultFontSize,
-        cornerRadius: 10
+        cornerRadius: 10,
+        blurEnabled: true,
+        windowOpacity: 1.0
     )
 
     public init(
@@ -207,20 +133,24 @@ public struct AppPreferences: Codable, Equatable {
         hoverHighlightsEnabled: Bool,
         animationPreset: AnimationPreset,
         snapPadding: Double,
-        themeColor: ThemeColor = .default,
+        theme: BuiltInTheme = .theme1,
         fontStyle: FontStylePreset = .system,
         fontSize: Double = 13,
-        cornerRadius: Double = 10
+        cornerRadius: Double = 10,
+        blurEnabled: Bool = true,
+        windowOpacity: Double = 1.0
     ) {
         self.rowHeight = rowHeight
         self.panelWidth = panelWidth
         self.hoverHighlightsEnabled = hoverHighlightsEnabled
         self.animationPreset = animationPreset
         self.snapPadding = snapPadding
-        self.themeColor = themeColor
+        self.theme = theme
         self.fontStyle = fontStyle
         self.fontSize = fontSize
         self.cornerRadius = cornerRadius
+        self.blurEnabled = blurEnabled
+        self.windowOpacity = windowOpacity
     }
 
     public init(from decoder: Decoder) throws {
@@ -232,109 +162,43 @@ public struct AppPreferences: Codable, Equatable {
         hoverHighlightsEnabled = try container.decodeIfPresent(Bool.self, forKey: .hoverHighlightsEnabled) ?? fallback.hoverHighlightsEnabled
         animationPreset = try container.decodeIfPresent(AnimationPreset.self, forKey: .animationPreset) ?? fallback.animationPreset
         snapPadding = try container.decodeIfPresent(Double.self, forKey: .snapPadding) ?? fallback.snapPadding
-        themeColor = try container.decodeIfPresent(ThemeColor.self, forKey: .themeColor) ?? fallback.themeColor
+        if let decodedTheme = try container.decodeIfPresent(BuiltInTheme.self, forKey: .theme) {
+            theme = decodedTheme
+        } else if let legacyThemeColor = try container.decodeIfPresent(ThemeColor.self, forKey: .themeColor) {
+            theme = BuiltInTheme.nearest(to: legacyThemeColor)
+        } else {
+            theme = fallback.theme
+        }
         fontStyle = try container.decodeIfPresent(FontStylePreset.self, forKey: .fontStyle) ?? fallback.fontStyle
         fontSize = try container.decodeIfPresent(Double.self, forKey: .fontSize) ?? fallback.fontSize
         cornerRadius = try container.decodeIfPresent(Double.self, forKey: .cornerRadius) ?? fallback.cornerRadius
+        blurEnabled = try container.decodeIfPresent(Bool.self, forKey: .blurEnabled) ?? fallback.blurEnabled
+        windowOpacity = try container.decodeIfPresent(Double.self, forKey: .windowOpacity) ?? fallback.windowOpacity
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(rowHeight, forKey: .rowHeight)
+        try container.encode(panelWidth, forKey: .panelWidth)
+        try container.encode(hoverHighlightsEnabled, forKey: .hoverHighlightsEnabled)
+        try container.encode(animationPreset, forKey: .animationPreset)
+        try container.encode(snapPadding, forKey: .snapPadding)
+        try container.encode(theme, forKey: .theme)
+        try container.encode(fontStyle, forKey: .fontStyle)
+        try container.encode(fontSize, forKey: .fontSize)
+        try container.encode(cornerRadius, forKey: .cornerRadius)
+        try container.encode(blurEnabled, forKey: .blurEnabled)
+        try container.encode(windowOpacity, forKey: .windowOpacity)
     }
 
     var motion: MotionProfile { animationPreset.motion }
+
+    public var themeColor: ThemeColor {
+        theme.color
+    }
 }
 
 #if canImport(AppKit)
-struct ThemePalette {
-    let background: NSColor
-    let highlight: NSColor
-    let text: NSColor
-    let usesLightText: Bool
-}
-
-extension ThemeColor {
-    init(nsColor: NSColor) {
-        let color = nsColor.usingColorSpace(.deviceRGB) ?? nsColor
-        self.init(
-            red: Double(color.redComponent),
-            green: Double(color.greenComponent),
-            blue: Double(color.blueComponent),
-            alpha: Double(color.alphaComponent)
-        )
-    }
-
-    var nsColor: NSColor {
-        NSColor(
-            srgbRed: CGFloat(red),
-            green: CGFloat(green),
-            blue: CGFloat(blue),
-            alpha: CGFloat(alpha)
-        )
-    }
-}
-
-private extension NSColor {
-    var resolvedSRGB: NSColor {
-        usingColorSpace(.sRGB) ?? usingColorSpace(.deviceRGB) ?? self
-    }
-
-    var relativeLuminance: CGFloat {
-        let color = resolvedSRGB
-
-        func linearized(_ component: CGFloat) -> CGFloat {
-            component <= 0.03928 ? component / 12.92 : pow((component + 0.055) / 1.055, 2.4)
-        }
-
-        return (
-            0.2126 * linearized(color.redComponent) +
-            0.7152 * linearized(color.greenComponent) +
-            0.0722 * linearized(color.blueComponent)
-        )
-    }
-
-    func blended(toward other: NSColor, amount: CGFloat) -> NSColor {
-        let lhs = resolvedSRGB
-        let rhs = other.resolvedSRGB
-        let factor = min(max(amount, 0), 1)
-
-        return NSColor(
-            srgbRed: lhs.redComponent + ((rhs.redComponent - lhs.redComponent) * factor),
-            green: lhs.greenComponent + ((rhs.greenComponent - lhs.greenComponent) * factor),
-            blue: lhs.blueComponent + ((rhs.blueComponent - lhs.blueComponent) * factor),
-            alpha: lhs.alphaComponent + ((rhs.alphaComponent - lhs.alphaComponent) * factor)
-        )
-    }
-
-    func shiftedHSB(
-        hueOffset: CGFloat = 0,
-        saturationMultiplier: CGFloat = 1,
-        brightnessMultiplier: CGFloat = 1,
-        brightnessDelta: CGFloat = 0,
-        brightnessOverride: CGFloat? = nil
-    ) -> NSColor {
-        let color = resolvedSRGB.usingColorSpace(.deviceRGB) ?? resolvedSRGB
-        var hue: CGFloat = 0
-        var saturation: CGFloat = 0
-        var brightness: CGFloat = 0
-        var alpha: CGFloat = 0
-
-        color.getHue(&hue, saturation: &saturation, brightness: &brightness, alpha: &alpha)
-
-        let shiftedHue = hueOffset == 0
-            ? hue
-            : ((hue + hueOffset).truncatingRemainder(dividingBy: 1) + 1).truncatingRemainder(dividingBy: 1)
-        let shiftedSaturation = min(max(saturation * saturationMultiplier, 0), 1)
-        let shiftedBrightness = min(
-            max(brightnessOverride ?? ((brightness * brightnessMultiplier) + brightnessDelta), 0),
-            1
-        )
-
-        return NSColor(
-            hue: shiftedHue,
-            saturation: shiftedSaturation,
-            brightness: shiftedBrightness,
-            alpha: alpha
-        )
-    }
-}
-
 extension FontStylePreset {
     func font(ofSize size: CGFloat, weight: NSFont.Weight = .regular) -> NSFont {
         let base = NSFont.systemFont(ofSize: size, weight: weight)
@@ -361,49 +225,25 @@ extension FontStylePreset {
 }
 
 extension AppPreferences {
+    var clampedWindowOpacity: Double {
+        min(max(windowOpacity, LayoutMetrics.minWindowOpacity), 1.0)
+    }
+
+    var selectedBuiltInTheme: BuiltInTheme {
+        theme
+    }
+
     var palette: ThemePalette {
-        if themeColor == .default {
-            return ThemePalette(
-                background: themeColor.nsColor,
-                highlight: NSColor(
-                    srgbRed: 42.0 / 255.0,
-                    green: 42.0 / 255.0,
-                    blue: 61.0 / 255.0,
-                    alpha: 1.0
-                ),
-                text: .white,
-                usesLightText: true
-            )
-        }
-
-        let background = themeColor.nsColor.resolvedSRGB
-        let luminance = background.relativeLuminance
-
-        if luminance < 0.42 {
-            return ThemePalette(
-                background: background,
-                highlight: background.shiftedHSB(
-                    hueOffset: 0.012,
-                    saturationMultiplier: 0.94,
-                    brightnessDelta: 0.12
-                ),
-                text: .white,
-                usesLightText: true
-            )
-        }
-
-        let text = background.shiftedHSB(
-            hueOffset: 0.028,
-            saturationMultiplier: 0.72,
-            brightnessOverride: 0.12
-        )
-        let highlight = background.blended(toward: text, amount: 0.14)
-
+        let style = selectedBuiltInTheme.style
+        let background = style.backgroundColor.nsColor.resolvedSRGB
+        let contentColor = style.contentColor.nsColor.resolvedSRGB
         return ThemePalette(
             background: background,
-            highlight: highlight,
-            text: text,
-            usesLightText: false
+            selectionColor: style.selectionColor.nsColor.resolvedSRGB,
+            selectionOpacity: CGFloat(min(max(style.selectionOpacity, 0), 1)),
+            contentColor: contentColor,
+            contentOpacity: CGFloat(min(max(style.contentOpacity, 0), 1)),
+            usesLightText: contentColor.relativeLuminance > background.relativeLuminance
         )
     }
 
@@ -411,40 +251,67 @@ extension AppPreferences {
         palette.background
     }
 
-    var activeFillColor: NSColor {
-        palette.highlight
+    var translucentSurfaceTintColor: NSColor {
+        panelBackgroundColor.withAlphaComponent(translucentSurfaceOpacity)
     }
 
-    var secondarySelectionFillColor: NSColor {
-        activeFillColor
+    var activeFillColor: NSColor {
+        return palette.selectionColor.withAlphaComponent(palette.selectionOpacity)
     }
 
     var primaryTextColor: NSColor {
-        palette.text
+        resolvedContentColor()
     }
 
     var secondaryTextColor: NSColor {
-        palette.text.withAlphaComponent(0.56)
+        return resolvedContentColor(multiplier: 0.72)
     }
 
     var subtleStrokeColor: NSColor {
-        palette.text.withAlphaComponent(0.15)
+        return palette.contentColor.withAlphaComponent(max(0.12, palette.contentOpacity * 0.22))
     }
 
     var strikethroughColor: NSColor {
-        palette.text.withAlphaComponent(0.5)
+        return resolvedContentColor(multiplier: 0.60)
     }
 
     var selectionOverlayColor: NSColor {
-        palette.text.withAlphaComponent(palette.usesLightText ? 0.18 : 0.14)
+        let highlightOpacity = min(max(Double(palette.selectionOpacity) + 0.08, 0.14), 0.30)
+        return palette.selectionColor.withAlphaComponent(highlightOpacity)
     }
 
     var caretColor: NSColor {
-        palette.text.withAlphaComponent(0.95)
+        return palette.contentColor.withAlphaComponent(min(max(Double(palette.contentOpacity) + 0.06, 0), 1))
     }
 
     var usesLightText: Bool {
-        palette.usesLightText
+        return palette.usesLightText
+    }
+
+    var usesTranslucentSurface: Bool {
+        blurEnabled
+    }
+
+    var contentBaseColor: NSColor {
+        palette.contentColor
+    }
+
+    var translucentSurfaceOpacity: Double {
+        let normalized = (clampedWindowOpacity - LayoutMetrics.minWindowOpacity) / (1.0 - LayoutMetrics.minWindowOpacity)
+        let eased = pow(min(max(normalized, 0), 1), 1.35)
+        return 0.03 + (0.49 * eased)
+    }
+
+    var translucentEffectAlpha: Double {
+        let normalized = (clampedWindowOpacity - LayoutMetrics.minWindowOpacity) / (1.0 - LayoutMetrics.minWindowOpacity)
+        let eased = pow(min(max(normalized, 0), 1), 0.85)
+        return 0.90 + (0.10 * eased)
+    }
+
+    var backdropBlurRadius: Double {
+        let normalized = (clampedWindowOpacity - LayoutMetrics.minWindowOpacity) / (1.0 - LayoutMetrics.minWindowOpacity)
+        let eased = min(max(normalized, 0), 1)
+        return 18.0 - (8.0 * eased)
     }
 
     var maximumCornerRadius: Double {
@@ -455,8 +322,18 @@ extension AppPreferences {
         LayoutMetrics.manualTextVerticalOffset(fontStyle: fontStyle, fontSize: fontSize)
     }
 
+    var displayTextVerticalOffset: Double {
+        LayoutMetrics.displayTextVerticalOffset(fontStyle: fontStyle, fontSize: fontSize)
+    }
+
     func appFont(weight: NSFont.Weight = .regular) -> NSFont {
         fontStyle.font(ofSize: CGFloat(fontSize), weight: weight)
+    }
+
+    func resolvedContentColor(multiplier: CGFloat = 1.0) -> NSColor {
+        let baseOpacity = palette.contentOpacity
+        let alpha = min(max(baseOpacity * multiplier, 0), 1)
+        return contentBaseColor.withAlphaComponent(alpha)
     }
 }
 #endif
@@ -473,6 +350,7 @@ enum LayoutMetrics {
     static let maxFontSize: Double = fontSizeOptions.last ?? 16
     static let minCornerRadius: Double = 4
     static let maxCornerRadius: Double = 24
+    static let minWindowOpacity: Double = 0.3
     static let rowHorizontalInset: Double = 12
     static let textInset: Double = 8
     static let rowBackgroundInset: Double = 8
@@ -488,18 +366,104 @@ enum LayoutMetrics {
     static let dividerHeight: Double = 0.5
     static let contentBottomPadding: Double = 16.5
 
+    // Edit these tables directly when tuning vertical text placement.
+    // Keys are the discrete font size options defined above.
+    private static let manualTextVerticalOffsetTable: [FontStylePreset: [Double: Double]] = [
+        .system: [
+            12: -1.0,
+            13: -0.5,
+            14: -0.5,
+            15: -1.0,
+            16: -2.0,
+        ],
+        .rounded: [
+            12: -0.5,
+            13: -0.5,
+            14: -0.5,
+            15: -1.0,
+            16: -2.0,
+        ],
+        .serif: [
+            12: -2.0,
+            13: -2.0,
+            14: -2.0,
+            15: -2.0,
+            16: -2.0,
+        ],
+        .monospaced: [
+            12: -1.0,
+            13: -0.5,
+            14: -0.5,
+            15: -0.5,
+            16: -1.5,
+        ],
+    ]
+
+    private static let displayTextVerticalOffsetTable: [FontStylePreset: [Double: Double]] = [
+        .system: [
+            12: 1.5,
+            13: 1.5,
+            14: 1.5,
+            15: 2.0,
+            16: 2.5,
+        ],
+        .rounded: [
+            12: 1.5,
+            13: 1.5,
+            14: 1.5,
+            15: 2.0,
+            16: 2.5,
+        ],
+        .serif: [
+            12: 2.5,
+            13: 2.5,
+            14: 2.5,
+            15: 2.5,
+            16: 2.5,
+        ],
+        .monospaced: [
+            12: 1.0,
+            13: 1.0,
+            14: 1.5,
+            15: 1.5,
+            16: 1.5,
+        ],
+    ]
+
     static func maximumCornerRadius(forRowHeight rowHeight: Double) -> Double {
         let visibleRowHeight = max(0, rowHeight - (rowVerticalInset * 2.0))
         return min(maxCornerRadius, visibleRowHeight / 2.0)
     }
 
     static func manualTextVerticalOffset(fontStyle: FontStylePreset, fontSize: Double) -> Double {
-        _ = fontStyle
-        _ = fontSize
-        return 0
+        offset(
+            for: fontStyle,
+            fontSize: fontSize,
+            table: manualTextVerticalOffsetTable,
+            fallback: 0
+        )
+    }
+
+    static func displayTextVerticalOffset(fontStyle: FontStylePreset, fontSize: Double) -> Double {
+        offset(
+            for: fontStyle,
+            fontSize: fontSize,
+            table: displayTextVerticalOffsetTable,
+            fallback: 0
+        )
     }
 
     static func nearestFontSizeOption(to value: Double) -> Double {
         fontSizeOptions.min(by: { abs($0 - value) < abs($1 - value) }) ?? defaultFontSize
+    }
+
+    private static func offset(
+        for fontStyle: FontStylePreset,
+        fontSize: Double,
+        table: [FontStylePreset: [Double: Double]],
+        fallback: Double
+    ) -> Double {
+        let resolvedFontSize = nearestFontSizeOption(to: fontSize)
+        return table[fontStyle]?[resolvedFontSize] ?? fallback
     }
 }
