@@ -417,7 +417,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
     private func preferencesRequireRowRefresh(old: AppPreferences, new: AppPreferences) -> Bool {
         old.rowHeight != new.rowHeight ||
         old.panelWidth != new.panelWidth ||
-        old.themeColor != new.themeColor ||
+        old.theme != new.theme ||
         old.fontStyle != new.fontStyle ||
         old.fontSize != new.fontSize ||
         old.cornerRadius != new.cornerRadius

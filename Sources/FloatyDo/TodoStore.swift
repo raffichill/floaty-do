@@ -208,7 +208,7 @@ public final class TodoStore: ObservableObject {
             hoverHighlightsEnabled: newPreferences.hoverHighlightsEnabled,
             animationPreset: newPreferences.animationPreset,
             snapPadding: max(Self.minimumSnapPadding, newPreferences.snapPadding),
-            themeColor: newPreferences.themeColor.clamped(),
+            theme: newPreferences.theme,
             fontStyle: newPreferences.fontStyle,
             fontSize: LayoutMetrics.nearestFontSizeOption(to: newPreferences.fontSize),
             cornerRadius: clampedCornerRadius,

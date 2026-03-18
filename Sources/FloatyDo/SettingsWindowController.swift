@@ -20,13 +20,14 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     var onWindowVisibilityChange: ((Bool) -> Void)?
 
     private let settingsViewController: SettingsViewController
-    private let surfaceViewController: SettingsSurfaceViewController
+    private let surfaceViewController: PanelSurfaceHostingViewController<SettingsViewController>
 
     init(preferences: AppPreferences) {
         self.settingsViewController = SettingsViewController(preferences: preferences)
-        self.surfaceViewController = SettingsSurfaceViewController(
+        self.surfaceViewController = PanelSurfaceHostingViewController(
             preferences: preferences,
-            contentViewController: settingsViewController
+            contentViewController: settingsViewController,
+            frame: NSRect(x: 0, y: 0, width: 880, height: 660)
         )
 
         let window = SettingsPanel(
@@ -151,44 +152,5 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
             self.applyDynamicTheme(preferences)
             self.onPreferencesChange?(preferences)
         }
-    }
-}
-
-private final class SettingsSurfaceViewController: NSViewController {
-    private let preferences: AppPreferences
-    private let hostedViewController: SettingsViewController
-    private let panelSurface: PanelSurfaceView
-
-    init(preferences: AppPreferences, contentViewController: SettingsViewController) {
-        self.preferences = preferences
-        self.hostedViewController = contentViewController
-        self.panelSurface = PanelSurfaceView(frame: NSRect(x: 0, y: 0, width: 880, height: 660))
-        super.init(nibName: nil, bundle: nil)
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
-
-    override func loadView() {
-        panelSurface.apply(preferences: preferences)
-        let container = panelSurface.contentView
-        let hostedView = hostedViewController.view
-        addChild(hostedViewController)
-        hostedView.translatesAutoresizingMaskIntoConstraints = false
-        container.addSubview(hostedView)
-        NSLayoutConstraint.activate([
-            hostedView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            hostedView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            hostedView.topAnchor.constraint(equalTo: container.topAnchor),
-            hostedView.bottomAnchor.constraint(equalTo: container.bottomAnchor),
-        ])
-        view = panelSurface
-    }
-
-    func apply(preferences: AppPreferences) {
-        guard isViewLoaded else { return }
-        panelSurface.apply(preferences: preferences)
     }
 }

@@ -24,12 +24,12 @@ final class SettingsViewControllerTests: XCTestCase {
     }
 
     func testTextVerticalOffsetTablesPreserveCurrentDefaults() {
-        XCTAssertEqual(LayoutMetrics.manualTextVerticalOffset(fontStyle: .system, fontSize: 14), 0)
-        XCTAssertEqual(LayoutMetrics.manualTextVerticalOffset(fontStyle: .serif, fontSize: 12), 0)
-        XCTAssertEqual(LayoutMetrics.displayTextVerticalOffset(fontStyle: .system, fontSize: 12), 1)
-        XCTAssertEqual(LayoutMetrics.displayTextVerticalOffset(fontStyle: .rounded, fontSize: 15), 1)
-        XCTAssertEqual(LayoutMetrics.displayTextVerticalOffset(fontStyle: .monospaced, fontSize: 16), 0)
-        XCTAssertEqual(LayoutMetrics.displayTextVerticalOffset(fontStyle: .serif, fontSize: 14), 0)
+        XCTAssertEqual(LayoutMetrics.manualTextVerticalOffset(fontStyle: .system, fontSize: 14), -0.5)
+        XCTAssertEqual(LayoutMetrics.manualTextVerticalOffset(fontStyle: .serif, fontSize: 12), -2.0)
+        XCTAssertEqual(LayoutMetrics.displayTextVerticalOffset(fontStyle: .system, fontSize: 12), 1.5)
+        XCTAssertEqual(LayoutMetrics.displayTextVerticalOffset(fontStyle: .rounded, fontSize: 15), 2.0)
+        XCTAssertEqual(LayoutMetrics.displayTextVerticalOffset(fontStyle: .monospaced, fontSize: 16), 1.5)
+        XCTAssertEqual(LayoutMetrics.displayTextVerticalOffset(fontStyle: .serif, fontSize: 14), 2.5)
     }
 
     func testUpdatingPreferencesBeforeViewLoadsDoesNotCrash() {
@@ -40,7 +40,7 @@ final class SettingsViewControllerTests: XCTestCase {
             hoverHighlightsEnabled: false,
             animationPreset: .relaxed,
             snapPadding: 32,
-            themeColor: ThemeColor(red: 0.15, green: 0.42, blue: 0.67, alpha: 1),
+            theme: .theme2,
             fontStyle: .rounded,
             fontSize: 15,
             cornerRadius: 16

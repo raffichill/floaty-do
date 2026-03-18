@@ -505,7 +505,7 @@ final class TodoStoreTests: XCTestCase {
             hoverHighlightsEnabled: false,
             animationPreset: .snappy,
             snapPadding: 32,
-            themeColor: ThemeColor(red: 0.12, green: 0.45, blue: 0.73, alpha: 1),
+            theme: .barbie,
             fontStyle: .rounded,
             fontSize: 16,
             cornerRadius: 18,
@@ -525,7 +525,7 @@ final class TodoStoreTests: XCTestCase {
             hoverHighlightsEnabled: true,
             animationPreset: .balanced,
             snapPadding: 40,
-            themeColor: .default,
+            theme: .theme1,
             fontStyle: .system,
             fontSize: 13.6,
             cornerRadius: 99
@@ -562,6 +562,7 @@ final class TodoStoreTests: XCTestCase {
 
         XCTAssertEqual(store.preferences.windowOpacity, 0.3)
         XCTAssertFalse(store.preferences.blurEnabled)
+        XCTAssertEqual(store.preferences.theme, .theme1)
     }
 
     func testLegacyPreferencesDecodeUsesNewFieldDefaults() throws {
@@ -582,7 +583,7 @@ final class TodoStoreTests: XCTestCase {
         XCTAssertFalse(store.preferences.hoverHighlightsEnabled)
         XCTAssertEqual(store.preferences.animationPreset, .relaxed)
         XCTAssertEqual(store.preferences.snapPadding, 32.0)
-        XCTAssertEqual(store.preferences.themeColor, .default)
+        XCTAssertEqual(store.preferences.theme, .theme1)
         XCTAssertEqual(store.preferences.fontStyle, .system)
         XCTAssertEqual(store.preferences.fontSize, 14.0)
         XCTAssertEqual(store.preferences.cornerRadius, 10.0)
@@ -603,7 +604,7 @@ final class TodoStoreTests: XCTestCase {
             hoverHighlightsEnabled: false,
             animationPreset: .snappy,
             snapPadding: 48,
-            themeColor: ThemeColor(red: 0.2, green: 0.3, blue: 0.4, alpha: 1),
+            theme: .theme4,
             fontStyle: .rounded,
             fontSize: 15,
             cornerRadius: 14
@@ -628,7 +629,7 @@ final class TodoStoreTests: XCTestCase {
             hoverHighlightsEnabled: true,
             animationPreset: .balanced,
             snapPadding: 12,
-            themeColor: .default,
+            theme: .theme1,
             fontStyle: .system,
             fontSize: 14.4,
             cornerRadius: 99
