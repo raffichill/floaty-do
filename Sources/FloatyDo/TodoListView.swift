@@ -1529,8 +1529,10 @@ final class HoverTrackingButton: NSButton {
 
 public final class CaretEndFieldEditor: NSTextView {
     private var allowsFullSelection = false
+    private let editingUndoManager = UndoManager()
 
     public override var mouseDownCanMoveWindow: Bool { false }
+    public override var undoManager: UndoManager? { editingUndoManager }
 
     public override func addCursorRect(_ rect: NSRect, cursor: NSCursor) {
         super.addCursorRect(rect, cursor: .arrow)
@@ -1547,6 +1549,10 @@ public final class CaretEndFieldEditor: NSTextView {
     public override func mouseDown(with event: NSEvent) {}
     public override func mouseDragged(with event: NSEvent) {}
     public override func mouseUp(with event: NSEvent) {}
+
+    public func resetUndoHistory() {
+        editingUndoManager.removeAllActions()
+    }
 
     public override func selectAll(_ sender: Any?) {
         allowsFullSelection = true

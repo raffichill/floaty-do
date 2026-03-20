@@ -1026,16 +1026,39 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
     }
 
     func performUndo() -> Bool {
-        guard historyManager.canUndo else { return false }
         guard !isAnimating, !listView.isBusy else { return false }
+        if performTextEditingUndo(isRedo: false) {
+            return true
+        }
+        guard historyManager.canUndo else { return false }
         historyManager.undo()
         return true
     }
 
     func performRedo() -> Bool {
-        guard historyManager.canRedo else { return false }
         guard !isAnimating, !listView.isBusy else { return false }
+        if performTextEditingUndo(isRedo: true) {
+            return true
+        }
+        guard historyManager.canRedo else { return false }
         historyManager.redo()
+        return true
+    }
+
+    private func performTextEditingUndo(isRedo: Bool) -> Bool {
+        guard editorRowID != nil, let editor = activeTextEditor(), let undoManager = editor.undoManager else {
+            return false
+        }
+
+        let canReplayChange = isRedo ? undoManager.canRedo : undoManager.canUndo
+        guard canReplayChange else { return false }
+
+        if isRedo {
+            undoManager.redo()
+        } else {
+            undoManager.undo()
+        }
+        syncVisibleEditorState()
         return true
     }
 
@@ -1108,6 +1131,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         }
 
         let targetText = textForRow(rowID)
+        let shouldResetEditorUndoHistory = editorRowID != rowID || sharedEditor.stringValue != targetText
         if editorRowID != rowID {
             sharedEditor.stringValue = targetText
             editorRowID = rowID
@@ -1120,7 +1144,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
             window.makeFirstResponder(sharedEditor)
         }
 
-        bindHiddenEditor(placeCaretAtEnd: placeCaretAtEnd)
+        bindHiddenEditor(placeCaretAtEnd: placeCaretAtEnd, resetUndoHistory: shouldResetEditorUndoHistory)
     }
 
     private func cancelDeferredEditorActivation() {
@@ -1155,6 +1179,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
             return
         }
 
+        resetTextEditorUndoHistory()
         editorRowID = nil
         listView.updateEditingPresentation(rowID: nil, text: nil, selectionRange: nil)
         if let observer = editorSelectionObserver {
@@ -1166,7 +1191,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         }
     }
 
-    private func bindHiddenEditor(placeCaretAtEnd: Bool) {
+    private func bindHiddenEditor(placeCaretAtEnd: Bool, resetUndoHistory: Bool = false) {
         if let observer = editorSelectionObserver {
             NotificationCenter.default.removeObserver(observer)
             editorSelectionObserver = nil
@@ -1174,7 +1199,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
 
         let applyBinding = { [weak self] in
             guard let self else { return }
-            if let editor = self.sharedEditor.currentEditor() as? NSTextView {
+            if let editor = self.activeTextEditor() {
                 self.editorSelectionObserver = NotificationCenter.default.addObserver(
                     forName: NSTextView.didChangeSelectionNotification,
                     object: editor,
@@ -1183,6 +1208,9 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
                     self?.syncVisibleEditorState()
                 }
 
+                if resetUndoHistory {
+                    editor.resetUndoHistory()
+                }
                 if placeCaretAtEnd {
                     editor.setSelectedRange(NSRange(location: editor.string.count, length: 0))
                 }
@@ -1223,6 +1251,17 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
     private func makeListFirstResponder() {
         guard let window = view.window else { return }
         window.makeFirstResponder(listView)
+    }
+
+    private func activeTextEditor() -> CaretEndFieldEditor? {
+        if let editor = sharedEditor.currentEditor() as? CaretEndFieldEditor {
+            return editor
+        }
+        return view.window?.fieldEditor(false, for: sharedEditor) as? CaretEndFieldEditor
+    }
+
+    private func resetTextEditorUndoHistory() {
+        activeTextEditor()?.resetUndoHistory()
     }
 
     private func moveCaretToEnd() {
@@ -1266,7 +1305,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
 
         bindHiddenEditor(placeCaretAtEnd: false)
 
-        if let editor = sharedEditor.currentEditor() as? NSTextView {
+        if let editor = activeTextEditor() {
             editor.selectAll(nil)
             syncVisibleEditorState()
             return
@@ -1275,7 +1314,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         DispatchQueue.main.async { [weak self] in
             guard let self,
                   self.editorRowID == rowID,
-                  let editor = self.sharedEditor.currentEditor() as? NSTextView else { return }
+                  let editor = self.activeTextEditor() else { return }
             editor.selectAll(nil)
             self.syncVisibleEditorState()
         }

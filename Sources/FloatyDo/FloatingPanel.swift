@@ -35,6 +35,7 @@ public final class FloatingPanel: NSWindow {
         // Configure custom field editor
         customFieldEditor.isFieldEditor = true
         customFieldEditor.isRichText = false
+        customFieldEditor.allowsUndo = true
 
         let center = NotificationCenter.default
         observers.append(
