@@ -1528,6 +1528,8 @@ final class HoverTrackingButton: NSButton {
 }
 
 public final class CaretEndFieldEditor: NSTextView {
+    private var allowsFullSelection = false
+
     public override var mouseDownCanMoveWindow: Bool { false }
 
     public override func addCursorRect(_ rect: NSRect, cursor: NSCursor) {
@@ -1546,8 +1548,14 @@ public final class CaretEndFieldEditor: NSTextView {
     public override func mouseDragged(with event: NSEvent) {}
     public override func mouseUp(with event: NSEvent) {}
 
+    public override func selectAll(_ sender: Any?) {
+        allowsFullSelection = true
+        super.selectAll(sender)
+        allowsFullSelection = false
+    }
+
     public override func setSelectedRange(_ charRange: NSRange, affinity: NSSelectionAffinity, stillSelecting flag: Bool) {
-        if charRange.length == string.count && charRange.length > 0 && !flag {
+        if charRange.length == string.count && charRange.length > 0 && !flag && !allowsFullSelection {
             super.setSelectedRange(NSRange(location: string.count, length: 0), affinity: affinity, stillSelecting: flag)
         } else {
             super.setSelectedRange(charRange, affinity: affinity, stillSelecting: flag)

@@ -136,7 +136,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         window.appearance = NSAppearance(named: preferences.usesLightText ? .darkAqua : .aqua)
         window.isOpaque = false
         window.backgroundColor = .clear
-        window.hasShadow = false
+        window.hasShadow = true
     }
 
     private func applyDynamicTheme(_ preferences: AppPreferences) {

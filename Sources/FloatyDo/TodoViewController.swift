@@ -183,10 +183,12 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
             let hasControl = mods.contains(.control)
 
             if hasCommand && !hasShift && !hasOption && !hasControl {
-                switch event.keyCode {
-                case 0:
-                    self.selectAllRows()
+                if event.charactersIgnoringModifiers?.lowercased() == "a" {
+                    self.handleCommandSelectAll()
                     return nil
+                }
+
+                switch event.keyCode {
                 case 125:
                     self.jumpToBoundary(.bottom)
                     return nil
@@ -952,19 +954,6 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         }
     }
 
-    private func selectAllRows() {
-        guard !isAnimating, !listView.isBusy else { return }
-        let orderedBatchRows = batchSelectableRowIDs()
-        guard !orderedBatchRows.isEmpty else { return }
-
-        cancelDeferredEditorActivation()
-        let focusedRowID = (selectedRowID.flatMap { orderedBatchRows.contains($0) ? $0 : nil }) ?? orderedBatchRows.first
-        selectedRowID = focusedRowID
-        selectionAnchorRowID = focusedRowID
-        selectedRowIDs = Set(orderedBatchRows)
-        syncSelectionUI(placeCaretAtEnd: false)
-    }
-
     private func activateRow(_ rowID: TodoRowID, placeCaretAtEnd: Bool = true) {
         guard rowModels.contains(where: { $0.id == rowID && $0.isSelectable }) else { return }
         cancelDeferredEditorActivation()
@@ -1259,6 +1248,43 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
 
     private func textForRow(_ rowID: TodoRowID) -> String {
         rowModels.first(where: { $0.id == rowID })?.text ?? ""
+    }
+
+    private func handleCommandSelectAll() {
+        guard eventBelongsToPanelEditorContext() else { return }
+        guard let rowID = currentEditingRowID else { return }
+
+        if editorRowID != rowID {
+            sharedEditor.stringValue = textForRow(rowID)
+            editorRowID = rowID
+        }
+
+        guard let window = view.window else { return }
+        if window.firstResponder !== sharedEditor.currentEditor() {
+            window.makeFirstResponder(sharedEditor)
+        }
+
+        bindHiddenEditor(placeCaretAtEnd: false)
+
+        if let editor = sharedEditor.currentEditor() as? NSTextView {
+            editor.selectAll(nil)
+            syncVisibleEditorState()
+            return
+        }
+
+        DispatchQueue.main.async { [weak self] in
+            guard let self,
+                  self.editorRowID == rowID,
+                  let editor = self.sharedEditor.currentEditor() as? NSTextView else { return }
+            editor.selectAll(nil)
+            self.syncVisibleEditorState()
+        }
+    }
+
+    private func eventBelongsToPanelEditorContext() -> Bool {
+        guard let window = view.window else { return false }
+        guard window.isKeyWindow else { return false }
+        return NSApp.keyWindow === window
     }
 
     private func handleCommandReturn() {
