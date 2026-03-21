@@ -43,6 +43,7 @@ final class SettingsViewController: NSViewController {
     private enum AnimationMetrics {
         static let resizeDuration: TimeInterval = 0.18
         static let crossfadeDuration: TimeInterval = 0.14
+        static let growCrossfadeDelay: TimeInterval = 0.04
     }
 
     static let preferredWindowWidth: CGFloat = 680
@@ -335,7 +336,8 @@ final class SettingsViewController: NSViewController {
         reportPreferredWindowHeight(forContentHeight: targetContentHeight, animated: true)
 
         if grows {
-            transitionDisplayedContentHeight(to: targetContentHeight, animated: true) { [weak self] in
+            transitionDisplayedContentHeight(to: targetContentHeight, animated: true)
+            DispatchQueue.main.asyncAfter(deadline: .now() + AnimationMetrics.growCrossfadeDelay) { [weak self] in
                 self?.crossfadeIfCurrent(from: outgoingTab, to: tab, transitionID: transitionID)
             }
             return

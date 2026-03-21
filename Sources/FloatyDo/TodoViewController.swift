@@ -1049,6 +1049,81 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         syncSelectionUI(placeCaretAtEnd: false)
     }
 
+    private func extendSelection(to rowID: TodoRowID) {
+        guard !isAnimating, !listView.isBusy else { return }
+
+        let orderedBatchRows = batchSelectableRowIDs()
+        guard !orderedBatchRows.isEmpty,
+              let targetIndex = orderedBatchRows.firstIndex(of: rowID) else {
+            activateRow(rowID, placeCaretAtEnd: false)
+            return
+        }
+
+        guard let anchorID = selectedRowID,
+              let anchorIndex = orderedBatchRows.firstIndex(of: anchorID) else {
+            activateRow(rowID, placeCaretAtEnd: false)
+            return
+        }
+
+        guard targetIndex != anchorIndex || isRangeSelectionActive else {
+            syncSelectionUI(placeCaretAtEnd: false)
+            return
+        }
+
+        selectionAnchorRowID = anchorID
+        self.selectedRowID = rowID
+        let lowerBound = min(anchorIndex, targetIndex)
+        let upperBound = max(anchorIndex, targetIndex)
+        selectedRowIDs = Set(orderedBatchRows[lowerBound...upperBound])
+        syncSelectionUI(placeCaretAtEnd: false)
+    }
+
+    private func toggleSelection(for rowID: TodoRowID) {
+        guard !isAnimating, !listView.isBusy else { return }
+
+        let orderedBatchRows = batchSelectableRowIDs()
+        guard orderedBatchRows.contains(rowID) else {
+            activateRow(rowID, placeCaretAtEnd: false)
+            return
+        }
+
+        var nextSelectedRowIDs = Set(selectedBatchRowIDs())
+        if nextSelectedRowIDs.contains(rowID) {
+            if nextSelectedRowIDs.count == 1 {
+                clearRangeSelectionState()
+                selectedRowID = rowID
+                syncSelectionUI(placeCaretAtEnd: false)
+                return
+            }
+            nextSelectedRowIDs.remove(rowID)
+        } else {
+            if nextSelectedRowIDs.isEmpty, let selectedRowID, orderedBatchRows.contains(selectedRowID) {
+                nextSelectedRowIDs.insert(selectedRowID)
+            }
+            nextSelectedRowIDs.insert(rowID)
+        }
+
+        if nextSelectedRowIDs.count == 1, let remainingRowID = nextSelectedRowIDs.first {
+            clearRangeSelectionState()
+            selectedRowID = remainingRowID
+            syncSelectionUI(placeCaretAtEnd: false)
+            return
+        }
+
+        selectedRowIDs = nextSelectedRowIDs
+        selectionAnchorRowID = nil
+
+        if nextSelectedRowIDs.contains(rowID) {
+            selectedRowID = rowID
+        } else if let selectedRowID, nextSelectedRowIDs.contains(selectedRowID) {
+            self.selectedRowID = selectedRowID
+        } else {
+            selectedRowID = orderedBatchRows.first(where: { nextSelectedRowIDs.contains($0) })
+        }
+
+        syncSelectionUI(placeCaretAtEnd: false)
+    }
+
     private enum BoundaryDestination {
         case top
         case bottom
@@ -1877,8 +1952,15 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
 }
 
 extension TodoViewController: TodoListViewDelegate {
-    func listView(_ listView: TodoListView, didActivateRow rowID: TodoRowID) {
-        activateRow(rowID, placeCaretAtEnd: true)
+    func listView(_ listView: TodoListView, didActivateRow rowID: TodoRowID, selectionMode: TodoListSelectionMode) {
+        switch selectionMode {
+        case .replace:
+            activateRow(rowID, placeCaretAtEnd: true)
+        case .extendRange:
+            extendSelection(to: rowID)
+        case .toggleMembership:
+            toggleSelection(for: rowID)
+        }
         if currentTab == .tasks, rowID != .taskDraft {
             normalizeDraftBeforeStructuralAction()
         }

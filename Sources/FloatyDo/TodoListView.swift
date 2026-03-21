@@ -1,8 +1,14 @@
 import AppKit
 import QuartzCore
 
+enum TodoListSelectionMode {
+    case replace
+    case extendRange
+    case toggleMembership
+}
+
 protocol TodoListViewDelegate: AnyObject {
-    func listView(_ listView: TodoListView, didActivateRow rowID: TodoRowID)
+    func listView(_ listView: TodoListView, didActivateRow rowID: TodoRowID, selectionMode: TodoListSelectionMode)
     func listView(_ listView: TodoListView, didActivateCheckboxFor rowID: TodoRowID)
     func listViewWillPressRowBody(_ listView: TodoListView, rowID: TodoRowID)
     func listViewWillBeginDragging(_ listView: TodoListView, rowID: TodoRowID)
@@ -19,6 +25,7 @@ final class TodoListView: NSView {
         let rowID: TodoRowID
         let initialPoint: CGPoint
         let zone: HitZone
+        let selectionMode: TodoListSelectionMode
         let rowWasActive: Bool
         let canDrag: Bool
         let previousEditingRowID: TodoRowID?
@@ -152,10 +159,21 @@ final class TodoListView: NSView {
     }
 
     func updateInteractionState(selectedRowID: TodoRowID?, selectedRowIDs: Set<TodoRowID>, editingRowID: TodoRowID?) {
+        let previousSelectedRowID = self.selectedRowID
+        let previousSelectedRowIDs = self.selectedRowIDs
+        let previousEditingRowID = self.editingRowID
         self.selectedRowID = selectedRowID
         self.selectedRowIDs = selectedRowIDs
         self.editingRowID = editingRowID
-        refreshRowVisualState(excluding: currentDraggedRowID)
+        refreshRowVisualState(
+            for: affectedInteractionRowIDs(
+                previousSelectedRowID: previousSelectedRowID,
+                previousSelectedRowIDs: previousSelectedRowIDs,
+                previousEditingRowID: previousEditingRowID,
+                previousPressedRowID: pressedRowID
+            ),
+            excluding: currentDraggedRowID
+        )
     }
 
     func updateEditingPresentation(rowID: TodoRowID?, text: String?, selectionRange: NSRange?) {
@@ -245,13 +263,27 @@ final class TodoListView: NSView {
         }
 
         let zone = rowView.hitZone(at: convert(location, to: rowView))
+        let selectionMode: TodoListSelectionMode
+        if zone == .body, event.modifierFlags.contains(.shift) {
+            selectionMode = .extendRange
+        } else if zone == .body, event.modifierFlags.contains(.command) {
+            selectionMode = .toggleMembership
+        } else {
+            selectionMode = .replace
+        }
         let canDrag = zone == .body && model.canDrag
+        let previousSelectedRowID = selectedRowID
+        let previousSelectedRowIDs = selectedRowIDs
+        let previousEditingRowID = editingRowID
+        let previousPressedRowID = pressedRowID
         if zone == .body {
             delegate?.listViewWillPressRowBody(self, rowID: rowID)
             window?.makeFirstResponder(self)
         }
-        if zone == .body {
+        if zone == .body && selectionMode == .replace {
             selectedRowIDs.removeAll()
+            selectedRowID = rowID
+            editingRowID = nil
         }
         pressedRowID = zone == .body ? rowID : nil
         interactionState = .pressed(
@@ -259,14 +291,21 @@ final class TodoListView: NSView {
                 rowID: rowID,
                 initialPoint: location,
                 zone: zone,
-                rowWasActive: rowID == selectedRowID,
+                selectionMode: selectionMode,
+                rowWasActive: rowID == previousSelectedRowID,
                 canDrag: canDrag,
-                previousEditingRowID: editingRowID
+                previousEditingRowID: previousEditingRowID
             )
         )
-        selectedRowID = rowID
-        editingRowID = nil
-        refreshRowVisualState()
+        refreshRowVisualState(
+            for: affectedInteractionRowIDs(
+                previousSelectedRowID: previousSelectedRowID,
+                previousSelectedRowIDs: previousSelectedRowIDs,
+                previousEditingRowID: previousEditingRowID,
+                previousPressedRowID: previousPressedRowID
+            ),
+            excluding: currentDraggedRowID
+        )
     }
 
     override func mouseDragged(with event: NSEvent) {
@@ -319,16 +358,19 @@ final class TodoListView: NSView {
             }
 
             interactionState = .idle
+            let previousPressedRowID = pressedRowID
             pressedRowID = nil
 
             if press.zone == .body {
-                refreshRowVisualState()
-                delegate?.listView(self, didActivateRow: press.rowID)
+                refreshRowVisualState(for: [press.rowID, previousPressedRowID].compactMap { $0 })
+                delegate?.listView(self, didActivateRow: press.rowID, selectionMode: press.selectionMode)
             } else if press.rowWasActive {
                 editingRowID = press.previousEditingRowID
-                refreshRowVisualState()
+                refreshRowVisualState(
+                    for: [press.rowID, previousPressedRowID, press.previousEditingRowID].compactMap { $0 }
+                )
             } else {
-                refreshRowVisualState()
+                refreshRowVisualState(for: [press.rowID, previousPressedRowID].compactMap { $0 })
             }
 
         case .dragging(let drag):
@@ -447,7 +489,11 @@ final class TodoListView: NSView {
     }
 
     private func refreshRowVisualState(excluding draggedRowID: TodoRowID? = nil) {
-        for rowID in displayOrder {
+        refreshRowVisualState(for: displayOrder, excluding: draggedRowID)
+    }
+
+    private func refreshRowVisualState<S: Sequence>(for rowIDs: S, excluding draggedRowID: TodoRowID? = nil) where S.Element == TodoRowID {
+        for rowID in Set(rowIDs) {
             guard let rowView = rowViews[rowID] else { continue }
             rowView.setSelectionState(
                 focused: rowID == selectedRowID,
@@ -461,6 +507,19 @@ final class TodoListView: NSView {
                 rowView.setDragging(false)
             }
         }
+    }
+
+    private func affectedInteractionRowIDs(
+        previousSelectedRowID: TodoRowID?,
+        previousSelectedRowIDs: Set<TodoRowID>,
+        previousEditingRowID: TodoRowID?,
+        previousPressedRowID: TodoRowID?
+    ) -> Set<TodoRowID> {
+        var affected = previousSelectedRowIDs.symmetricDifference(selectedRowIDs)
+        [previousSelectedRowID, selectedRowID, previousEditingRowID, editingRowID, previousPressedRowID, pressedRowID]
+            .compactMap { $0 }
+            .forEach { affected.insert($0) }
+        return affected
     }
 
     private func layoutRows(animated: Bool, duration: CFTimeInterval?) {
@@ -761,13 +820,11 @@ final class TodoRowView: NSView {
     private var preferences: AppPreferences
     private(set) var model: TodoRowModel
 
-    private var isFocusedRow = false {
+    private var isSelectedRow = false {
         didSet { updateAppearance() }
     }
 
-    private var isRangeSelected = false {
-        didSet { updateAppearance() }
-    }
+    private var isFocusedRow = false
 
     private var isEditingRow = false {
         didSet { updateAppearance() }
@@ -872,7 +929,12 @@ final class TodoRowView: NSView {
     func setSelectionState(focused: Bool, selected: Bool, animateFill: Bool = false) {
         shouldAnimateNextSelectionFill = animateFill && focused
         isFocusedRow = focused
-        isRangeSelected = selected && !focused
+        let nextIsSelectedRow = (focused || selected) && model.isSelectable
+        if isSelectedRow != nextIsSelectedRow {
+            isSelectedRow = nextIsSelectedRow
+        } else if shouldAnimateNextSelectionFill {
+            updateAppearance()
+        }
     }
 
     func setEditing(_ editing: Bool) {
@@ -1026,13 +1088,13 @@ final class TodoRowView: NSView {
 
     private func updateAppearance() {
         let activeFillColor = preferences.activeFillColor
-        let isAnySelected = (isFocusedRow || isRangeSelected) && model.isSelectable
-        let circleAlpha = isAnySelected
-            ? max(CGFloat(model.circleOpacity), model.isDone ? CGFloat(model.textOpacity) : 0.86)
-            : CGFloat(model.circleOpacity)
+        let isAnySelected = isSelectedRow && model.isSelectable
         let textAlpha = isAnySelected
             ? max(CGFloat(model.textOpacity), 0.98)
             : CGFloat(model.textOpacity)
+        let circleAlpha = isAnySelected
+            ? max(CGFloat(model.circleOpacity), model.isDone ? textAlpha : 0.86)
+            : CGFloat(model.circleOpacity)
 
         let backgroundColor: CGColor
         let borderColor: CGColor
@@ -1043,7 +1105,7 @@ final class TodoRowView: NSView {
             backgroundColor = NSColor.clear.cgColor
             borderColor = preferences.subtleStrokeColor.cgColor
             borderWidth = 1.0
-        } else if model.isSelectable && (isFocusedRow || isRangeSelected) {
+        } else if model.isSelectable && isSelectedRow {
             backgroundColor = activeFillColor.cgColor
             borderColor = NSColor.clear.cgColor
             borderWidth = 0.0
