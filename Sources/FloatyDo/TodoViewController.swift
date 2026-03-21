@@ -29,7 +29,15 @@ private struct TodoUndoSnapshot: Equatable {
 }
 
 public final class TodoViewController: NSViewController, NSTextFieldDelegate {
+    private enum DebugMetrics {
+        static let showsHeaderButtonHitTargets = true
+        static let headerButtonWidth: CGFloat = 36
+        static let headerButtonHeight: CGFloat = 30
+        static let headerButtonOutlineColor = NSColor.systemPink.withAlphaComponent(0.9)
+    }
+
     private let store: TodoStore
+    private let listScrollView = NSScrollView()
     private let listView = TodoListView()
     private let sharedEditor = KeyboardOnlyTextField()
 
@@ -74,7 +82,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
     private var motion: MotionProfile { store.preferences.motion }
     private var rowHeight: CGFloat { CGFloat(store.preferences.rowHeight) }
     private var panelWidth: CGFloat { CGFloat(store.preferences.panelWidth) }
-    private var rowCount: Int { rowModels.count }
+    private var visibleRowCount: Int { targetVisibleRowCount() }
     private var selectedRowIndex: Int? {
         guard let selectedRowID else { return nil }
         return rowModels.firstIndex(where: { $0.id == selectedRowID })
@@ -128,21 +136,32 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
 
         let tabBar = NSStackView(views: [tasksTabButton, archiveTabButton, settingsButton])
         tabBar.orientation = .horizontal
-        tabBar.spacing = 0
+        tabBar.spacing = DebugMetrics.showsHeaderButtonHitTargets ? -1 : 0
         tabBar.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(tabBar)
 
-        listView.translatesAutoresizingMaskIntoConstraints = false
+        listScrollView.translatesAutoresizingMaskIntoConstraints = false
+        listScrollView.drawsBackground = false
+        listScrollView.borderType = .noBorder
+        listScrollView.hasVerticalScroller = false
+        listScrollView.hasHorizontalScroller = false
+        listScrollView.autohidesScrollers = true
+        listScrollView.scrollerStyle = .overlay
+        listScrollView.verticalScrollElasticity = .none
+
+        listView.frame = NSRect(x: 0, y: 0, width: panelWidth, height: 240)
+        listView.autoresizingMask = [.width]
         listView.delegate = self
+        listScrollView.documentView = listView
         sharedEditor.frame = NSRect(x: -1000, y: -1000, width: 1, height: 1)
         sharedEditor.alphaValue = 0.001
 
-        container.addSubview(listView)
+        container.addSubview(listScrollView)
         container.addSubview(sharedEditor)
 
         let initialHeaderHeight = defaultHeaderHeight
         let tabBarHeightConstraint = tabBar.heightAnchor.constraint(equalToConstant: initialHeaderHeight)
-        let listTopConstraint = listView.topAnchor.constraint(
+        let listTopConstraint = listScrollView.topAnchor.constraint(
             equalTo: container.topAnchor,
             constant: initialHeaderHeight + CGFloat(LayoutMetrics.contentTopPadding)
         )
@@ -155,12 +174,13 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
             tabBar.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -LayoutMetrics.titlebarTrailingInset),
 
             listTopConstraint,
-            listView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            listView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            listView.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            listScrollView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            listScrollView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            listScrollView.bottomAnchor.constraint(equalTo: container.bottomAnchor),
         ])
 
         self.view = panelSurface
+        updateListScrollBehavior()
         updateTabAppearance()
     }
 
@@ -432,7 +452,9 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         button.isBordered = false
         button.imagePosition = .imageOnly
         button.translatesAutoresizingMaskIntoConstraints = false
-        button.widthAnchor.constraint(equalToConstant: 36).isActive = true
+        button.widthAnchor.constraint(equalToConstant: DebugMetrics.headerButtonWidth).isActive = true
+        button.heightAnchor.constraint(equalToConstant: DebugMetrics.headerButtonHeight).isActive = true
+        applyHeaderButtonDebugOutline(to: button)
         return button
     }
 
@@ -443,8 +465,19 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         button.isBordered = false
         button.imagePosition = .imageOnly
         button.translatesAutoresizingMaskIntoConstraints = false
-        button.widthAnchor.constraint(equalToConstant: 36).isActive = true
+        button.widthAnchor.constraint(equalToConstant: DebugMetrics.headerButtonWidth).isActive = true
+        button.heightAnchor.constraint(equalToConstant: DebugMetrics.headerButtonHeight).isActive = true
+        applyHeaderButtonDebugOutline(to: button)
         return button
+    }
+
+    private func applyHeaderButtonDebugOutline(to button: NSButton) {
+        guard DebugMetrics.showsHeaderButtonHitTargets else { return }
+        button.wantsLayer = true
+        button.layer?.cornerRadius = 0
+        button.layer?.borderWidth = 1
+        button.layer?.borderColor = DebugMetrics.headerButtonOutlineColor.cgColor
+        button.layer?.backgroundColor = NSColor.clear.cgColor
     }
 
     private func updateTabAppearance() {
@@ -462,7 +495,8 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         selectedRowID = nil
         clearRangeSelectionState()
         updateTabAppearance()
-        refreshRows(resize: false, animateResize: false)
+        updateListScrollBehavior()
+        refreshRows(resize: true, animateResize: true)
     }
 
     @objc private func switchToArchive() {
@@ -472,7 +506,22 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         selectedRowID = nil
         clearRangeSelectionState()
         updateTabAppearance()
-        refreshRows(resize: false, animateResize: false)
+        updateListScrollBehavior()
+        refreshRows(resize: true, animateResize: true)
+    }
+
+    func showTasksTab() {
+        switchToTasks()
+    }
+
+    func showArchiveTab() {
+        switchToArchive()
+    }
+
+    private func updateListScrollBehavior() {
+        let allowsOverflowScrolling = currentTab == .archive
+        listScrollView.hasVerticalScroller = allowsOverflowScrolling
+        listScrollView.verticalScrollElasticity = allowsOverflowScrolling ? .automatic : .none
     }
 
     @objc private func toggleSettings(_ sender: NSButton) {
@@ -632,14 +681,23 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         refreshRows(placeCaretAtEnd: false)
     }
 
+    private func targetVisibleRowCount(for tab: Tab? = nil) -> Int {
+        switch tab ?? currentTab {
+        case .tasks:
+            // Keep very small task lists on a stable panel height. The 0/1/2-item
+            // transitions are where AppKit's full-size-content resize path was
+            // producing the first-row/titlebar overlap bug.
+            return max(5, min(store.items.count + 3, TodoStore.maxItems))
+        case .archive:
+            return max(5, min(store.archivedItems.count + 3, TodoStore.maxItems))
+        }
+    }
+
     private func buildRowModels(for tab: Tab? = nil) -> [TodoRowModel] {
         switch tab ?? currentTab {
         case .tasks:
             let showsDraft = canShowDraftRow
-            // Keep very small task lists on a stable panel height. The 0/1/2-item
-            // transitions are where AppKit's full-size-content resize path was
-            // producing the first-row/titlebar overlap bug.
-            let visibleRowCount = max(5, min(store.items.count + 3, TodoStore.maxItems))
+            let visibleRowCount = targetVisibleRowCount(for: .tasks)
             let baseRowCount = store.items.count + (showsDraft ? 1 : 0)
             let fillerCount = max(visibleRowCount - baseRowCount, 0)
 
@@ -700,7 +758,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
             return models
 
         case .archive:
-            let visibleRowCount = max(store.archivedItems.count, 3)
+            let visibleRowCount = targetVisibleRowCount(for: .archive)
             var models = store.archivedItems.map { item in
                 TodoRowModel(
                     id: .archiveItem(item.id),
@@ -773,6 +831,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         updateHeaderLayoutInsets()
         view.layoutSubtreeIfNeeded()
         listView.layoutSubtreeIfNeeded()
+        listView.scrollRowToVisible(selectedRowID)
         attachEditorIfNeeded(placeCaretAtEnd: placeCaretAtEnd)
     }
 
@@ -969,6 +1028,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
             editingRowID: currentEditingRowID
         )
         listView.layoutSubtreeIfNeeded()
+        listView.scrollRowToVisible(selectedRowID)
         attachEditorIfNeeded(placeCaretAtEnd: placeCaretAtEnd)
     }
 
@@ -1653,7 +1713,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
     private func resizeWindow(animate: Bool = true) {
         guard let window = view.window else { return }
         guard !isInNativeFullScreen else { return }
-        let rows = CGFloat(max(rowCount, 1))
+        let rows = CGFloat(max(visibleRowCount, 1))
         let contentHeight = rows * rowHeight + LayoutMetrics.contentTopPadding + LayoutMetrics.contentBottomPadding
         let titlebarHeight = window.titlebarHeight
         let fullHeight = max(contentHeight + titlebarHeight, window.minSize.height)

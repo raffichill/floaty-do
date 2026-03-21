@@ -133,6 +133,7 @@ final class TodoListView: NSView {
             displayOrder = models.map(\.id)
         }
 
+        syncDocumentFrameToContent()
         layoutRows(animated: animatedLayout, duration: animatedLayoutDuration)
         self.selectionRevealRowID = nil
     }
@@ -171,6 +172,15 @@ final class TodoListView: NSView {
         rowViews[rowID]
     }
 
+    func scrollRowToVisible(_ rowID: TodoRowID?) {
+        guard let rowID,
+              let rowFrame = frameForRow(withID: rowID) else {
+            return
+        }
+
+        scrollToVisible(rowFrame.insetBy(dx: 0, dy: -4))
+    }
+
     func animateRemoval(of rowID: TodoRowID, duration: TimeInterval, completion: @escaping () -> Void) {
         guard let rowView = rowViews[rowID] else {
             completion()
@@ -204,6 +214,7 @@ final class TodoListView: NSView {
 
     override func layout() {
         super.layout()
+        syncDocumentFrameToContent()
         layoutRows(animated: false, duration: nil)
     }
 
@@ -716,6 +727,18 @@ final class TodoListView: NSView {
     private func frameForRow(withID rowID: TodoRowID) -> CGRect? {
         guard let index = displayOrder.firstIndex(of: rowID) else { return nil }
         return frameForRow(at: index)
+    }
+
+    private func syncDocumentFrameToContent() {
+        guard let clipView = superview as? NSClipView else { return }
+
+        let targetSize = NSSize(
+            width: clipView.bounds.width,
+            height: max(CGFloat(displayOrder.count) * CGFloat(preferences.rowHeight), clipView.bounds.height)
+        )
+
+        guard frame.size != targetSize else { return }
+        frame.size = targetSize
     }
 }
 
