@@ -1510,7 +1510,7 @@ final class KeyboardOnlyTextField: NSTextField {
     override func mouseUp(with event: NSEvent) {}
 }
 
-final class HoverTrackingButton: NSButton {
+final class HoverTrackingButton: PressScaleButton {
     var onHoverChange: ((Bool) -> Void)?
 
     private(set) var isHovered = false {

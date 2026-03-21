@@ -30,9 +30,9 @@ private struct TodoUndoSnapshot: Equatable {
 
 public final class TodoViewController: NSViewController, NSTextFieldDelegate {
     private enum DebugMetrics {
-        static let showsHeaderButtonHitTargets = true
-        static let showsHeaderAreaOutline = true
-        static let headerButtonWidth: CGFloat = 40
+        static let showsHeaderButtonHitTargets = false
+        static let showsHeaderAreaOutline = false
+        static let headerButtonWidth: CGFloat = 34
         static let headerButtonOutlineColor = NSColor.systemPink.withAlphaComponent(0.9)
         static let headerAreaOutlineColor = NSColor.systemPink.withAlphaComponent(0.9)
     }
@@ -56,7 +56,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
     private var cancellables = Set<AnyCancellable>()
     private var currentTab: Tab = .tasks
     private var tasksTabButton: NSButton!
-    private var archiveTabButton: NSButton!
+    private var archiveTabButton: HoverTrackingButton!
     private var settingsButton: HoverTrackingButton!
     private var settingsWindowController: SettingsWindowController?
     private var isAnimating = false
@@ -130,7 +130,10 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         containerView = container
 
         tasksTabButton = makeTabButton(symbolName: "checklist.unchecked", action: #selector(switchToTasks))
-        archiveTabButton = makeTabButton(symbolName: "archivebox", action: #selector(switchToArchive))
+        archiveTabButton = makeHoverTabButton(symbolName: "archivebox", action: #selector(switchToArchive))
+        archiveTabButton.onHoverChange = { [weak self] _ in
+            self?.updateTabAppearance()
+        }
         settingsButton = makeHoverTabButton(symbolName: "paintpalette", action: #selector(toggleSettings(_:)))
         settingsButton.onHoverChange = { [weak self] _ in
             self?.updateTabAppearance()
@@ -191,7 +194,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
 
             tabBar.topAnchor.constraint(equalTo: container.topAnchor),
             tabBar.bottomAnchor.constraint(equalTo: headerDebugView.bottomAnchor),
-            tabBar.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            tabBar.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -6),
             tabBar.widthAnchor.constraint(equalToConstant: DebugMetrics.headerButtonWidth * 3),
 
             headerButtonDebugOverlay.leadingAnchor.constraint(equalTo: tabBar.leadingAnchor),
@@ -494,13 +497,14 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         old.cornerRadius != new.cornerRadius
     }
 
-    private func makeTabButton(symbolName: String, action: Selector) -> NSButton {
+    private func makeTabButton(symbolName: String, action: Selector) -> PressScaleButton {
         let image = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)!
         let config = NSImage.SymbolConfiguration(pointSize: 13, weight: .medium)
-        let button = NSButton(image: image.withSymbolConfiguration(config)!, target: self, action: action)
+        let button = PressScaleButton(image: image.withSymbolConfiguration(config)!, target: self, action: action)
         button.isBordered = false
         button.imagePosition = .imageOnly
         button.translatesAutoresizingMaskIntoConstraints = false
+        button.wantsLayer = true
         button.widthAnchor.constraint(equalToConstant: DebugMetrics.headerButtonWidth).isActive = true
         return button
     }
@@ -512,6 +516,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         button.isBordered = false
         button.imagePosition = .imageOnly
         button.translatesAutoresizingMaskIntoConstraints = false
+        button.wantsLayer = true
         button.widthAnchor.constraint(equalToConstant: DebugMetrics.headerButtonWidth).isActive = true
         return button
     }
@@ -528,7 +533,8 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
     private func updateTabAppearance() {
         let primary = store.preferences.primaryTextColor
         tasksTabButton.contentTintColor = currentTab == .tasks ? primary : primary.withAlphaComponent(0.35)
-        archiveTabButton.contentTintColor = currentTab == .archive ? primary : primary.withAlphaComponent(0.35)
+        let archiveIsEmphasized = currentTab == .archive || archiveTabButton.isHovered
+        archiveTabButton.contentTintColor = archiveIsEmphasized ? primary : primary.withAlphaComponent(0.35)
         let settingsIsEmphasized = settingsWindowController?.window?.isVisible == true || settingsButton.isHovered
         settingsButton.contentTintColor = settingsIsEmphasized ? primary : primary.withAlphaComponent(0.42)
     }
@@ -1909,6 +1915,37 @@ private extension NSWindow {
         let safeAreaHeight = contentView?.safeAreaInsets.top ?? 0
         let layoutChromeHeight = max(0, frame.height - contentLayoutRect.height)
         return max(safeAreaHeight, layoutChromeHeight)
+    }
+}
+
+class PressScaleButton: NSButton {
+    var pressedScale: CGFloat = 0.97
+
+    override var mouseDownCanMoveWindow: Bool { false }
+
+    override func mouseDown(with event: NSEvent) {
+        setPressedAppearance(true, duration: 0.08)
+        super.mouseDown(with: event)
+        setPressedAppearance(false, duration: 0.12)
+    }
+
+    private func setPressedAppearance(_ pressed: Bool, duration: CFTimeInterval) {
+        wantsLayer = true
+        guard let layer else { return }
+
+        let targetTransform = CATransform3DMakeScale(
+            pressed ? pressedScale : 1,
+            pressed ? pressedScale : 1,
+            1
+        )
+        let animation = CABasicAnimation(keyPath: "transform")
+        animation.fromValue = layer.presentation()?.transform ?? layer.transform
+        animation.toValue = targetTransform
+        animation.duration = duration
+        animation.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        layer.removeAnimation(forKey: "pressScale")
+        layer.add(animation, forKey: "pressScale")
+        layer.transform = targetTransform
     }
 }
 
@@ -3375,7 +3412,38 @@ private final class KeyboardOnlyTextField: NSTextField {
     override func mouseUp(with event: NSEvent) {}
 }
 
-final class HoverTrackingButton: NSButton {
+class PressScaleButton: NSButton {
+    var pressedScale: CGFloat = 0.97
+
+    override var mouseDownCanMoveWindow: Bool { false }
+
+    override func mouseDown(with event: NSEvent) {
+        setPressedAppearance(true, duration: 0.08)
+        super.mouseDown(with: event)
+        setPressedAppearance(false, duration: 0.12)
+    }
+
+    private func setPressedAppearance(_ pressed: Bool, duration: CFTimeInterval) {
+        wantsLayer = true
+        guard let layer else { return }
+
+        let targetTransform = CATransform3DMakeScale(
+            pressed ? pressedScale : 1,
+            pressed ? pressedScale : 1,
+            1
+        )
+        let animation = CABasicAnimation(keyPath: "transform")
+        animation.fromValue = layer.presentation()?.transform ?? layer.transform
+        animation.toValue = targetTransform
+        animation.duration = duration
+        animation.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        layer.removeAnimation(forKey: "pressScale")
+        layer.add(animation, forKey: "pressScale")
+        layer.transform = targetTransform
+    }
+}
+
+final class HoverTrackingButton: PressScaleButton {
     var onHoverChange: ((Bool) -> Void)?
 
     private(set) var isHovered = false {
