@@ -5,6 +5,108 @@ private final class SettingsPanel: NSPanel {
     override var canBecomeMain: Bool { false }
 }
 
+struct SettingsWindowPlacement {
+    enum HorizontalSide {
+        case left
+        case right
+    }
+
+    static let companionGap: CGFloat = 24
+    static let screenEdgePadding: CGFloat = 24
+    static let minimumViewportWidthForCompanionLayout: CGFloat = 1400
+    static let minimumViewportHeightForCompanionLayout: CGFloat = 820
+
+    static func origin(for windowSize: NSSize, parentFrame: NSRect?, visibleFrame: NSRect) -> NSPoint {
+        guard let parentFrame, supportsCompanionLayout(windowSize: windowSize, parentFrame: parentFrame, visibleFrame: visibleFrame) else {
+            return centeredOrigin(for: windowSize, in: visibleFrame)
+        }
+
+        let orderedSides = preferredHorizontalSides(parentFrame: parentFrame, visibleFrame: visibleFrame)
+        let alignedToTop = parentFrame.midY >= visibleFrame.midY
+        let expandedParentFrame = parentFrame.insetBy(dx: -(companionGap / 2.0), dy: -8)
+
+        let candidates = orderedSides.map {
+            candidateFrame(
+                for: windowSize,
+                side: $0,
+                alignedToTop: alignedToTop,
+                parentFrame: parentFrame,
+                visibleFrame: visibleFrame
+            )
+        }
+
+        if let nonIntersectingCandidate = candidates.first(where: { !$0.intersects(expandedParentFrame) }) {
+            return nonIntersectingCandidate.origin
+        }
+
+        return candidates.first?.origin ?? centeredOrigin(for: windowSize, in: visibleFrame)
+    }
+
+    private static func supportsCompanionLayout(windowSize: NSSize, parentFrame: NSRect, visibleFrame: NSRect) -> Bool {
+        let requiredWidth = parentFrame.width + windowSize.width + companionGap + (screenEdgePadding * 2.0)
+        let requiredHeight = max(parentFrame.height, windowSize.height) + (screenEdgePadding * 2.0)
+        return visibleFrame.width >= max(requiredWidth, minimumViewportWidthForCompanionLayout)
+            && visibleFrame.height >= max(requiredHeight, minimumViewportHeightForCompanionLayout)
+    }
+
+    private static func preferredHorizontalSides(parentFrame: NSRect, visibleFrame: NSRect) -> [HorizontalSide] {
+        let leftSpace = parentFrame.minX - visibleFrame.minX
+        let rightSpace = visibleFrame.maxX - parentFrame.maxX
+        return rightSpace >= leftSpace ? [.right, .left] : [.left, .right]
+    }
+
+    private static func candidateFrame(
+        for windowSize: NSSize,
+        side: HorizontalSide,
+        alignedToTop: Bool,
+        parentFrame: NSRect,
+        visibleFrame: NSRect
+    ) -> NSRect {
+        let rawX: CGFloat
+        switch side {
+        case .left:
+            rawX = parentFrame.minX - companionGap - windowSize.width
+        case .right:
+            rawX = parentFrame.maxX + companionGap
+        }
+
+        let rawY = alignedToTop
+            ? parentFrame.maxY - windowSize.height
+            : parentFrame.minY
+
+        let clampedOrigin = clampedOrigin(
+            rawOrigin: NSPoint(x: rawX, y: rawY),
+            size: windowSize,
+            visibleFrame: visibleFrame
+        )
+        return NSRect(origin: clampedOrigin, size: windowSize)
+    }
+
+    private static func clampedOrigin(rawOrigin: NSPoint, size: NSSize, visibleFrame: NSRect) -> NSPoint {
+        NSPoint(
+            x: min(
+                max(rawOrigin.x, visibleFrame.minX + screenEdgePadding),
+                visibleFrame.maxX - size.width - screenEdgePadding
+            ),
+            y: min(
+                max(rawOrigin.y, visibleFrame.minY + screenEdgePadding),
+                visibleFrame.maxY - size.height - screenEdgePadding
+            )
+        )
+    }
+
+    private static func centeredOrigin(for windowSize: NSSize, in visibleFrame: NSRect) -> NSPoint {
+        clampedOrigin(
+            rawOrigin: NSPoint(
+                x: visibleFrame.midX - (windowSize.width / 2.0),
+                y: visibleFrame.midY - (windowSize.height / 2.0)
+            ),
+            size: windowSize,
+            visibleFrame: visibleFrame
+        )
+    }
+}
+
 final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     private enum ChromeMetrics {
         static let trafficLightInset: CGFloat = 18
@@ -83,9 +185,10 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
                 ?? NSScreen.main?.visibleFrame
                 ?? window.screen?.visibleFrame
                 ?? window.frame
-            let origin = NSPoint(
-                x: visibleFrame.midX - (window.frame.width / 2.0),
-                y: visibleFrame.midY - (window.frame.height / 2.0)
+            let origin = SettingsWindowPlacement.origin(
+                for: window.frame.size,
+                parentFrame: parentWindow?.frame,
+                visibleFrame: visibleFrame
             )
             window.setFrameOrigin(origin)
         }
