@@ -11,6 +11,12 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         static let trafficLightSpacing: CGFloat = 6
     }
 
+    private enum WindowMetrics {
+        static let width: CGFloat = SettingsViewController.preferredWindowWidth
+        static let initialHeight: CGFloat = 560
+        static let minimumHeight: CGFloat = 320
+    }
+
     var onPreferencesChange: ((AppPreferences) -> Void)? {
         didSet {
             installPreferencesChangeHandler()
@@ -27,11 +33,11 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         self.surfaceViewController = PanelSurfaceHostingViewController(
             preferences: preferences,
             contentViewController: settingsViewController,
-            frame: NSRect(x: 0, y: 0, width: 880, height: 660)
+            frame: NSRect(x: 0, y: 0, width: WindowMetrics.width, height: WindowMetrics.initialHeight)
         )
 
         let window = SettingsPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 880, height: 660),
+            contentRect: NSRect(x: 0, y: 0, width: WindowMetrics.width, height: WindowMetrics.initialHeight),
             styleMask: [.titled, .closable, .miniaturizable, .fullSizeContentView],
             backing: .buffered,
             defer: false
@@ -43,13 +49,14 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         window.isFloatingPanel = true
         window.hidesOnDeactivate = false
         window.center()
-        window.minSize = NSSize(width: 820, height: 620)
+        window.minSize = NSSize(width: WindowMetrics.width, height: WindowMetrics.minimumHeight)
+        window.maxSize = NSSize(width: WindowMetrics.width, height: CGFloat.greatestFiniteMagnitude)
         window.contentViewController = surfaceViewController
 
         let toolbar = NSToolbar(identifier: "settings")
         toolbar.showsBaselineSeparator = false
         window.toolbar = toolbar
-        window.toolbarStyle = .unified
+        window.toolbarStyle = .unifiedCompact
 
         super.init(window: window)
 
@@ -57,6 +64,9 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         self.window?.delegate = self
         if let window = self.window {
             applyWindowTheme(preferences, to: window)
+        }
+        settingsViewController.onPreferredWindowHeightChange = { [weak self] height, animated in
+            self?.resizeWindow(toHeight: height, animated: animated)
         }
         installPreferencesChangeHandler()
     }
@@ -67,6 +77,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     }
 
     func present(attachedTo parentWindow: NSWindow?) {
+        resizeWindowToPreferredHeight(animated: false)
         if let window, !window.isVisible {
             let visibleFrame = parentWindow?.screen?.visibleFrame
                 ?? NSScreen.main?.visibleFrame
@@ -82,6 +93,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         window?.makeKeyAndOrderFront(nil)
         applyWindowChromeLayout()
         DispatchQueue.main.async { [weak self] in
+            self?.resizeWindowToPreferredHeight(animated: false)
             self?.applyWindowChromeLayout()
         }
         NSApp.activate(ignoringOtherApps: true)
@@ -136,13 +148,45 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         window.appearance = NSAppearance(named: preferences.usesLightText ? .darkAqua : .aqua)
         window.isOpaque = false
         window.backgroundColor = .clear
-        window.hasShadow = false
+        window.hasShadow = true
     }
 
     private func applyDynamicTheme(_ preferences: AppPreferences) {
         surfaceViewController.apply(preferences: preferences)
         if let window {
             applyWindowTheme(preferences, to: window)
+        }
+    }
+
+    private func resizeWindowToPreferredHeight(animated: Bool) {
+        resizeWindow(toHeight: settingsViewController.preferredWindowHeight(), animated: animated)
+    }
+
+    private func resizeWindow(toHeight requestedHeight: CGFloat, animated: Bool) {
+        guard let window else { return }
+
+        let height = max(requestedHeight, WindowMetrics.minimumHeight)
+        let oldFrame = window.frame
+        let newFrame = NSRect(
+            x: oldFrame.origin.x,
+            y: oldFrame.maxY - height,
+            width: oldFrame.width,
+            height: height
+        )
+
+        guard abs(oldFrame.height - newFrame.height) > 0.5 else {
+            return
+        }
+
+        guard animated, window.isVisible else {
+            window.setFrame(newFrame, display: true, animate: false)
+            return
+        }
+
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.18
+            context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            window.animator().setFrame(newFrame, display: true)
         }
     }
 

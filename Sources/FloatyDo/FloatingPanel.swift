@@ -30,11 +30,12 @@ public final class FloatingPanel: NSWindow {
         appearance = NSAppearance(named: .darkAqua)
         isOpaque = false
         backgroundColor = .clear
-        hasShadow = false
+        hasShadow = true
 
         // Configure custom field editor
         customFieldEditor.isFieldEditor = true
         customFieldEditor.isRichText = false
+        customFieldEditor.allowsUndo = true
 
         let center = NotificationCenter.default
         observers.append(
@@ -73,7 +74,7 @@ public final class FloatingPanel: NSWindow {
         appearance = NSAppearance(named: preferences.usesLightText ? .darkAqua : .aqua)
         backgroundColor = .clear
         alphaValue = 1.0
-        hasShadow = false
+        hasShadow = true
         invalidateShadow()
         contentView?.needsDisplay = true
     }

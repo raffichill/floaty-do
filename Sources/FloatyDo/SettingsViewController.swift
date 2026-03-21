@@ -2,7 +2,7 @@ import AppKit
 
 final class SettingsViewController: NSViewController {
     private enum Metrics {
-        static let outerPadding = NSEdgeInsets(top: 20, left: 34, bottom: 28, right: 34)
+        static let outerPadding = NSEdgeInsets(top: 20, left: 34, bottom: 56, right: 34)
         static let titleTopInset: CGFloat = 10
         static let tabTopInset: CGFloat = 36
         static let dividerTopInset: CGFloat = 104
@@ -40,6 +40,27 @@ final class SettingsViewController: NSViewController {
         static let shortcutsRowSpacing: CGFloat = 14
     }
 
+    private enum AnimationMetrics {
+        static let resizeDuration: TimeInterval = 0.18
+        static let crossfadeDuration: TimeInterval = 0.14
+    }
+
+    static let preferredWindowWidth: CGFloat = 680
+
+    private final class SettingsPageContainerView: NSView {
+        var allowsHitTesting = false
+
+        override func hitTest(_ point: NSPoint) -> NSView? {
+            guard allowsHitTesting, alphaValue > 0.01, !isHidden else { return nil }
+            return super.hitTest(point)
+        }
+    }
+
+    private struct SettingsPage {
+        let container: SettingsPageContainerView
+        let contentHeight: CGFloat
+    }
+
     private enum SettingsTab: CaseIterable, Hashable {
         case appearance
         case shortcuts
@@ -63,22 +84,27 @@ final class SettingsViewController: NSViewController {
     }
 
     var onPreferencesChange: ((AppPreferences) -> Void)?
+    var onPreferredWindowHeightChange: ((CGFloat, Bool) -> Void)?
 
     private var preferences: AppPreferences
     private var isUpdatingControls = false
     private var selectedTab: SettingsTab = .appearance
+    private var displayedTab: SettingsTab?
+    private var transitionGeneration = 0
 
     private let titleLabel = NSTextField(labelWithString: "Settings")
     private let tabStack = NSStackView()
+    private let headerView = NSView()
     private let divider = NSView()
     private let contentHostView = NSView()
+    private var contentHostHeightConstraint: NSLayoutConstraint?
     private var primaryLabels: [NSTextField] = []
     private var secondaryLabels: [NSTextField] = []
     private var keycapLabels: [NSTextField] = []
     private var keycapBackgroundViews: [NSView] = []
 
     private var tabButtons: [SettingsTab: SettingsTabButton] = [:]
-    private var pageViews: [SettingsTab: NSView] = [:]
+    private var pages: [SettingsTab: SettingsPage] = [:]
 
     private let iconStatusLabel = NSTextField(labelWithString: "")
     private let applyIconButton = NSButton(title: "Relaunch", target: nil, action: nil)
@@ -129,6 +155,8 @@ final class SettingsViewController: NSViewController {
         titleLabel.alignment = .center
         primaryLabels.append(titleLabel)
 
+        headerView.translatesAutoresizingMaskIntoConstraints = false
+
         tabStack.orientation = .horizontal
         tabStack.alignment = .centerY
         tabStack.spacing = 4
@@ -138,20 +166,31 @@ final class SettingsViewController: NSViewController {
         divider.wantsLayer = true
 
         contentHostView.translatesAutoresizingMaskIntoConstraints = false
+        contentHostView.wantsLayer = true
+        contentHostView.layer?.masksToBounds = true
 
-        root.addSubview(titleLabel)
-        root.addSubview(tabStack)
+        root.addSubview(headerView)
         root.addSubview(divider)
         root.addSubview(contentHostView)
+        headerView.addSubview(titleLabel)
+        headerView.addSubview(tabStack)
+
+        let contentHostHeightConstraint = contentHostView.heightAnchor.constraint(equalToConstant: 0)
+        self.contentHostHeightConstraint = contentHostHeightConstraint
 
         NSLayoutConstraint.activate([
-            titleLabel.topAnchor.constraint(equalTo: root.topAnchor, constant: Metrics.titleTopInset),
+            headerView.topAnchor.constraint(equalTo: root.topAnchor),
+            headerView.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            headerView.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            headerView.heightAnchor.constraint(equalToConstant: Metrics.dividerTopInset),
+
+            titleLabel.topAnchor.constraint(equalTo: headerView.topAnchor, constant: Metrics.titleTopInset),
             titleLabel.centerXAnchor.constraint(equalTo: root.centerXAnchor),
 
-            tabStack.topAnchor.constraint(equalTo: root.topAnchor, constant: Metrics.tabTopInset),
+            tabStack.topAnchor.constraint(equalTo: headerView.topAnchor, constant: Metrics.tabTopInset),
             tabStack.centerXAnchor.constraint(equalTo: root.centerXAnchor),
 
-            divider.topAnchor.constraint(equalTo: root.topAnchor, constant: Metrics.dividerTopInset),
+            divider.topAnchor.constraint(equalTo: headerView.bottomAnchor),
             divider.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             divider.trailingAnchor.constraint(equalTo: root.trailingAnchor),
             divider.heightAnchor.constraint(equalToConstant: 1),
@@ -159,7 +198,8 @@ final class SettingsViewController: NSViewController {
             contentHostView.topAnchor.constraint(equalTo: divider.bottomAnchor, constant: Metrics.contentTopInset),
             contentHostView.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: Metrics.outerPadding.left),
             contentHostView.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -Metrics.outerPadding.right),
-            contentHostView.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -Metrics.outerPadding.bottom),
+            contentHostView.bottomAnchor.constraint(lessThanOrEqualTo: root.bottomAnchor, constant: -Metrics.outerPadding.bottom),
+            contentHostHeightConstraint,
         ])
 
         self.view = root
@@ -172,6 +212,11 @@ final class SettingsViewController: NSViewController {
         buildPages()
         selectTab(.appearance)
         applyPreferencesToControls()
+    }
+
+    override func viewDidAppear() {
+        super.viewDidAppear()
+        reportPreferredWindowHeight(animated: false)
     }
 
     func updatePreferences(_ preferences: AppPreferences) {
@@ -211,11 +256,51 @@ final class SettingsViewController: NSViewController {
     }
 
     private func buildPages() {
-        pageViews = [
+        let pageContentViews: [SettingsTab: NSView] = [
             .appearance: makeAppearancePage(),
             .shortcuts: makeShortcutsPage(),
             .about: makeAboutPage(),
         ]
+        var pageContainers: [SettingsTab: SettingsPageContainerView] = [:]
+
+        pages = [:]
+        contentHostView.subviews.forEach { $0.removeFromSuperview() }
+
+        for tab in SettingsTab.allCases {
+            guard let contentView = pageContentViews[tab] else { continue }
+            let pageView = SettingsPageContainerView()
+            pageView.translatesAutoresizingMaskIntoConstraints = false
+            pageView.wantsLayer = true
+            pageView.alphaValue = 0
+            pageView.allowsHitTesting = false
+            pageView.addSubview(contentView)
+            contentView.translatesAutoresizingMaskIntoConstraints = false
+            contentHostView.addSubview(pageView)
+            pageContainers[tab] = pageView
+            NSLayoutConstraint.activate([
+                pageView.leadingAnchor.constraint(equalTo: contentHostView.leadingAnchor),
+                pageView.trailingAnchor.constraint(equalTo: contentHostView.trailingAnchor),
+                pageView.topAnchor.constraint(equalTo: contentHostView.topAnchor),
+
+                contentView.leadingAnchor.constraint(equalTo: pageView.leadingAnchor),
+                contentView.trailingAnchor.constraint(equalTo: pageView.trailingAnchor),
+                contentView.topAnchor.constraint(equalTo: pageView.topAnchor),
+                contentView.bottomAnchor.constraint(equalTo: pageView.bottomAnchor),
+            ])
+        }
+
+        view.layoutSubtreeIfNeeded()
+
+        for tab in SettingsTab.allCases {
+            guard let pageView = pageContainers[tab] else { continue }
+
+            let contentHeight = ceil(pageView.fittingSize.height)
+            let heightConstraint = pageView.heightAnchor.constraint(equalToConstant: contentHeight)
+            heightConstraint.isActive = true
+            pages[tab] = SettingsPage(container: pageView, contentHeight: contentHeight)
+        }
+
+        view.layoutSubtreeIfNeeded()
     }
 
     @objc private func tabSelected(_ sender: NSButton) {
@@ -224,47 +309,96 @@ final class SettingsViewController: NSViewController {
     }
 
     private func selectTab(_ tab: SettingsTab) {
+        let outgoingTab = displayedTab ?? tab
         selectedTab = tab
         tabButtons.forEach { key, button in
             button.isSelected = key == tab
         }
 
-        contentHostView.subviews.forEach { $0.removeFromSuperview() }
-        guard let pageView = pageViews[tab] else { return }
-        pageView.translatesAutoresizingMaskIntoConstraints = false
-        contentHostView.addSubview(pageView)
-        NSLayoutConstraint.activate([
-            pageView.leadingAnchor.constraint(equalTo: contentHostView.leadingAnchor),
-            pageView.trailingAnchor.constraint(equalTo: contentHostView.trailingAnchor),
-            pageView.topAnchor.constraint(equalTo: contentHostView.topAnchor),
-            pageView.bottomAnchor.constraint(lessThanOrEqualTo: contentHostView.bottomAnchor),
-        ])
+        let targetContentHeight = measuredContentHeight(for: tab)
+        let shouldAnimate = view.window?.isVisible == true && displayedTab != nil && outgoingTab != tab
+
+        transitionGeneration += 1
+        let transitionID = transitionGeneration
+
+        guard shouldAnimate else {
+            applyVisiblePage(tab)
+            transitionDisplayedContentHeight(to: targetContentHeight, animated: false)
+            reportPreferredWindowHeight(forContentHeight: targetContentHeight, animated: false)
+            return
+        }
+
+        preparePagesForTransition(from: outgoingTab, to: tab)
+        let currentContentHeight = contentHostHeightConstraint?.constant ?? measuredContentHeight(for: outgoingTab)
+        let grows = targetContentHeight > currentContentHeight + 0.5
+
+        reportPreferredWindowHeight(forContentHeight: targetContentHeight, animated: true)
+
+        if grows {
+            transitionDisplayedContentHeight(to: targetContentHeight, animated: true) { [weak self] in
+                self?.crossfadeIfCurrent(from: outgoingTab, to: tab, transitionID: transitionID)
+            }
+            return
+        }
+
+        crossfadePages(from: outgoingTab, to: tab, transitionID: transitionID)
+        transitionDisplayedContentHeight(to: targetContentHeight, animated: true)
     }
 
     private func makeAppearancePage() -> NSView {
-        let contentStack = NSStackView(views: [
-            makeFormRow(title: "Background", control: makeThemeControl()),
-            makeFormRow(title: "Transparent", control: makeTransparencyAndBlurControl()),
-            makeFormRow(title: "Font", control: makeFontControl()),
-            makeFormRow(title: "Font Size", control: makeFontSizeControl()),
-            makeFormRow(title: "Radius", control: makeBorderRadiusControl()),
-            makeFormRow(title: "App Icon", control: makeAppIconControl()),
+        let labelsStack = NSStackView(views: [
+            makeAppearanceLabelRow(title: "Background"),
+            makeAppearanceLabelRow(title: "Transparent"),
+            makeAppearanceLabelRow(title: "Font"),
+            makeAppearanceLabelRow(title: "Font Size"),
+            makeAppearanceLabelRow(title: "Radius"),
+            makeAppearanceLabelRow(title: "App Icon"),
         ])
-        contentStack.orientation = .vertical
-        contentStack.alignment = .leading
-        contentStack.spacing = Metrics.rowSpacing
-        contentStack.translatesAutoresizingMaskIntoConstraints = false
+        labelsStack.orientation = .vertical
+        labelsStack.alignment = .trailing
+        labelsStack.spacing = Metrics.rowSpacing
+        labelsStack.translatesAutoresizingMaskIntoConstraints = false
+
+        let controlsStack = NSStackView(views: [
+            wrapAppearanceControl(makeThemeControl()),
+            wrapAppearanceControl(makeTransparencyAndBlurControl()),
+            wrapAppearanceControl(makeFontControl()),
+            wrapAppearanceControl(makeFontSizeControl()),
+            wrapAppearanceControl(makeBorderRadiusControl()),
+            wrapAppearanceControl(makeAppIconControl()),
+        ])
+        controlsStack.orientation = .vertical
+        controlsStack.alignment = .centerX
+        controlsStack.spacing = Metrics.rowSpacing
+        controlsStack.translatesAutoresizingMaskIntoConstraints = false
+
+        let content = NSView()
+        content.translatesAutoresizingMaskIntoConstraints = false
+        content.addSubview(labelsStack)
+        content.addSubview(controlsStack)
+
+        NSLayoutConstraint.activate([
+            controlsStack.topAnchor.constraint(equalTo: content.topAnchor),
+            controlsStack.centerXAnchor.constraint(equalTo: content.centerXAnchor),
+            controlsStack.trailingAnchor.constraint(lessThanOrEqualTo: content.trailingAnchor),
+            controlsStack.bottomAnchor.constraint(equalTo: content.bottomAnchor),
+
+            labelsStack.topAnchor.constraint(equalTo: controlsStack.topAnchor),
+            labelsStack.trailingAnchor.constraint(equalTo: controlsStack.leadingAnchor, constant: -18),
+            labelsStack.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+            labelsStack.bottomAnchor.constraint(equalTo: controlsStack.bottomAnchor),
+        ])
 
         let container = NSView()
         container.translatesAutoresizingMaskIntoConstraints = false
-        container.addSubview(contentStack)
+        container.addSubview(content)
 
         NSLayoutConstraint.activate([
-            contentStack.topAnchor.constraint(equalTo: container.topAnchor),
-            contentStack.centerXAnchor.constraint(equalTo: container.centerXAnchor),
-            contentStack.leadingAnchor.constraint(greaterThanOrEqualTo: container.leadingAnchor, constant: 24),
-            contentStack.trailingAnchor.constraint(lessThanOrEqualTo: container.trailingAnchor, constant: -24),
-            contentStack.bottomAnchor.constraint(lessThanOrEqualTo: container.bottomAnchor),
+            content.topAnchor.constraint(equalTo: container.topAnchor),
+            content.centerXAnchor.constraint(equalTo: container.centerXAnchor),
+            content.leadingAnchor.constraint(greaterThanOrEqualTo: container.leadingAnchor, constant: 24),
+            content.trailingAnchor.constraint(lessThanOrEqualTo: container.trailingAnchor, constant: -24),
+            content.bottomAnchor.constraint(equalTo: container.bottomAnchor),
         ])
 
         return container
@@ -281,6 +415,8 @@ final class SettingsViewController: NSViewController {
             ("New row below", ["return"]),
             ("Complete selected", ["command", "return"]),
             ("Delete selected", ["command", "delete"]),
+            ("Show list", ["command", "1"]),
+            ("Show archive", ["command", "2"]),
             ("Move selection", ["up/down"]),
             ("Expand selection", ["shift", "up/down"]),
             ("Jump to top or bottom", ["command", "up/down"]),
@@ -303,7 +439,7 @@ final class SettingsViewController: NSViewController {
             stack.centerXAnchor.constraint(equalTo: container.centerXAnchor),
             stack.leadingAnchor.constraint(greaterThanOrEqualTo: container.leadingAnchor, constant: 24),
             stack.trailingAnchor.constraint(lessThanOrEqualTo: container.trailingAnchor, constant: -24),
-            stack.bottomAnchor.constraint(lessThanOrEqualTo: container.bottomAnchor),
+            stack.bottomAnchor.constraint(equalTo: container.bottomAnchor),
         ])
 
         return container
@@ -325,7 +461,7 @@ final class SettingsViewController: NSViewController {
             label.topAnchor.constraint(equalTo: container.topAnchor, constant: 8),
             label.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 8),
             label.trailingAnchor.constraint(lessThanOrEqualTo: container.trailingAnchor, constant: -8),
-            label.bottomAnchor.constraint(lessThanOrEqualTo: container.bottomAnchor),
+            label.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -8),
         ])
 
         return container
@@ -555,33 +691,146 @@ final class SettingsViewController: NSViewController {
         return stack
     }
 
-    private func makeFormRow(title: String, control: NSView) -> NSView {
+    private func makeAppearanceLabelRow(title: String) -> NSView {
+        let container = NSView()
+        container.translatesAutoresizingMaskIntoConstraints = false
+        container.heightAnchor.constraint(equalToConstant: Metrics.rowHeight).isActive = true
+
         let label = NSTextField(labelWithString: title)
         label.font = .systemFont(ofSize: 12, weight: .regular)
         label.alignment = .right
         label.translatesAutoresizingMaskIntoConstraints = false
         label.widthAnchor.constraint(equalToConstant: Metrics.labelWidth).isActive = true
         primaryLabels.append(label)
-
-        let controlContainer = NSView()
-        controlContainer.translatesAutoresizingMaskIntoConstraints = false
-        controlContainer.widthAnchor.constraint(equalToConstant: Metrics.controlWidth).isActive = true
-        controlContainer.heightAnchor.constraint(equalToConstant: Metrics.rowHeight).isActive = true
-        control.translatesAutoresizingMaskIntoConstraints = false
-        controlContainer.addSubview(control)
+        container.addSubview(label)
 
         NSLayoutConstraint.activate([
-            control.leadingAnchor.constraint(equalTo: controlContainer.leadingAnchor),
-            control.centerYAnchor.constraint(equalTo: controlContainer.centerYAnchor),
-            control.topAnchor.constraint(greaterThanOrEqualTo: controlContainer.topAnchor),
-            control.bottomAnchor.constraint(lessThanOrEqualTo: controlContainer.bottomAnchor),
+            label.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            label.centerYAnchor.constraint(equalTo: container.centerYAnchor),
+            label.leadingAnchor.constraint(equalTo: container.leadingAnchor),
         ])
 
-        let row = NSStackView(views: [label, controlContainer])
-        row.orientation = .horizontal
-        row.alignment = .centerY
-        row.spacing = 18
-        return row
+        return container
+    }
+
+    private func wrapAppearanceControl(_ control: NSView) -> NSView {
+        let container = NSView()
+        container.translatesAutoresizingMaskIntoConstraints = false
+        container.widthAnchor.constraint(equalToConstant: Metrics.controlWidth).isActive = true
+        container.heightAnchor.constraint(equalToConstant: Metrics.rowHeight).isActive = true
+        control.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(control)
+
+        NSLayoutConstraint.activate([
+            control.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            control.centerYAnchor.constraint(equalTo: container.centerYAnchor),
+            control.topAnchor.constraint(greaterThanOrEqualTo: container.topAnchor),
+            control.bottomAnchor.constraint(lessThanOrEqualTo: container.bottomAnchor),
+        ])
+
+        return container
+    }
+
+    func preferredWindowHeight() -> CGFloat {
+        loadViewIfNeeded()
+        return totalWindowHeight(forContentHeight: measuredContentHeight(for: selectedTab))
+    }
+
+    private func reportPreferredWindowHeight(forContentHeight contentHeight: CGFloat? = nil, animated: Bool) {
+        guard isViewLoaded else { return }
+        let resolvedContentHeight = contentHeight ?? measuredContentHeight(for: selectedTab)
+        onPreferredWindowHeightChange?(totalWindowHeight(forContentHeight: resolvedContentHeight), animated)
+    }
+
+    private func measuredContentHeight(for tab: SettingsTab) -> CGFloat {
+        pages[tab]?.contentHeight ?? 0
+    }
+
+    private func totalWindowHeight(forContentHeight contentHeight: CGFloat) -> CGFloat {
+        Metrics.dividerTopInset + 1 + Metrics.contentTopInset + contentHeight + Metrics.outerPadding.bottom
+    }
+
+    private func transitionDisplayedContentHeight(to targetHeight: CGFloat, animated: Bool, completion: (() -> Void)? = nil) {
+        guard let contentHostHeightConstraint else { return }
+        let currentHeight = contentHostHeightConstraint.constant
+
+        guard abs(currentHeight - targetHeight) > 0.5 else {
+            completion?()
+            return
+        }
+
+        guard animated else {
+            contentHostHeightConstraint.constant = targetHeight
+            view.layoutSubtreeIfNeeded()
+            completion?()
+            return
+        }
+
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = AnimationMetrics.resizeDuration
+            context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            context.allowsImplicitAnimation = true
+            contentHostHeightConstraint.animator().constant = targetHeight
+            view.layoutSubtreeIfNeeded()
+        } completionHandler: {
+            completion?()
+        }
+    }
+
+    private func applyVisiblePage(_ tab: SettingsTab) {
+        for (key, page) in pages {
+            let isVisible = key == tab
+            page.container.alphaValue = isVisible ? 1 : 0
+            page.container.isHidden = false
+            page.container.allowsHitTesting = isVisible
+        }
+        displayedTab = tab
+    }
+
+    private func preparePagesForTransition(from outgoingTab: SettingsTab, to incomingTab: SettingsTab) {
+        for (key, page) in pages {
+            page.container.layer?.removeAllAnimations()
+            page.container.isHidden = false
+            page.container.allowsHitTesting = false
+            switch key {
+            case outgoingTab:
+                page.container.alphaValue = 1
+            case incomingTab:
+                page.container.alphaValue = 0
+            default:
+                page.container.alphaValue = 0
+            }
+        }
+        displayedTab = outgoingTab
+    }
+
+    private func crossfadeIfCurrent(from outgoingTab: SettingsTab, to incomingTab: SettingsTab, transitionID: Int) {
+        guard transitionGeneration == transitionID else { return }
+        crossfadePages(from: outgoingTab, to: incomingTab, transitionID: transitionID)
+    }
+
+    private func crossfadePages(from outgoingTab: SettingsTab, to incomingTab: SettingsTab, transitionID: Int) {
+        guard let outgoingPage = pages[outgoingTab],
+              let incomingPage = pages[incomingTab] else {
+            applyVisiblePage(incomingTab)
+            return
+        }
+
+        outgoingPage.container.isHidden = false
+        incomingPage.container.isHidden = false
+        outgoingPage.container.allowsHitTesting = false
+        incomingPage.container.allowsHitTesting = false
+
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = AnimationMetrics.crossfadeDuration
+            context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            context.allowsImplicitAnimation = true
+            outgoingPage.container.animator().alphaValue = 0
+            incomingPage.container.animator().alphaValue = 1
+        } completionHandler: { [weak self] in
+            guard let self, self.transitionGeneration == transitionID else { return }
+            self.applyVisiblePage(incomingTab)
+        }
     }
 
     private func makeShortcutRow(label: String, shortcut: [String]) -> NSView {

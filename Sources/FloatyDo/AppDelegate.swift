@@ -42,9 +42,10 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
         }
 
-        // App-level shortcuts: cmd+Q to quit, cmd+W to hide panel, cmd+, for theme,
-        // cmd+0 to reset the main window size, cmd+z/cmd+shift+z for undo/redo,
-        // and ctrl+option+arrow to snap the panel to screen edges/corners.
+        // App-level shortcuts: cmd+1/cmd+2 to switch tabs, cmd+Q to quit,
+        // cmd+W to hide panel, cmd+, for theme, cmd+0 to reset the main
+        // window size, cmd+z/cmd+shift+z for undo/redo, and ctrl+option+arrow
+        // to snap the panel to screen edges/corners.
         appEventMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self else { return event }
             let mods = event.modifierFlags.intersection([.command, .option, .control, .shift])
@@ -102,6 +103,14 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             }
             if characters == "," {
                 self.todoVC.openSettingsWindow()
+                return nil
+            }
+            if characters == "1" {
+                self.todoVC.showTasksTab()
+                return nil
+            }
+            if characters == "2" {
+                self.todoVC.showArchiveTab()
                 return nil
             }
             if characters == "0" {

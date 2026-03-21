@@ -133,6 +133,7 @@ final class TodoListView: NSView {
             displayOrder = models.map(\.id)
         }
 
+        syncDocumentFrameToContent()
         layoutRows(animated: animatedLayout, duration: animatedLayoutDuration)
         self.selectionRevealRowID = nil
     }
@@ -171,6 +172,15 @@ final class TodoListView: NSView {
         rowViews[rowID]
     }
 
+    func scrollRowToVisible(_ rowID: TodoRowID?) {
+        guard let rowID,
+              let rowFrame = frameForRow(withID: rowID) else {
+            return
+        }
+
+        scrollToVisible(rowFrame.insetBy(dx: 0, dy: -4))
+    }
+
     func animateRemoval(of rowID: TodoRowID, duration: TimeInterval, completion: @escaping () -> Void) {
         guard let rowView = rowViews[rowID] else {
             completion()
@@ -204,6 +214,7 @@ final class TodoListView: NSView {
 
     override func layout() {
         super.layout()
+        syncDocumentFrameToContent()
         layoutRows(animated: false, duration: nil)
     }
 
@@ -716,6 +727,18 @@ final class TodoListView: NSView {
     private func frameForRow(withID rowID: TodoRowID) -> CGRect? {
         guard let index = displayOrder.firstIndex(of: rowID) else { return nil }
         return frameForRow(at: index)
+    }
+
+    private func syncDocumentFrameToContent() {
+        guard let clipView = superview as? NSClipView else { return }
+
+        let targetSize = NSSize(
+            width: clipView.bounds.width,
+            height: max(CGFloat(displayOrder.count) * CGFloat(preferences.rowHeight), clipView.bounds.height)
+        )
+
+        guard frame.size != targetSize else { return }
+        frame.size = targetSize
     }
 }
 
@@ -1528,7 +1551,11 @@ final class HoverTrackingButton: NSButton {
 }
 
 public final class CaretEndFieldEditor: NSTextView {
+    private var allowsFullSelection = false
+    private let editingUndoManager = UndoManager()
+
     public override var mouseDownCanMoveWindow: Bool { false }
+    public override var undoManager: UndoManager? { editingUndoManager }
 
     public override func addCursorRect(_ rect: NSRect, cursor: NSCursor) {
         super.addCursorRect(rect, cursor: .arrow)
@@ -1546,8 +1573,18 @@ public final class CaretEndFieldEditor: NSTextView {
     public override func mouseDragged(with event: NSEvent) {}
     public override func mouseUp(with event: NSEvent) {}
 
+    public func resetUndoHistory() {
+        editingUndoManager.removeAllActions()
+    }
+
+    public override func selectAll(_ sender: Any?) {
+        allowsFullSelection = true
+        super.selectAll(sender)
+        allowsFullSelection = false
+    }
+
     public override func setSelectedRange(_ charRange: NSRange, affinity: NSSelectionAffinity, stillSelecting flag: Bool) {
-        if charRange.length == string.count && charRange.length > 0 && !flag {
+        if charRange.length == string.count && charRange.length > 0 && !flag && !allowsFullSelection {
             super.setSelectedRange(NSRange(location: string.count, length: 0), affinity: affinity, stillSelecting: flag)
         } else {
             super.setSelectedRange(charRange, affinity: affinity, stillSelecting: flag)
