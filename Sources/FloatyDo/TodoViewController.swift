@@ -31,9 +31,10 @@ private struct TodoUndoSnapshot: Equatable {
 public final class TodoViewController: NSViewController, NSTextFieldDelegate {
     private enum DebugMetrics {
         static let showsHeaderButtonHitTargets = true
-        static let headerButtonWidth: CGFloat = 36
-        static let headerButtonHeight: CGFloat = 30
+        static let showsHeaderAreaOutline = true
+        static let headerButtonWidth: CGFloat = 40
         static let headerButtonOutlineColor = NSColor.systemPink.withAlphaComponent(0.9)
+        static let headerAreaOutlineColor = NSColor.systemPink.withAlphaComponent(0.9)
     }
 
     private let store: TodoStore
@@ -61,9 +62,10 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
     private var isAnimating = false
     private weak var surfaceView: PanelSurfaceView?
     private weak var containerView: NSView?
-    private var tabBarHeightConstraint: NSLayoutConstraint?
+    private var headerDebugHeightConstraint: NSLayoutConstraint?
     private var listTopConstraint: NSLayoutConstraint?
     private var lastKnownHeaderHeight: CGFloat = 0
+    private var lastReportedHeaderHeight: CGFloat = -1
     private let historyManager = UndoManager()
     private var isApplyingSettingsPreferenceChange = false
     private var nativeFullScreenState = false
@@ -134,11 +136,24 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
             self?.updateTabAppearance()
         }
 
-        let tabBar = NSStackView(views: [tasksTabButton, archiveTabButton, settingsButton])
-        tabBar.orientation = .horizontal
-        tabBar.spacing = DebugMetrics.showsHeaderButtonHitTargets ? -1 : 0
+        let headerDebugView = NSView()
+        headerDebugView.translatesAutoresizingMaskIntoConstraints = false
+        applyHeaderDebugOutline(to: headerDebugView)
+
+        let tabBar = NSView()
         tabBar.translatesAutoresizingMaskIntoConstraints = false
+        let headerButtonDebugOverlay = HeaderButtonDebugOverlayView(
+            cellWidth: DebugMetrics.headerButtonWidth,
+            strokeColor: DebugMetrics.headerButtonOutlineColor
+        )
+        headerButtonDebugOverlay.translatesAutoresizingMaskIntoConstraints = false
+        headerButtonDebugOverlay.isHidden = !DebugMetrics.showsHeaderButtonHitTargets
+        container.addSubview(headerDebugView)
         container.addSubview(tabBar)
+        tabBar.addSubview(headerButtonDebugOverlay)
+        tabBar.addSubview(tasksTabButton)
+        tabBar.addSubview(archiveTabButton)
+        tabBar.addSubview(settingsButton)
 
         listScrollView.translatesAutoresizingMaskIntoConstraints = false
         listScrollView.drawsBackground = false
@@ -160,18 +175,48 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         container.addSubview(sharedEditor)
 
         let initialHeaderHeight = defaultHeaderHeight
-        let tabBarHeightConstraint = tabBar.heightAnchor.constraint(equalToConstant: initialHeaderHeight)
         let listTopConstraint = listScrollView.topAnchor.constraint(
             equalTo: container.topAnchor,
             constant: initialHeaderHeight + CGFloat(LayoutMetrics.contentTopPadding)
         )
-        self.tabBarHeightConstraint = tabBarHeightConstraint
+        let headerDebugHeightConstraint = headerDebugView.heightAnchor.constraint(equalToConstant: initialHeaderHeight)
+        self.headerDebugHeightConstraint = headerDebugHeightConstraint
         self.listTopConstraint = listTopConstraint
 
         NSLayoutConstraint.activate([
+            headerDebugView.topAnchor.constraint(equalTo: container.topAnchor),
+            headerDebugView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            headerDebugView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            headerDebugHeightConstraint,
+
             tabBar.topAnchor.constraint(equalTo: container.topAnchor),
-            tabBarHeightConstraint,
-            tabBar.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -LayoutMetrics.titlebarTrailingInset),
+            tabBar.bottomAnchor.constraint(equalTo: headerDebugView.bottomAnchor),
+            tabBar.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            tabBar.widthAnchor.constraint(equalToConstant: DebugMetrics.headerButtonWidth * 3),
+
+            headerButtonDebugOverlay.leadingAnchor.constraint(equalTo: tabBar.leadingAnchor),
+            headerButtonDebugOverlay.trailingAnchor.constraint(equalTo: tabBar.trailingAnchor),
+            headerButtonDebugOverlay.topAnchor.constraint(equalTo: tabBar.topAnchor),
+            headerButtonDebugOverlay.bottomAnchor.constraint(equalTo: tabBar.bottomAnchor),
+
+            tasksTabButton.leadingAnchor.constraint(equalTo: tabBar.leadingAnchor),
+            tasksTabButton.topAnchor.constraint(equalTo: tabBar.topAnchor),
+            tasksTabButton.bottomAnchor.constraint(equalTo: tabBar.bottomAnchor),
+
+            archiveTabButton.leadingAnchor.constraint(
+                equalTo: tasksTabButton.trailingAnchor
+            ),
+            archiveTabButton.topAnchor.constraint(equalTo: tabBar.topAnchor),
+            archiveTabButton.bottomAnchor.constraint(equalTo: tabBar.bottomAnchor),
+            archiveTabButton.widthAnchor.constraint(equalTo: tasksTabButton.widthAnchor),
+
+            settingsButton.leadingAnchor.constraint(
+                equalTo: archiveTabButton.trailingAnchor
+            ),
+            settingsButton.topAnchor.constraint(equalTo: tabBar.topAnchor),
+            settingsButton.bottomAnchor.constraint(equalTo: tabBar.bottomAnchor),
+            settingsButton.trailingAnchor.constraint(equalTo: tabBar.trailingAnchor),
+            settingsButton.widthAnchor.constraint(equalTo: tasksTabButton.widthAnchor),
 
             listTopConstraint,
             listScrollView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
@@ -432,8 +477,12 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
 
     private func updateHeaderLayoutInsets() {
         let headerHeight = effectiveHeaderHeight(for: view.window)
-        tabBarHeightConstraint?.constant = headerHeight
+        headerDebugHeightConstraint?.constant = headerHeight
         listTopConstraint?.constant = headerHeight + CGFloat(LayoutMetrics.contentTopPadding)
+        if abs(lastReportedHeaderHeight - headerHeight) > 0.5 {
+            lastReportedHeaderHeight = headerHeight
+            NSLog("Main panel header height: %.1f", headerHeight)
+        }
     }
 
     private func preferencesRequireRowRefresh(old: AppPreferences, new: AppPreferences) -> Bool {
@@ -453,8 +502,6 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         button.imagePosition = .imageOnly
         button.translatesAutoresizingMaskIntoConstraints = false
         button.widthAnchor.constraint(equalToConstant: DebugMetrics.headerButtonWidth).isActive = true
-        button.heightAnchor.constraint(equalToConstant: DebugMetrics.headerButtonHeight).isActive = true
-        applyHeaderButtonDebugOutline(to: button)
         return button
     }
 
@@ -466,18 +513,16 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         button.imagePosition = .imageOnly
         button.translatesAutoresizingMaskIntoConstraints = false
         button.widthAnchor.constraint(equalToConstant: DebugMetrics.headerButtonWidth).isActive = true
-        button.heightAnchor.constraint(equalToConstant: DebugMetrics.headerButtonHeight).isActive = true
-        applyHeaderButtonDebugOutline(to: button)
         return button
     }
 
-    private func applyHeaderButtonDebugOutline(to button: NSButton) {
-        guard DebugMetrics.showsHeaderButtonHitTargets else { return }
-        button.wantsLayer = true
-        button.layer?.cornerRadius = 0
-        button.layer?.borderWidth = 1
-        button.layer?.borderColor = DebugMetrics.headerButtonOutlineColor.cgColor
-        button.layer?.backgroundColor = NSColor.clear.cgColor
+    private func applyHeaderDebugOutline(to view: NSView) {
+        guard DebugMetrics.showsHeaderAreaOutline else { return }
+        view.wantsLayer = true
+        view.layer?.cornerRadius = 0
+        view.layer?.borderWidth = 1
+        view.layer?.borderColor = DebugMetrics.headerAreaOutlineColor.cgColor
+        view.layer?.backgroundColor = NSColor.clear.cgColor
     }
 
     private func updateTabAppearance() {
@@ -1864,6 +1909,51 @@ private extension NSWindow {
         let safeAreaHeight = contentView?.safeAreaInsets.top ?? 0
         let layoutChromeHeight = max(0, frame.height - contentLayoutRect.height)
         return max(safeAreaHeight, layoutChromeHeight)
+    }
+}
+
+final class HeaderButtonDebugOverlayView: NSView {
+    private let cellWidth: CGFloat
+    private let strokeColor: NSColor
+
+    init(cellWidth: CGFloat, strokeColor: NSColor) {
+        self.cellWidth = cellWidth
+        self.strokeColor = strokeColor
+        super.init(frame: .zero)
+        wantsLayer = false
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        nil
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+
+        let path = NSBezierPath()
+        let maxX = bounds.maxX
+        let maxY = bounds.maxY
+
+        path.move(to: NSPoint(x: 0.5, y: 0.5))
+        path.line(to: NSPoint(x: maxX - 0.5, y: 0.5))
+        path.line(to: NSPoint(x: maxX - 0.5, y: maxY - 0.5))
+        path.line(to: NSPoint(x: 0.5, y: maxY - 0.5))
+        path.close()
+
+        let separatorXValues = [cellWidth, cellWidth * 2]
+        for separatorX in separatorXValues where separatorX < maxX {
+            path.move(to: NSPoint(x: separatorX + 0.5, y: 0.5))
+            path.line(to: NSPoint(x: separatorX + 0.5, y: maxY - 0.5))
+        }
+
+        strokeColor.setStroke()
+        path.lineWidth = 1
+        path.stroke()
     }
 }
 
@@ -3322,6 +3412,51 @@ final class HoverTrackingButton: NSButton {
     override func mouseExited(with event: NSEvent) {
         super.mouseExited(with: event)
         isHovered = false
+    }
+}
+
+final class HeaderButtonDebugOverlayView: NSView {
+    private let cellWidth: CGFloat
+    private let strokeColor: NSColor
+
+    init(cellWidth: CGFloat, strokeColor: NSColor) {
+        self.cellWidth = cellWidth
+        self.strokeColor = strokeColor
+        super.init(frame: .zero)
+        wantsLayer = false
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        nil
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+
+        let path = NSBezierPath()
+        let maxX = bounds.maxX
+        let maxY = bounds.maxY
+
+        path.move(to: NSPoint(x: 0.5, y: 0.5))
+        path.line(to: NSPoint(x: maxX - 0.5, y: 0.5))
+        path.line(to: NSPoint(x: maxX - 0.5, y: maxY - 0.5))
+        path.line(to: NSPoint(x: 0.5, y: maxY - 0.5))
+        path.close()
+
+        let separatorXValues = [cellWidth, cellWidth * 2]
+        for separatorX in separatorXValues where separatorX < maxX {
+            path.move(to: NSPoint(x: separatorX + 0.5, y: 0.5))
+            path.line(to: NSPoint(x: separatorX + 0.5, y: maxY - 0.5))
+        }
+
+        strokeColor.setStroke()
+        path.lineWidth = 1
+        path.stroke()
     }
 }
 
