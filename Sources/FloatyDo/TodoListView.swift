@@ -34,7 +34,7 @@ final class TodoListView: NSView {
     private struct DragSession {
         let rowID: TodoRowID
         let itemID: UUID
-        let snapshotView: NSImageView
+        let snapshotView: NSView
         let pointerOffset: CGFloat
         var currentTaskOrdinal: Int
     }
@@ -51,9 +51,7 @@ final class TodoListView: NSView {
         static let dragSwapCoverageFactor: CGFloat = 0.33
         static let dragReorderDuration: CFTimeInterval = 0.12
         static let pressedScale: CGFloat = 0.99
-        static let dragScale: CGFloat = 0.99
         static let pressAnimationDuration: CFTimeInterval = 0.08
-        static let dragScaleDuration: CFTimeInterval = 0.08
     }
 
     weak var delegate: TodoListViewDelegate?
@@ -391,29 +389,13 @@ final class TodoListView: NSView {
         delegate?.listViewWillBeginDragging(self, rowID: press.rowID)
         pressedRowID = nil
         rowView.setPressed(false)
-
-        guard let snapshotView = makeSnapshot(for: rowView) else {
-            interactionState = .idle
-            refreshRowVisualState()
-            return
-        }
-
-        snapshotView.frame = rowView.frame
-        addSubview(snapshotView, positioned: .above, relativeTo: nil)
-        applyScale(
-            to: snapshotView,
-            scale: InteractionMetrics.dragScale,
-            duration: InteractionMetrics.dragScaleDuration,
-            animationKey: "dragSnapshotScale"
-        )
-
-        rowView.setDragging(true)
+        rowView.layer?.zPosition = 20
 
         let rowFrame = rowView.frame
         var drag = DragSession(
             rowID: press.rowID,
             itemID: itemID,
-            snapshotView: snapshotView,
+            snapshotView: rowView,
             pointerOffset: pointerLocation.y - rowFrame.origin.y,
             currentTaskOrdinal: taskOrdinal
         )
@@ -473,16 +455,15 @@ final class TodoListView: NSView {
             drag.snapshotView,
             to: targetFrame,
             duration: InteractionMetrics.dragReorderDuration,
-            scale: InteractionMetrics.dragScale,
+            scale: 1.0,
             animationKey: "dropSettle"
         )
 
         DispatchQueue.main.asyncAfter(deadline: .now() + InteractionMetrics.dragReorderDuration) { [weak self] in
             guard let self else { return }
-            drag.snapshotView.removeFromSuperview()
-            self.rowViews[drag.rowID]?.alphaValue = 1.0
-            self.rowViews[drag.rowID]?.setDragging(false)
+            drag.snapshotView.layer?.zPosition = 0
             self.interactionState = .idle
+            self.layoutRows(animated: false, duration: nil)
             self.refreshRowVisualState()
             self.delegate?.listView(self, didFinishDraggingRow: drag.rowID, orderedItemIDs: self.currentOrderedTaskItemIDs())
         }
@@ -502,10 +483,7 @@ final class TodoListView: NSView {
             )
             rowView.setEditing(rowID == editingRowID)
             rowView.setPressed(rowID == pressedRowID)
-            if rowID != draggedRowID {
-                rowView.alphaValue = 1.0
-                rowView.setDragging(false)
-            }
+            rowView.alphaValue = 1.0
         }
     }
 
@@ -536,12 +514,12 @@ final class TodoListView: NSView {
                 )
                 rowView.setEditing(rowID == self.editingRowID)
                 rowView.setPressed(rowID == self.pressedRowID)
+                if rowID == draggedRowID {
+                    continue
+                }
                 let targetFrame = self.frameForRow(at: index)
                 rowView.frame = targetFrame
-                if rowID != draggedRowID {
-                    rowView.alphaValue = 1.0
-                    rowView.setDragging(false)
-                }
+                rowView.alphaValue = 1.0
             }
         }
 
@@ -561,11 +539,6 @@ final class TodoListView: NSView {
             rowView.setPressed(rowID == pressedRowID)
             let targetFrame = frameForRow(at: index)
             if rowID == draggedRowID {
-                CATransaction.begin()
-                CATransaction.setDisableActions(true)
-                rowView.frame = targetFrame
-                rowView.layer?.transform = CATransform3DIdentity
-                CATransaction.commit()
                 continue
             }
 
@@ -681,50 +654,6 @@ final class TodoListView: NSView {
         CATransaction.commit()
     }
 
-    private func applyScale(
-        to view: NSView,
-        scale: CGFloat,
-        duration: CFTimeInterval,
-        animationKey: String
-    ) {
-        guard let layer = view.layer else { return }
-        let currentTransform = layer.presentation()?.transform ?? layer.transform
-        let targetTransform = CATransform3DMakeScale(scale, scale, 1)
-
-        layer.removeAnimation(forKey: animationKey)
-
-        let animation = CABasicAnimation(keyPath: "transform")
-        animation.fromValue = currentTransform
-        animation.toValue = targetTransform
-        animation.duration = duration
-        animation.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-        layer.add(animation, forKey: animationKey)
-
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        layer.transform = targetTransform
-        CATransaction.commit()
-    }
-
-    private func makeSnapshot(for rowView: TodoRowView) -> NSImageView? {
-        let bounds = rowView.bounds
-        guard let bitmap = rowView.bitmapImageRepForCachingDisplay(in: bounds) else { return nil }
-        rowView.cacheDisplay(in: bounds, to: bitmap)
-        let image = NSImage(size: bounds.size)
-        image.addRepresentation(bitmap)
-
-        let imageView = NSImageView(image: image)
-        imageView.imageScaling = .scaleAxesIndependently
-        imageView.wantsLayer = true
-        imageView.layer?.cornerRadius = CGFloat(preferences.cornerRadius)
-        imageView.layer?.shadowColor = NSColor.black.cgColor
-        imageView.layer?.shadowOpacity = 0.22
-        imageView.layer?.shadowRadius = 12
-        imageView.layer?.shadowOffset = CGSize(width: 0, height: 3)
-        imageView.layer?.zPosition = 10
-        return imageView
-    }
-
     private func rowID(at location: CGPoint) -> TodoRowID? {
         for rowID in displayOrder {
             guard let rowView = rowViews[rowID] else { continue }
@@ -831,10 +760,6 @@ final class TodoRowView: NSView {
     }
 
     private var isPressedRow = false {
-        didSet { updateAppearance() }
-    }
-
-    private var isDraggingRow = false {
         didSet { updateAppearance() }
     }
 
@@ -946,10 +871,6 @@ final class TodoRowView: NSView {
 
     func setPressed(_ pressed: Bool) {
         isPressedRow = pressed && model.isSelectable
-    }
-
-    func setDragging(_ dragging: Bool) {
-        isDraggingRow = dragging
     }
 
     func refreshMountedEditorState() {
@@ -1101,11 +1022,7 @@ final class TodoRowView: NSView {
         let borderWidth: CGFloat
         let animateSelectionFill = shouldAnimateNextSelectionFill && model.isSelectable && isFocusedRow
         shouldAnimateNextSelectionFill = false
-        if isDraggingRow {
-            backgroundColor = NSColor.clear.cgColor
-            borderColor = preferences.subtleStrokeColor.cgColor
-            borderWidth = 1.0
-        } else if model.isSelectable && isSelectedRow {
+        if model.isSelectable && isSelectedRow {
             backgroundColor = activeFillColor.cgColor
             borderColor = NSColor.clear.cgColor
             borderWidth = 0.0
@@ -1138,18 +1055,10 @@ final class TodoRowView: NSView {
         editingTextView.isHidden = false
         editorHostView.isHidden = true
         cursorShieldView.isHidden = true
-
-        if isDraggingRow {
-            backgroundView.alphaValue = 1.0
-            textLabel.alphaValue = 0.0
-            editingTextView.alphaValue = 0.0
-            circleView.alphaValue = 0.0
-        } else {
-            backgroundView.alphaValue = 1.0
-            textLabel.alphaValue = 0.0
-            editingTextView.alphaValue = 1.0
-            circleView.alphaValue = 1.0
-        }
+        backgroundView.alphaValue = 1.0
+        textLabel.alphaValue = 0.0
+        editingTextView.alphaValue = 1.0
+        circleView.alphaValue = 1.0
 
         updateScaleTransform()
     }
@@ -1166,7 +1075,7 @@ final class TodoRowView: NSView {
         let currentBorderColor = layer.presentation()?.borderColor ?? layer.borderColor
         let currentBorderWidth = layer.presentation()?.borderWidth ?? layer.borderWidth
 
-        let shouldAnimate = animate && window != nil && !isDraggingRow
+        let shouldAnimate = animate && window != nil
 
         if shouldAnimate, let currentBackground {
             let animation = CABasicAnimation(keyPath: "backgroundColor")
@@ -1237,14 +1146,7 @@ final class TodoRowView: NSView {
     private func updateScaleTransform() {
         guard let layer else { return }
 
-        let targetScale: CGFloat
-        if isDraggingRow {
-            targetScale = 1.0
-        } else if isPressedRow {
-            targetScale = AppearanceMetrics.pressedScale
-        } else {
-            targetScale = 1.0
-        }
+        let targetScale: CGFloat = isPressedRow ? AppearanceMetrics.pressedScale : 1.0
 
         let currentTransform = layer.presentation()?.sublayerTransform ?? layer.sublayerTransform
         let targetTransform = centeredSublayerScaleTransform(scale: targetScale)
