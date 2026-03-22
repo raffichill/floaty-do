@@ -51,13 +51,14 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
     private var eventMonitor: Any?
     private var cursorEventMonitor: Any?
     private var editorSelectionObserver: Any?
+    private var windowFocusObservers: [NSObjectProtocol] = []
     private var deferredEditorRowID: TodoRowID?
     private var deferredEditorActivationWorkItem: DispatchWorkItem?
     private var cancellables = Set<AnyCancellable>()
     private var currentTab: Tab = .tasks
-    private var tasksTabButton: NSButton!
-    private var archiveTabButton: HoverTrackingButton!
-    private var settingsButton: HoverTrackingButton!
+    private var tasksTabButton: HeaderIconButton!
+    private var archiveTabButton: HeaderIconButton!
+    private var settingsButton: HeaderIconButton!
     private var settingsWindowController: SettingsWindowController?
     private var isAnimating = false
     private weak var surfaceView: PanelSurfaceView?
@@ -386,6 +387,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
     public override func viewDidAppear() {
         super.viewDidAppear()
         view.window?.acceptsMouseMovedEvents = true
+        installWindowFocusObserversIfNeeded()
         if let panel = view.window as? FloatingPanel {
             panel.applyTheme(preferences: store.preferences)
         }
@@ -410,6 +412,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         if let observer = editorSelectionObserver {
             NotificationCenter.default.removeObserver(observer)
         }
+        windowFocusObservers.forEach(NotificationCenter.default.removeObserver)
     }
 
     private func shouldForceArrowCursor(for event: NSEvent) -> Bool {
@@ -451,6 +454,29 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         view.window?.displayIfNeeded()
         settingsWindowController?.window?.displayIfNeeded()
         NSApp.updateWindows()
+    }
+
+    private func installWindowFocusObserversIfNeeded() {
+        guard windowFocusObservers.isEmpty, let window = view.window else { return }
+        let center = NotificationCenter.default
+        windowFocusObservers = [
+            center.addObserver(
+                forName: NSWindow.didBecomeKeyNotification,
+                object: window,
+                queue: .main
+            ) { [weak self] _ in
+                self?.updateTabAppearance()
+            },
+            center.addObserver(
+                forName: NSWindow.didResignKeyNotification,
+                object: window,
+                queue: .main
+            ) { [weak self] _ in
+                self?.archiveTabButton.resetHoverState()
+                self?.settingsButton.resetHoverState()
+                self?.updateTabAppearance()
+            },
+        ]
     }
 
     private var defaultHeaderHeight: CGFloat {
@@ -497,38 +523,20 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         old.cornerRadius != new.cornerRadius
     }
 
-    private func makeTabButton(symbolName: String, action: Selector) -> PressScaleButton {
-        let image = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)!
-        let config = NSImage.SymbolConfiguration(pointSize: 13, weight: .medium)
-        let button = PressScaleButton(image: image.withSymbolConfiguration(config)!, target: self, action: action)
-        button.isBordered = false
-        button.imagePosition = .imageOnly
+    private func makeTabButton(symbolName: String, action: Selector) -> HeaderIconButton {
+        let button = HeaderIconButton(symbolName: symbolName, target: self, action: action)
         button.suppressSystemHighlight = true
         button.pressedScale = 0.85
         button.translatesAutoresizingMaskIntoConstraints = false
-        button.wantsLayer = true
-        if let cell = button.cell as? NSButtonCell {
-            cell.highlightsBy = []
-            cell.showsStateBy = []
-        }
         button.widthAnchor.constraint(equalToConstant: DebugMetrics.headerButtonWidth).isActive = true
         return button
     }
 
-    private func makeHoverTabButton(symbolName: String, action: Selector) -> HoverTrackingButton {
-        let image = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)!
-        let config = NSImage.SymbolConfiguration(pointSize: 13, weight: .medium)
-        let button = HoverTrackingButton(image: image.withSymbolConfiguration(config)!, target: self, action: action)
-        button.isBordered = false
-        button.imagePosition = .imageOnly
+    private func makeHoverTabButton(symbolName: String, action: Selector) -> HeaderIconButton {
+        let button = HeaderIconButton(symbolName: symbolName, target: self, action: action)
         button.suppressSystemHighlight = true
         button.pressedScale = 0.85
         button.translatesAutoresizingMaskIntoConstraints = false
-        button.wantsLayer = true
-        if let cell = button.cell as? NSButtonCell {
-            cell.highlightsBy = []
-            cell.showsStateBy = []
-        }
         button.widthAnchor.constraint(equalToConstant: DebugMetrics.headerButtonWidth).isActive = true
         return button
     }
@@ -546,13 +554,13 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         let primary = store.preferences.primaryTextColor
         let settingsIsVisible = settingsWindowController?.window?.isVisible == true
         let tasksIsEmphasized = !settingsIsVisible && currentTab == .tasks
-        tasksTabButton.contentTintColor = tasksIsEmphasized ? primary : primary.withAlphaComponent(0.35)
+        tasksTabButton.applyTint(tasksIsEmphasized ? primary : primary.withAlphaComponent(0.35))
 
         let archiveIsEmphasized = !settingsIsVisible && (currentTab == .archive || archiveTabButton.isHovered)
-        archiveTabButton.contentTintColor = archiveIsEmphasized ? primary : primary.withAlphaComponent(0.35)
+        archiveTabButton.applyTint(archiveIsEmphasized ? primary : primary.withAlphaComponent(0.35))
 
         let settingsIsEmphasized = settingsIsVisible || settingsButton.isHovered
-        settingsButton.contentTintColor = settingsIsEmphasized ? primary : primary.withAlphaComponent(0.42)
+        settingsButton.applyTint(settingsIsEmphasized ? primary : primary.withAlphaComponent(0.42))
     }
 
     @objc private func switchToTasks() {
@@ -3595,7 +3603,7 @@ final class HoverTrackingButton: PressScaleButton {
 
         let trackingArea = NSTrackingArea(
             rect: bounds,
-            options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+            options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
             owner: self,
             userInfo: nil
         )
@@ -3610,6 +3618,10 @@ final class HoverTrackingButton: PressScaleButton {
 
     override func mouseExited(with event: NSEvent) {
         super.mouseExited(with: event)
+        isHovered = false
+    }
+
+    func resetHoverState() {
         isHovered = false
     }
 }
