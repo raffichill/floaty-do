@@ -556,7 +556,13 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
     }
 
     @objc private func switchToTasks() {
-        guard currentTab != .tasks else { return }
+        let dismissedSettings = dismissSettingsWindowIfVisible()
+        guard currentTab != .tasks else {
+            if dismissedSettings {
+                updateTabAppearance()
+            }
+            return
+        }
         cancelDeferredEditorActivation()
         currentTab = .tasks
         selectedRowID = nil
@@ -567,7 +573,13 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
     }
 
     @objc private func switchToArchive() {
-        guard currentTab != .archive else { return }
+        let dismissedSettings = dismissSettingsWindowIfVisible()
+        guard currentTab != .archive else {
+            if dismissedSettings {
+                updateTabAppearance()
+            }
+            return
+        }
         cancelDeferredEditorActivation()
         currentTab = .archive
         selectedRowID = nil
@@ -593,7 +605,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
 
     @objc private func toggleSettings(_ sender: NSButton) {
         if let window = settingsWindowController?.window, window.isVisible {
-            window.close()
+            dismissSettingsWindowIfVisible()
             return
         }
 
@@ -601,10 +613,16 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
     }
 
     func closeSettingsWindowIfVisible() -> Bool {
+        dismissSettingsWindowIfVisible()
+    }
+
+    @discardableResult
+    private func dismissSettingsWindowIfVisible() -> Bool {
         guard let window = settingsWindowController?.window, window.isVisible else {
             return false
         }
         window.close()
+        restoreFocusAfterSettingsDismissal()
         return true
     }
 
@@ -621,10 +639,31 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         controller.onWindowVisibilityChange = { [weak self] _ in
             self?.updateTabAppearance()
         }
+        controller.onResignKeyWhileVisible = { [weak self] in
+            _ = self?.dismissSettingsWindowIfVisible()
+        }
         controller.updatePreferences(store.preferences)
         settingsWindowController = controller
         updateTabAppearance()
         controller.present(attachedTo: view.window, initialTab: initialTab)
+    }
+
+    private func restoreFocusAfterSettingsDismissal() {
+        guard let window = view.window else { return }
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+
+        if selectedRowID == nil {
+            let firstSelectableRow = rowModels.first(where: \.isSelectable)?.id
+            selectedRowID = firstSelectableRow
+        }
+
+        if let selectedRowID, currentTab == .tasks {
+            activateRow(selectedRowID, placeCaretAtEnd: true)
+        } else {
+            syncSelectionUI(placeCaretAtEnd: false)
+            makeListFirstResponder()
+        }
     }
 
     func resetWindowSize() {

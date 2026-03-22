@@ -3,12 +3,13 @@ import AppKit
 final class ThemePresetButton: NSButton {
     private let outerCircle = NSView()
     private let innerCircle = NSView()
+    private let pressedScale: CGFloat = 0.92
 
     var isSelected = false {
         didSet { updateAppearance() }
     }
 
-    init(color: NSColor, size: CGFloat) {
+    init(color: NSColor, selectedIndicatorColor: NSColor, selectedIndicatorOpacity: CGFloat, size: CGFloat) {
         super.init(frame: NSRect(x: 0, y: 0, width: size, height: size))
         setButtonType(.momentaryChange)
         title = ""
@@ -28,7 +29,7 @@ final class ThemePresetButton: NSButton {
 
         innerCircle.wantsLayer = true
         innerCircle.translatesAutoresizingMaskIntoConstraints = false
-        innerCircle.layer?.backgroundColor = NSColor.white.cgColor
+        innerCircle.layer?.backgroundColor = selectedIndicatorColor.withAlphaComponent(selectedIndicatorOpacity).cgColor
         let innerCircleSize = round(size * 0.46)
         innerCircle.layer?.cornerRadius = innerCircleSize / 2
         addSubview(innerCircle)
@@ -53,8 +54,41 @@ final class ThemePresetButton: NSButton {
         fatalError("init(coder:) has not been implemented")
     }
 
+    override func mouseDown(with event: NSEvent) {
+        setPressedAppearance(true, duration: 0.08)
+        super.mouseDown(with: event)
+        setPressedAppearance(false, duration: 0.12)
+    }
+
     private func updateAppearance() {
         innerCircle.isHidden = !isSelected
+    }
+
+    private func setPressedAppearance(_ pressed: Bool, duration: CFTimeInterval) {
+        wantsLayer = true
+        guard let layer else { return }
+
+        let scale = pressed ? pressedScale : 1
+        let targetTransform = centeredPressTransform(scale: scale)
+        let animation = CABasicAnimation(keyPath: "transform")
+        animation.fromValue = layer.presentation()?.transform ?? layer.transform
+        animation.toValue = targetTransform
+        animation.duration = duration
+        animation.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        layer.removeAnimation(forKey: "pressScale")
+        layer.add(animation, forKey: "pressScale")
+        layer.transform = targetTransform
+    }
+
+    private func centeredPressTransform(scale: CGFloat) -> CATransform3D {
+        let centerX = bounds.midX
+        let centerY = bounds.midY
+
+        var transform = CATransform3DIdentity
+        transform = CATransform3DTranslate(transform, centerX, centerY, 0)
+        transform = CATransform3DScale(transform, scale, scale, 1)
+        transform = CATransform3DTranslate(transform, -centerX, -centerY, 0)
+        return transform
     }
 }
 

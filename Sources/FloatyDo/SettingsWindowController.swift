@@ -132,6 +132,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     }
 
     var onWindowVisibilityChange: ((Bool) -> Void)?
+    var onResignKeyWhileVisible: (() -> Void)?
 
     private let settingsViewController: SettingsViewController
     private let surfaceViewController: PanelSurfaceHostingViewController<SettingsViewController>
@@ -235,7 +236,9 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     }
 
     func windowDidResignKey(_ notification: Notification) {
-        onWindowVisibilityChange?(window?.isVisible == true)
+        guard let window, window.isVisible else { return }
+        onResignKeyWhileVisible?()
+        onWindowVisibilityChange?(window.isVisible)
     }
 
     func windowDidResize(_ notification: Notification) {

@@ -39,7 +39,7 @@ final class SettingsViewController: NSViewController {
         static let shortcutsColumnGap: CGFloat = 16
         static let shortcutsRowSpacing: CGFloat = 14
         static let aboutBlockWidth: CGFloat = 400
-        static let opacityStops: [Double] = [LayoutMetrics.minWindowOpacity, 0.50, 0.75, 1.0]
+        static let opacityStops: [Double] = [0.50, 0.67, 0.83, 1.0]
     }
 
     private enum AnimationMetrics {
@@ -637,8 +637,13 @@ final class SettingsViewController: NSViewController {
 
     private func configureThemeButtons() {
         themeButtons = BuiltInTheme.allCases.enumerated().map { index, theme in
+            let backgroundColor = theme.color.nsColor.resolvedSRGB
+            let contentColor = theme.style.contentColor.nsColor.resolvedSRGB
+            let usesLightText = contentColor.relativeLuminance > backgroundColor.relativeLuminance
             let button = ThemePresetButton(
-                color: theme.color.nsColor,
+                color: backgroundColor,
+                selectedIndicatorColor: contentColor,
+                selectedIndicatorOpacity: usesLightText ? 0.85 : 0.65,
                 size: Metrics.themeSwatchButtonSize
             )
             button.tag = index
@@ -675,7 +680,7 @@ final class SettingsViewController: NSViewController {
         transparencySlider.minValue = 0
         transparencySlider.maxValue = Double(Metrics.opacityStops.count - 1)
         transparencySlider.numberOfTickMarks = Metrics.opacityStops.count
-        transparencySlider.allowsTickMarkValuesOnly = false
+        transparencySlider.allowsTickMarkValuesOnly = true
         transparencySlider.isContinuous = true
         transparencySlider.sendAction(on: [.leftMouseDown, .leftMouseDragged, .leftMouseUp])
         transparencySlider.target = self

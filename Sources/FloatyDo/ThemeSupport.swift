@@ -79,10 +79,10 @@ public enum BuiltInTheme: String, Codable, CaseIterable {
         BuiltInThemeDefinition(
             theme: .nasaOrange,
             style: BuiltInThemeStyle(
-                backgroundColor: ThemeColor(hex: "#E7BCAB"),
-                selectionColor: ThemeColor(hex: "#2E1E18"),
+                backgroundColor: ThemeColor(hex: "#DCEFFC"),
+                selectionColor: ThemeColor(hex: "#1B3242"),
                 selectionOpacity: 0.11,
-                contentColor: ThemeColor(hex: "#2A1A15"),
+                contentColor: ThemeColor(hex: "#182D3A"),
                 contentOpacity: 0.86
             ),
             supportsPrimaryAppIcon: false
@@ -90,7 +90,7 @@ public enum BuiltInTheme: String, Codable, CaseIterable {
         BuiltInThemeDefinition(
             theme: .barbie,
             style: BuiltInThemeStyle(
-                backgroundColor: ThemeColor(hex: "#E8BDD1"),
+                backgroundColor: ThemeColor(hex: "#F2D1E1"),
                 selectionColor: ThemeColor(hex: "#2D1B23"),
                 selectionOpacity: 0.11,
                 contentColor: ThemeColor(hex: "#2A1820"),
