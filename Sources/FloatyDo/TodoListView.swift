@@ -33,8 +33,7 @@ final class TodoListView: NSView {
 
     private struct DragSession {
         let rowID: TodoRowID
-        let itemID: UUID
-        let snapshotView: NSView
+        let draggedRowView: NSView
         let pointerOffset: CGFloat
         var currentTaskOrdinal: Int
     }
@@ -316,14 +315,14 @@ final class TodoListView: NSView {
         case .pressed(let press):
             guard press.canDrag,
                   let model = rowModelsByID[press.rowID],
-                  case .taskItem(let item) = model.kind else {
+                  case .taskItem = model.kind else {
                 return
             }
 
             let deltaX = location.x - press.initialPoint.x
             let deltaY = location.y - press.initialPoint.y
             guard hypot(deltaX, deltaY) >= InteractionMetrics.dragStartDistance else { return }
-            beginDrag(from: press, itemID: item.id, pointerLocation: location)
+            beginDrag(from: press, pointerLocation: location)
 
         case .dragging(var drag):
             updateDragSession(&drag, pointerLocation: location)
@@ -379,7 +378,7 @@ final class TodoListView: NSView {
         }
     }
 
-    private func beginDrag(from press: PressState, itemID: UUID, pointerLocation: CGPoint) {
+    private func beginDrag(from press: PressState, pointerLocation: CGPoint) {
         guard let rowView = rowViews[press.rowID],
               let taskOrdinal = taskOrdinal(for: press.rowID) else {
             interactionState = .idle
@@ -394,8 +393,7 @@ final class TodoListView: NSView {
         let rowFrame = rowView.frame
         var drag = DragSession(
             rowID: press.rowID,
-            itemID: itemID,
-            snapshotView: rowView,
+            draggedRowView: rowView,
             pointerOffset: pointerLocation.y - rowFrame.origin.y,
             currentTaskOrdinal: taskOrdinal
         )
@@ -406,9 +404,9 @@ final class TodoListView: NSView {
     }
 
     private func updateDragSession(_ drag: inout DragSession, pointerLocation: CGPoint) {
-        var snapshotFrame = drag.snapshotView.frame
-        snapshotFrame.origin.y = pointerLocation.y - drag.pointerOffset
-        drag.snapshotView.frame = snapshotFrame
+        var draggedFrame = drag.draggedRowView.frame
+        draggedFrame.origin.y = pointerLocation.y - drag.pointerOffset
+        drag.draggedRowView.frame = draggedFrame
 
         let overlapThreshold = CGFloat(preferences.rowHeight) * InteractionMetrics.dragSwapCoverageFactor
         var didReorder = false
@@ -418,7 +416,7 @@ final class TodoListView: NSView {
             let previousTaskID = taskIDs[drag.currentTaskOrdinal - 1]
             guard let previousFrame = frameForRow(withID: previousTaskID) else { break }
 
-            if drag.snapshotView.frame.minY < previousFrame.minY + overlapThreshold {
+            if drag.draggedRowView.frame.minY < previousFrame.minY + overlapThreshold {
                 swapTaskRows(at: drag.currentTaskOrdinal, and: drag.currentTaskOrdinal - 1)
                 drag.currentTaskOrdinal -= 1
                 didReorder = true
@@ -432,7 +430,7 @@ final class TodoListView: NSView {
             let nextTaskID = taskIDs[drag.currentTaskOrdinal + 1]
             guard let nextFrame = frameForRow(withID: nextTaskID) else { break }
 
-            if drag.snapshotView.frame.maxY > nextFrame.maxY - overlapThreshold {
+            if drag.draggedRowView.frame.maxY > nextFrame.maxY - overlapThreshold {
                 swapTaskRows(at: drag.currentTaskOrdinal, and: drag.currentTaskOrdinal + 1)
                 drag.currentTaskOrdinal += 1
                 didReorder = true
@@ -450,9 +448,9 @@ final class TodoListView: NSView {
         interactionState = .settling
         pressedRowID = nil
         refreshRowVisualState(excluding: drag.rowID)
-        let targetFrame = frameForRow(withID: drag.rowID) ?? drag.snapshotView.frame
+        let targetFrame = frameForRow(withID: drag.rowID) ?? drag.draggedRowView.frame
         animateDropSettle(
-            drag.snapshotView,
+            drag.draggedRowView,
             to: targetFrame,
             duration: InteractionMetrics.dragReorderDuration,
             scale: 1.0,
@@ -461,7 +459,7 @@ final class TodoListView: NSView {
 
         DispatchQueue.main.asyncAfter(deadline: .now() + InteractionMetrics.dragReorderDuration) { [weak self] in
             guard let self else { return }
-            drag.snapshotView.layer?.zPosition = 0
+            drag.draggedRowView.layer?.zPosition = 0
             self.interactionState = .idle
             self.layoutRows(animated: false, duration: nil)
             self.refreshRowVisualState()
@@ -1472,102 +1470,6 @@ final class KeyboardOnlyTextField: NSTextField {
     override func mouseDown(with event: NSEvent) {}
     override func mouseDragged(with event: NSEvent) {}
     override func mouseUp(with event: NSEvent) {}
-}
-
-class PressScaleButton: NSButton {
-    var pressedScale: CGFloat = 0.97
-    var suppressSystemHighlight = false
-
-    override var mouseDownCanMoveWindow: Bool { false }
-
-    override func highlight(_ flag: Bool) {
-        guard !suppressSystemHighlight else { return }
-        super.highlight(flag)
-    }
-
-    override func mouseDown(with event: NSEvent) {
-        setPressedAppearance(true, duration: 0.08)
-        super.mouseDown(with: event)
-        setPressedAppearance(false, duration: 0.12)
-    }
-
-    override func viewDidMoveToWindow() {
-        super.viewDidMoveToWindow()
-        updateCellHighlightBehavior()
-    }
-
-    private func setPressedAppearance(_ pressed: Bool, duration: CFTimeInterval) {
-        wantsLayer = true
-        guard let layer else { return }
-
-        let scale = pressed ? pressedScale : 1
-        let targetTransform = centeredPressTransform(scale: scale)
-        let animation = CABasicAnimation(keyPath: "transform")
-        animation.fromValue = layer.presentation()?.transform ?? layer.transform
-        animation.toValue = targetTransform
-        animation.duration = duration
-        animation.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-        layer.removeAnimation(forKey: "pressScale")
-        layer.add(animation, forKey: "pressScale")
-        layer.transform = targetTransform
-    }
-
-    private func centeredPressTransform(scale: CGFloat) -> CATransform3D {
-        let centerX = bounds.midX
-        let centerY = bounds.midY
-
-        var transform = CATransform3DIdentity
-        transform = CATransform3DTranslate(transform, centerX, centerY, 0)
-        transform = CATransform3DScale(transform, scale, scale, 1)
-        transform = CATransform3DTranslate(transform, -centerX, -centerY, 0)
-        return transform
-    }
-
-    private func updateCellHighlightBehavior() {
-        guard suppressSystemHighlight, let cell = cell as? NSButtonCell else { return }
-        cell.highlightsBy = []
-        cell.showsStateBy = []
-    }
-}
-
-final class HoverTrackingButton: PressScaleButton {
-    var onHoverChange: ((Bool) -> Void)?
-
-    private(set) var isHovered = false {
-        didSet {
-            guard oldValue != isHovered else { return }
-            onHoverChange?(isHovered)
-        }
-    }
-
-    private var hoverTrackingArea: NSTrackingArea?
-
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-
-        if let hoverTrackingArea {
-            removeTrackingArea(hoverTrackingArea)
-        }
-
-        let trackingArea = NSTrackingArea(
-            rect: bounds,
-            options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
-            owner: self,
-            userInfo: nil
-        )
-        addTrackingArea(trackingArea)
-        hoverTrackingArea = trackingArea
-    }
-
-    override func mouseEntered(with event: NSEvent) {
-        super.mouseEntered(with: event)
-        isHovered = true
-    }
-
-    override func mouseExited(with event: NSEvent) {
-        super.mouseExited(with: event)
-        isHovered = false
-    }
 }
 
 public final class CaretEndFieldEditor: NSTextView {
