@@ -532,10 +532,14 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
 
     private func updateTabAppearance() {
         let primary = store.preferences.primaryTextColor
-        tasksTabButton.contentTintColor = currentTab == .tasks ? primary : primary.withAlphaComponent(0.35)
-        let archiveIsEmphasized = currentTab == .archive || archiveTabButton.isHovered
+        let settingsIsVisible = settingsWindowController?.window?.isVisible == true
+        let tasksIsEmphasized = !settingsIsVisible && currentTab == .tasks
+        tasksTabButton.contentTintColor = tasksIsEmphasized ? primary : primary.withAlphaComponent(0.35)
+
+        let archiveIsEmphasized = !settingsIsVisible && (currentTab == .archive || archiveTabButton.isHovered)
         archiveTabButton.contentTintColor = archiveIsEmphasized ? primary : primary.withAlphaComponent(0.35)
-        let settingsIsEmphasized = settingsWindowController?.window?.isVisible == true || settingsButton.isHovered
+
+        let settingsIsEmphasized = settingsIsVisible || settingsButton.isHovered
         settingsButton.contentTintColor = settingsIsEmphasized ? primary : primary.withAlphaComponent(0.42)
     }
 

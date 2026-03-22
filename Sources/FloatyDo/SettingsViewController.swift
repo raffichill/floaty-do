@@ -38,6 +38,7 @@ final class SettingsViewController: NSViewController {
         static let shortcutsColumnWidth: CGFloat = 220
         static let shortcutsColumnGap: CGFloat = 16
         static let shortcutsRowSpacing: CGFloat = 14
+        static let aboutBlockWidth: CGFloat = 400
     }
 
     private enum AnimationMetrics {
@@ -54,6 +55,104 @@ final class SettingsViewController: NSViewController {
         override func hitTest(_ point: NSPoint) -> NSView? {
             guard allowsHitTesting, alphaValue > 0.01, !isHidden else { return nil }
             return super.hitTest(point)
+        }
+    }
+
+    private final class HoverAwareTextView: NSTextView {
+        var onActivatedLink: ((String) -> Void)?
+        var onHoveredLinkChange: ((String?) -> Void)?
+
+        private var hoverTrackingArea: NSTrackingArea?
+        private var hoveredLink: String?
+
+        override var acceptsFirstResponder: Bool { false }
+
+        override func updateTrackingAreas() {
+            super.updateTrackingAreas()
+            if let hoverTrackingArea {
+                removeTrackingArea(hoverTrackingArea)
+            }
+
+            let trackingArea = NSTrackingArea(
+                rect: bounds,
+                options: [.activeAlways, .inVisibleRect, .mouseMoved, .mouseEnteredAndExited],
+                owner: self,
+                userInfo: nil
+            )
+            addTrackingArea(trackingArea)
+            hoverTrackingArea = trackingArea
+        }
+
+        override func mouseMoved(with event: NSEvent) {
+            super.mouseMoved(with: event)
+            updateHoveredLink(at: convert(event.locationInWindow, from: nil))
+        }
+
+        override func mouseDown(with event: NSEvent) {
+            updateHoveredLink(at: convert(event.locationInWindow, from: nil))
+        }
+
+        override func mouseUp(with event: NSEvent) {
+            updateHoveredLink(at: convert(event.locationInWindow, from: nil))
+            if let hoveredLink {
+                onActivatedLink?(hoveredLink)
+                return
+            }
+            super.mouseUp(with: event)
+        }
+
+        override func mouseExited(with event: NSEvent) {
+            super.mouseExited(with: event)
+            applyHoveredLink(nil)
+        }
+
+        override func resetCursorRects() {
+            super.resetCursorRects()
+            addCursorRect(bounds, cursor: .arrow)
+        }
+
+        private func updateHoveredLink(at point: NSPoint) {
+            guard let textContainer, let layoutManager, let textStorage else {
+                applyHoveredLink(nil)
+                return
+            }
+
+            let containerOrigin = textContainerOrigin
+            let containerPoint = NSPoint(x: point.x - containerOrigin.x, y: point.y - containerOrigin.y)
+            guard containerPoint.x >= 0, containerPoint.y >= 0 else {
+                applyHoveredLink(nil)
+                return
+            }
+
+            let glyphIndex = layoutManager.glyphIndex(for: containerPoint, in: textContainer)
+            let glyphRange = NSRange(location: glyphIndex, length: 1)
+            let glyphRect = layoutManager.boundingRect(forGlyphRange: glyphRange, in: textContainer)
+            guard glyphRect.contains(containerPoint) else {
+                applyHoveredLink(nil)
+                return
+            }
+
+            let characterIndex = layoutManager.characterIndexForGlyph(at: glyphIndex)
+            guard characterIndex < textStorage.length else {
+                applyHoveredLink(nil)
+                return
+            }
+
+            let linkAttribute = textStorage.attribute(.link, at: characterIndex, effectiveRange: nil)
+            let linkString = (linkAttribute as? URL)?.absoluteString ?? (linkAttribute as? String)
+            applyHoveredLink(linkString)
+        }
+
+        private func applyHoveredLink(_ link: String?) {
+            if link != nil {
+                NSCursor.pointingHand.set()
+            } else {
+                NSCursor.arrow.set()
+            }
+
+            guard hoveredLink != link else { return }
+            hoveredLink = link
+            onHoveredLinkChange?(link)
         }
     }
 
@@ -92,7 +191,7 @@ final class SettingsViewController: NSViewController {
     private var selectedTab: SettingsTab = .appearance
     private var displayedTab: SettingsTab?
     private var transitionGeneration = 0
-
+    private var hoveredAboutLink: String?
     private let titleLabel = NSTextField(labelWithString: "Settings")
     private let tabStack = NSStackView()
     private let headerView = NSView()
@@ -115,6 +214,7 @@ final class SettingsViewController: NSViewController {
     private let transparencyLabel = NSTextField(labelWithString: "Opacity")
     private let transparencySlider = NSSlider()
     private let fontPopup = NSPopUpButton()
+    private let aboutTextView = HoverAwareTextView(frame: .zero)
     private let resetFontButton = NSButton(title: "Reset", target: nil, action: nil)
     private let fontSizeSlider = NSSlider()
     private let fontSizeDetailLabel = NSTextField(labelWithString: "")
@@ -312,6 +412,12 @@ final class SettingsViewController: NSViewController {
     private func selectTab(_ tab: SettingsTab) {
         let outgoingTab = displayedTab ?? tab
         selectedTab = tab
+        if tab != .about, hoveredAboutLink != nil {
+            hoveredAboutLink = nil
+            updateAboutTextView()
+            NSCursor.arrow.set()
+            view.window?.invalidateCursorRects(for: aboutTextView)
+        }
         tabButtons.forEach { key, button in
             button.isSelected = key == tab
         }
@@ -448,22 +554,43 @@ final class SettingsViewController: NSViewController {
     }
 
     private func makeAboutPage() -> NSView {
-        let label = NSTextField(wrappingLabelWithString: "paragraph goes here")
-        label.font = .systemFont(ofSize: 13)
-        label.translatesAutoresizingMaskIntoConstraints = false
-        label.maximumNumberOfLines = 0
-        label.preferredMaxLayoutWidth = 420
-        secondaryLabels.append(label)
+        aboutTextView.translatesAutoresizingMaskIntoConstraints = false
+        aboutTextView.drawsBackground = false
+        aboutTextView.isEditable = false
+        aboutTextView.isSelectable = false
+        aboutTextView.isRichText = true
+        aboutTextView.importsGraphics = false
+        aboutTextView.allowsUndo = false
+        aboutTextView.textContainerInset = .zero
+        aboutTextView.isHorizontallyResizable = false
+        aboutTextView.isVerticallyResizable = true
+        aboutTextView.minSize = .zero
+        aboutTextView.maxSize = NSSize(width: Metrics.aboutBlockWidth, height: .greatestFiniteMagnitude)
+        aboutTextView.textContainer?.containerSize = NSSize(width: Metrics.aboutBlockWidth, height: .greatestFiniteMagnitude)
+        aboutTextView.textContainer?.widthTracksTextView = true
+        aboutTextView.textContainer?.lineFragmentPadding = 0
+        aboutTextView.onHoveredLinkChange = { [weak self] link in
+            guard let self, self.hoveredAboutLink != link else { return }
+            self.hoveredAboutLink = link
+            self.updateAboutTextView()
+        }
+        aboutTextView.onActivatedLink = { [weak self] link in
+            self?.handleAboutLinkActivation(link)
+        }
+        updateAboutTextView()
+        aboutTextView.heightAnchor.constraint(equalToConstant: ceil(aboutTextView.frame.height)).isActive = true
 
         let container = NSView()
         container.translatesAutoresizingMaskIntoConstraints = false
-        container.addSubview(label)
+        container.addSubview(aboutTextView)
 
         NSLayoutConstraint.activate([
-            label.topAnchor.constraint(equalTo: container.topAnchor, constant: 8),
-            label.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 8),
-            label.trailingAnchor.constraint(lessThanOrEqualTo: container.trailingAnchor, constant: -8),
-            label.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -8),
+            aboutTextView.topAnchor.constraint(equalTo: container.topAnchor),
+            aboutTextView.centerXAnchor.constraint(equalTo: container.centerXAnchor),
+            aboutTextView.widthAnchor.constraint(equalToConstant: Metrics.aboutBlockWidth),
+            aboutTextView.leadingAnchor.constraint(greaterThanOrEqualTo: container.leadingAnchor, constant: 24),
+            aboutTextView.trailingAnchor.constraint(lessThanOrEqualTo: container.trailingAnchor, constant: -24),
+            aboutTextView.bottomAnchor.constraint(equalTo: container.bottomAnchor),
         ])
 
         return container
@@ -1129,6 +1256,7 @@ final class SettingsViewController: NSViewController {
         }
         themeableButtons.forEach { applyThemeStyle(to: $0) }
         applyThemeStyle(to: fontPopup)
+        updateAboutTextView()
 
         tabButtons.values.forEach {
             $0.applyTheme(
@@ -1161,25 +1289,95 @@ final class SettingsViewController: NSViewController {
     }
 
     private func applyThemeStyle(to popup: NSPopUpButton) {
-        let titleColor = popup.isEnabled
-            ? preferences.primaryTextColor
-            : preferences.primaryTextColor.withAlphaComponent(0.42)
+        let fullContrastTitleColor = popup.isEnabled
+            ? preferences.contentBaseColor
+            : preferences.contentBaseColor.withAlphaComponent(0.42)
         let fillColor = popup.isEnabled
             ? preferences.activeFillColor
             : preferences.activeFillColor.withAlphaComponent(max(0.12, preferences.activeFillColor.alphaComponent * 0.48))
         let font = popup.font ?? .systemFont(ofSize: 12)
         let attributes: [NSAttributedString.Key: Any] = [
-            .foregroundColor: titleColor,
+            .foregroundColor: fullContrastTitleColor,
             .font: font,
         ]
 
-        popup.contentTintColor = titleColor
+        popup.contentTintColor = fullContrastTitleColor
         popup.bezelColor = fillColor
+        popup.menu?.appearance = preferences.usesLightText
+            ? NSAppearance(named: .darkAqua)
+            : NSAppearance(named: .aqua)
         popup.itemArray.forEach { item in
+            item.view = nil
             item.attributedTitle = NSAttributedString(string: item.title, attributes: attributes)
         }
 
         let selectedTitle = popup.titleOfSelectedItem ?? ""
         popup.attributedTitle = NSAttributedString(string: selectedTitle, attributes: attributes)
     }
+
+    private func openAboutURL(_ urlString: String) {
+        guard let url = URL(string: urlString) else { return }
+        NSWorkspace.shared.open(url)
+    }
+
+    private func handleAboutLinkActivation(_ link: String) {
+        if link == "floatydo://shortcuts" {
+            selectTab(.shortcuts)
+            return
+        }
+
+        openAboutURL(link)
+    }
+
+    private func updateAboutTextView() {
+        guard isViewLoaded else { return }
+
+        let paragraphStyle = NSMutableParagraphStyle()
+        paragraphStyle.alignment = .left
+        paragraphStyle.lineSpacing = 2
+
+        let bodyAttributes: [NSAttributedString.Key: Any] = [
+            .foregroundColor: preferences.primaryTextColor.withAlphaComponent(0.85),
+            .font: NSFont.systemFont(ofSize: 13),
+            .paragraphStyle: paragraphStyle,
+        ]
+
+        let text = NSMutableAttributedString()
+        func appendBody(_ string: String) {
+            text.append(NSAttributedString(string: string, attributes: bodyAttributes))
+        }
+        func appendLink(_ title: String, link: String) {
+            var attributes: [NSAttributedString.Key: Any] = [
+                .foregroundColor: preferences.primaryTextColor.withAlphaComponent(
+                    hoveredAboutLink == link ? 1.0 : 0.85
+                ),
+                .font: NSFont.systemFont(ofSize: 13),
+                .paragraphStyle: paragraphStyle,
+                .underlineStyle: NSUnderlineStyle.single.rawValue,
+            ]
+            attributes[.link] = link
+            text.append(NSAttributedString(string: title, attributes: attributes))
+        }
+
+        appendBody("FloatyDo is a minimal app designed to keep you focused on your next few tasks and nothing else.\n\n")
+        appendBody("It is not a project management tool. It has no groups, scheduling, badges, or calendar sync. But for what it does I hope it works well and feels like it’s your own. I recommend taking some time to get familiar with the ")
+        appendLink("keyboard shortcuts", link: "floatydo://shortcuts")
+        appendBody(" as it makes the FloatyDo experience significantly better.\n\n")
+        appendBody("Feel free to ")
+        appendLink("email me", link: "mailto:raffi.chilingaryan@gmail.com")
+        appendBody(" with any feedback or requests, and thanks for giving the app a try.\n\nRaffi\n\nApp icons and iconography by ")
+        appendLink("Emirhan", link: "https://x.com/_eugrl")
+        appendBody(".")
+
+        aboutTextView.textStorage?.setAttributedString(text)
+        aboutTextView.linkTextAttributes = [
+            .foregroundColor: preferences.primaryTextColor.withAlphaComponent(0.85),
+            .underlineStyle: NSUnderlineStyle.single.rawValue,
+        ]
+        aboutTextView.layoutManager?.ensureLayout(for: aboutTextView.textContainer!)
+        let usedRect = aboutTextView.layoutManager?.usedRect(for: aboutTextView.textContainer!) ?? .zero
+        aboutTextView.frame.size = NSSize(width: Metrics.aboutBlockWidth, height: ceil(usedRect.height))
+        aboutTextView.invalidateIntrinsicContentSize()
+    }
+
 }
