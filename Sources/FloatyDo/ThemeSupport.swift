@@ -79,22 +79,22 @@ public enum BuiltInTheme: String, Codable, CaseIterable {
         BuiltInThemeDefinition(
             theme: .nasaOrange,
             style: BuiltInThemeStyle(
-                backgroundColor: ThemeColor(hex: "#C65F2E"),
-                selectionColor: ThemeColor(hex: "#FFF1E8"),
-                selectionOpacity: 0.12,
-                contentColor: ThemeColor(hex: "#FFF8F2"),
-                contentOpacity: 0.94
+                backgroundColor: ThemeColor(hex: "#E7BCAB"),
+                selectionColor: ThemeColor(hex: "#2E1E18"),
+                selectionOpacity: 0.11,
+                contentColor: ThemeColor(hex: "#2A1A15"),
+                contentOpacity: 0.86
             ),
             supportsPrimaryAppIcon: false
         ),
         BuiltInThemeDefinition(
             theme: .barbie,
             style: BuiltInThemeStyle(
-                backgroundColor: ThemeColor(hex: "#C86995"),
-                selectionColor: ThemeColor(hex: "#FFF4FA"),
-                selectionOpacity: 0.12,
-                contentColor: ThemeColor(hex: "#FFF8FC"),
-                contentOpacity: 0.94
+                backgroundColor: ThemeColor(hex: "#E8BDD1"),
+                selectionColor: ThemeColor(hex: "#2D1B23"),
+                selectionOpacity: 0.11,
+                contentColor: ThemeColor(hex: "#2A1820"),
+                contentOpacity: 0.86
             ),
             supportsPrimaryAppIcon: false
         ),

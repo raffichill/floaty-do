@@ -39,6 +39,7 @@ final class SettingsViewController: NSViewController {
         static let shortcutsColumnGap: CGFloat = 16
         static let shortcutsRowSpacing: CGFloat = 14
         static let aboutBlockWidth: CGFloat = 400
+        static let opacityStops: [Double] = [LayoutMetrics.minWindowOpacity, 0.50, 0.75, 1.0]
     }
 
     private enum AnimationMetrics {
@@ -671,8 +672,10 @@ final class SettingsViewController: NSViewController {
     }
 
     private func configureTransparencySlider() {
-        transparencySlider.minValue = LayoutMetrics.minWindowOpacity * 100.0
-        transparencySlider.maxValue = 100.0
+        transparencySlider.minValue = 0
+        transparencySlider.maxValue = Double(Metrics.opacityStops.count - 1)
+        transparencySlider.numberOfTickMarks = Metrics.opacityStops.count
+        transparencySlider.allowsTickMarkValuesOnly = false
         transparencySlider.isContinuous = true
         transparencySlider.sendAction(on: [.leftMouseDown, .leftMouseDragged, .leftMouseUp])
         transparencySlider.target = self
@@ -1122,9 +1125,8 @@ final class SettingsViewController: NSViewController {
         }
 
         let opacityControlsEnabled = preferences.blurEnabled
-        let displayedTransparency = preferences.clampedWindowOpacity * 100.0
         blurToggle.state = preferences.blurEnabled ? .on : .off
-        transparencySlider.doubleValue = displayedTransparency
+        transparencySlider.doubleValue = Double(nearestOpacityStopIndex(for: preferences.clampedWindowOpacity))
         transparencySlider.isEnabled = opacityControlsEnabled
 
         if let index = FontStylePreset.allCases.firstIndex(of: preferences.fontStyle) {
@@ -1165,14 +1167,26 @@ final class SettingsViewController: NSViewController {
 
     @objc private func transparencyChanged(_ sender: NSSlider) {
         guard !isUpdatingControls else { return }
-        let snappedValue = round(sender.doubleValue)
+        let snappedIndex = nearestOpacityStopIndex(forSliderValue: sender.doubleValue)
+        let snappedValue = Double(snappedIndex)
         if sender.doubleValue != snappedValue {
             sender.doubleValue = snappedValue
         }
         commitPreferenceChange { updated in
             updated.blurEnabled = true
-            updated.windowOpacity = snappedValue / 100.0
+            updated.windowOpacity = Metrics.opacityStops[snappedIndex]
         }
+    }
+
+    private func nearestOpacityStopIndex(for opacity: Double) -> Int {
+        Metrics.opacityStops.enumerated().min(by: { lhs, rhs in
+            abs(lhs.element - opacity) < abs(rhs.element - opacity)
+        })?.offset ?? 0
+    }
+
+    private func nearestOpacityStopIndex(forSliderValue value: Double) -> Int {
+        let roundedValue = Int(round(value))
+        return min(max(roundedValue, 0), Metrics.opacityStops.count - 1)
     }
 
     @objc private func blurToggled(_ sender: NSButton) {

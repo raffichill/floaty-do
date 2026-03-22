@@ -507,6 +507,10 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         button.pressedScale = 0.85
         button.translatesAutoresizingMaskIntoConstraints = false
         button.wantsLayer = true
+        if let cell = button.cell as? NSButtonCell {
+            cell.highlightsBy = []
+            cell.showsStateBy = []
+        }
         button.widthAnchor.constraint(equalToConstant: DebugMetrics.headerButtonWidth).isActive = true
         return button
     }
@@ -521,6 +525,10 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         button.pressedScale = 0.85
         button.translatesAutoresizingMaskIntoConstraints = false
         button.wantsLayer = true
+        if let cell = button.cell as? NSButtonCell {
+            cell.highlightsBy = []
+            cell.showsStateBy = []
+        }
         button.widthAnchor.constraint(equalToConstant: DebugMetrics.headerButtonWidth).isActive = true
         return button
     }
@@ -3473,13 +3481,24 @@ private final class KeyboardOnlyTextField: NSTextField {
 
 class PressScaleButton: NSButton {
     var pressedScale: CGFloat = 0.97
+    var suppressSystemHighlight = false
 
     override var mouseDownCanMoveWindow: Bool { false }
+
+    override func highlight(_ flag: Bool) {
+        guard !suppressSystemHighlight else { return }
+        super.highlight(flag)
+    }
 
     override func mouseDown(with event: NSEvent) {
         setPressedAppearance(true, duration: 0.08)
         super.mouseDown(with: event)
         setPressedAppearance(false, duration: 0.12)
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        updateCellHighlightBehavior()
     }
 
     private func setPressedAppearance(_ pressed: Bool, duration: CFTimeInterval) {
@@ -3507,6 +3526,12 @@ class PressScaleButton: NSButton {
         transform = CATransform3DScale(transform, scale, scale, 1)
         transform = CATransform3DTranslate(transform, -centerX, -centerY, 0)
         return transform
+    }
+
+    private func updateCellHighlightBehavior() {
+        guard suppressSystemHighlight, let cell = cell as? NSButtonCell else { return }
+        cell.highlightsBy = []
+        cell.showsStateBy = []
     }
 }
 

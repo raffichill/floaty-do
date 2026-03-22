@@ -348,7 +348,7 @@ enum LayoutMetrics {
     static var defaultFontSize: Double { fontSizeOptions[defaultFontSizeIndex] }
     static let minFontSize: Double = fontSizeOptions.first ?? 11
     static let maxFontSize: Double = fontSizeOptions.last ?? 16
-    static let minCornerRadius: Double = 4
+    static let minCornerRadius: Double = 6
     static let maxCornerRadius: Double = 24
     static let minWindowOpacity: Double = 0.3
     static let rowHorizontalInset: Double = 12

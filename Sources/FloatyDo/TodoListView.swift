@@ -1589,6 +1589,11 @@ class PressScaleButton: NSButton {
         setPressedAppearance(false, duration: 0.12)
     }
 
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        updateCellHighlightBehavior()
+    }
+
     private func setPressedAppearance(_ pressed: Bool, duration: CFTimeInterval) {
         wantsLayer = true
         guard let layer else { return }
@@ -1614,6 +1619,12 @@ class PressScaleButton: NSButton {
         transform = CATransform3DScale(transform, scale, scale, 1)
         transform = CATransform3DTranslate(transform, -centerX, -centerY, 0)
         return transform
+    }
+
+    private func updateCellHighlightBehavior() {
+        guard suppressSystemHighlight, let cell = cell as? NSButtonCell else { return }
+        cell.highlightsBy = []
+        cell.showsStateBy = []
     }
 }
 
