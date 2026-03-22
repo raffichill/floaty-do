@@ -58,7 +58,7 @@ final class ThemePresetButton: NSButton {
     }
 }
 
-final class SettingsTabButton: NSButton {
+final class SettingsTabButton: PressScaleButton {
     private let container = NSView()
     private let imageView = NSImageView()
     private let titleField = NSTextField(labelWithString: "")

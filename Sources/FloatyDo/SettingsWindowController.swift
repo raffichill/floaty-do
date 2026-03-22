@@ -108,6 +108,12 @@ struct SettingsWindowPlacement {
 }
 
 final class SettingsWindowController: NSWindowController, NSWindowDelegate {
+    enum InitialTab {
+        case appearance
+        case shortcuts
+        case about
+    }
+
     private enum ChromeMetrics {
         static let trafficLightInset: CGFloat = 18
         static let trafficLightSpacing: CGFloat = 6
@@ -178,7 +184,18 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         fatalError("init(coder:) has not been implemented")
     }
 
-    func present(attachedTo parentWindow: NSWindow?) {
+    func present(attachedTo parentWindow: NSWindow?, initialTab: InitialTab? = nil) {
+        if let initialTab {
+            switch initialTab {
+            case .appearance:
+                settingsViewController.showAppearanceTab(animated: false)
+            case .shortcuts:
+                settingsViewController.showShortcutsTab(animated: false)
+            case .about:
+                settingsViewController.showAboutTab(animated: false)
+            }
+        }
+
         resizeWindowToPreferredHeight(animated: false)
         if let window, !window.isVisible {
             let visibleFrame = parentWindow?.screen?.visibleFrame

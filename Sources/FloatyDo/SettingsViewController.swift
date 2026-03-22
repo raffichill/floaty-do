@@ -20,11 +20,11 @@ final class SettingsViewController: NSViewController {
         static let themeSwatchButtonSize: CGFloat = 24
         static let themeSwatchSpacing: CGFloat = 12
         static let themeSwatchContainerHeight: CGFloat = 42
-        static let themeSwatchInset: CGFloat = (themeSwatchContainerHeight - themeSwatchButtonSize) / 2
+        static let themeSwatchInset: CGFloat =
+            (themeSwatchContainerHeight - themeSwatchButtonSize) / 2
         static let themeSwatchContainerWidth: CGFloat =
-            (themeSwatchButtonCount * themeSwatchButtonSize) +
-            ((themeSwatchButtonCount - 1) * themeSwatchSpacing) +
-            (themeSwatchInset * 2)
+            (themeSwatchButtonCount * themeSwatchButtonSize)
+            + ((themeSwatchButtonCount - 1) * themeSwatchSpacing) + (themeSwatchInset * 2)
         static let valueWidth: CGFloat = 44
         static let sliderValueSpacing: CGFloat = 8
         static let controlWidth: CGFloat = themeSwatchContainerWidth
@@ -118,7 +118,8 @@ final class SettingsViewController: NSViewController {
             }
 
             let containerOrigin = textContainerOrigin
-            let containerPoint = NSPoint(x: point.x - containerOrigin.x, y: point.y - containerOrigin.y)
+            let containerPoint = NSPoint(
+                x: point.x - containerOrigin.x, y: point.y - containerOrigin.y)
             guard containerPoint.x >= 0, containerPoint.y >= 0 else {
                 applyHoveredLink(nil)
                 return
@@ -138,7 +139,8 @@ final class SettingsViewController: NSViewController {
                 return
             }
 
-            let linkAttribute = textStorage.attribute(.link, at: characterIndex, effectiveRange: nil)
+            let linkAttribute = textStorage.attribute(
+                .link, at: characterIndex, effectiveRange: nil)
             let linkString = (linkAttribute as? URL)?.absoluteString ?? (linkAttribute as? String)
             applyHoveredLink(linkString)
         }
@@ -200,6 +202,7 @@ final class SettingsViewController: NSViewController {
     private var contentHostHeightConstraint: NSLayoutConstraint?
     private var primaryLabels: [NSTextField] = []
     private var secondaryLabels: [NSTextField] = []
+    private var shortcutDescriptionLabels: [NSTextField] = []
     private var keycapLabels: [NSTextField] = []
     private var keycapBackgroundViews: [NSView] = []
 
@@ -276,7 +279,8 @@ final class SettingsViewController: NSViewController {
         headerView.addSubview(titleLabel)
         headerView.addSubview(tabStack)
 
-        let contentHostHeightConstraint = contentHostView.heightAnchor.constraint(equalToConstant: 0)
+        let contentHostHeightConstraint = contentHostView.heightAnchor.constraint(
+            equalToConstant: 0)
         self.contentHostHeightConstraint = contentHostHeightConstraint
 
         NSLayoutConstraint.activate([
@@ -285,10 +289,12 @@ final class SettingsViewController: NSViewController {
             headerView.trailingAnchor.constraint(equalTo: root.trailingAnchor),
             headerView.heightAnchor.constraint(equalToConstant: Metrics.dividerTopInset),
 
-            titleLabel.topAnchor.constraint(equalTo: headerView.topAnchor, constant: Metrics.titleTopInset),
+            titleLabel.topAnchor.constraint(
+                equalTo: headerView.topAnchor, constant: Metrics.titleTopInset),
             titleLabel.centerXAnchor.constraint(equalTo: root.centerXAnchor),
 
-            tabStack.topAnchor.constraint(equalTo: headerView.topAnchor, constant: Metrics.tabTopInset),
+            tabStack.topAnchor.constraint(
+                equalTo: headerView.topAnchor, constant: Metrics.tabTopInset),
             tabStack.centerXAnchor.constraint(equalTo: root.centerXAnchor),
 
             divider.topAnchor.constraint(equalTo: headerView.bottomAnchor),
@@ -296,10 +302,14 @@ final class SettingsViewController: NSViewController {
             divider.trailingAnchor.constraint(equalTo: root.trailingAnchor),
             divider.heightAnchor.constraint(equalToConstant: 1),
 
-            contentHostView.topAnchor.constraint(equalTo: divider.bottomAnchor, constant: Metrics.contentTopInset),
-            contentHostView.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: Metrics.outerPadding.left),
-            contentHostView.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -Metrics.outerPadding.right),
-            contentHostView.bottomAnchor.constraint(lessThanOrEqualTo: root.bottomAnchor, constant: -Metrics.outerPadding.bottom),
+            contentHostView.topAnchor.constraint(
+                equalTo: divider.bottomAnchor, constant: Metrics.contentTopInset),
+            contentHostView.leadingAnchor.constraint(
+                equalTo: root.leadingAnchor, constant: Metrics.outerPadding.left),
+            contentHostView.trailingAnchor.constraint(
+                equalTo: root.trailingAnchor, constant: -Metrics.outerPadding.right),
+            contentHostView.bottomAnchor.constraint(
+                lessThanOrEqualTo: root.bottomAnchor, constant: -Metrics.outerPadding.bottom),
             contentHostHeightConstraint,
         ])
 
@@ -311,13 +321,28 @@ final class SettingsViewController: NSViewController {
         configureTabButtons()
         configureControls()
         buildPages()
-        selectTab(.appearance)
+        selectTab(.appearance, animated: false)
         applyPreferencesToControls()
     }
 
     override func viewDidAppear() {
         super.viewDidAppear()
         reportPreferredWindowHeight(animated: false)
+    }
+
+    func showAppearanceTab(animated: Bool = false) {
+        loadViewIfNeeded()
+        selectTab(.appearance, animated: animated)
+    }
+
+    func showShortcutsTab(animated: Bool = false) {
+        loadViewIfNeeded()
+        selectTab(.shortcuts, animated: animated)
+    }
+
+    func showAboutTab(animated: Bool = false) {
+        loadViewIfNeeded()
+        selectTab(.about, animated: animated)
     }
 
     func updatePreferences(_ preferences: AppPreferences) {
@@ -409,7 +434,7 @@ final class SettingsViewController: NSViewController {
         selectTab(SettingsTab.allCases[sender.tag])
     }
 
-    private func selectTab(_ tab: SettingsTab) {
+    private func selectTab(_ tab: SettingsTab, animated explicitAnimated: Bool? = nil) {
         let outgoingTab = displayedTab ?? tab
         selectedTab = tab
         if tab != .about, hoveredAboutLink != nil {
@@ -423,7 +448,9 @@ final class SettingsViewController: NSViewController {
         }
 
         let targetContentHeight = measuredContentHeight(for: tab)
-        let shouldAnimate = view.window?.isVisible == true && displayedTab != nil && outgoingTab != tab
+        let shouldAnimate =
+            explicitAnimated
+            ?? (view.window?.isVisible == true && displayedTab != nil && outgoingTab != tab)
 
         transitionGeneration += 1
         let transitionID = transitionGeneration
@@ -436,14 +463,16 @@ final class SettingsViewController: NSViewController {
         }
 
         preparePagesForTransition(from: outgoingTab, to: tab)
-        let currentContentHeight = contentHostHeightConstraint?.constant ?? measuredContentHeight(for: outgoingTab)
+        let currentContentHeight =
+            contentHostHeightConstraint?.constant ?? measuredContentHeight(for: outgoingTab)
         let grows = targetContentHeight > currentContentHeight + 0.5
 
         reportPreferredWindowHeight(forContentHeight: targetContentHeight, animated: true)
 
         if grows {
             transitionDisplayedContentHeight(to: targetContentHeight, animated: true)
-            DispatchQueue.main.asyncAfter(deadline: .now() + AnimationMetrics.growCrossfadeDelay) { [weak self] in
+            DispatchQueue.main.asyncAfter(deadline: .now() + AnimationMetrics.growCrossfadeDelay) {
+                [weak self] in
                 self?.crossfadeIfCurrent(from: outgoingTab, to: tab, transitionID: transitionID)
             }
             return
@@ -492,7 +521,8 @@ final class SettingsViewController: NSViewController {
             controlsStack.bottomAnchor.constraint(equalTo: content.bottomAnchor),
 
             labelsStack.topAnchor.constraint(equalTo: controlsStack.topAnchor),
-            labelsStack.trailingAnchor.constraint(equalTo: controlsStack.leadingAnchor, constant: -18),
+            labelsStack.trailingAnchor.constraint(
+                equalTo: controlsStack.leadingAnchor, constant: -18),
             labelsStack.leadingAnchor.constraint(equalTo: content.leadingAnchor),
             labelsStack.bottomAnchor.constraint(equalTo: controlsStack.bottomAnchor),
         ])
@@ -504,8 +534,10 @@ final class SettingsViewController: NSViewController {
         NSLayoutConstraint.activate([
             content.topAnchor.constraint(equalTo: container.topAnchor),
             content.centerXAnchor.constraint(equalTo: container.centerXAnchor),
-            content.leadingAnchor.constraint(greaterThanOrEqualTo: container.leadingAnchor, constant: 24),
-            content.trailingAnchor.constraint(lessThanOrEqualTo: container.trailingAnchor, constant: -24),
+            content.leadingAnchor.constraint(
+                greaterThanOrEqualTo: container.leadingAnchor, constant: 24),
+            content.trailingAnchor.constraint(
+                lessThanOrEqualTo: container.trailingAnchor, constant: -24),
             content.bottomAnchor.constraint(equalTo: container.bottomAnchor),
         ])
 
@@ -523,13 +555,12 @@ final class SettingsViewController: NSViewController {
             ("New row below", ["return"]),
             ("Complete selected", ["command", "return"]),
             ("Delete selected", ["command", "delete"]),
-            ("Show list", ["command", "1"]),
+            ("Show todo", ["command", "1"]),
             ("Show archive", ["command", "2"]),
             ("Move selection", ["up/down"]),
             ("Expand selection", ["shift", "up/down"]),
             ("Jump to top or bottom", ["command", "up/down"]),
             ("Select to top or bottom", ["command", "shift", "up/down"]),
-            ("Select all", ["command", "A"]),
             ("Open theme", ["command", ","]),
             ("Reset window size", ["command", "0"]),
             ("Snap window", ["control", "option", "arrow"]),
@@ -545,8 +576,10 @@ final class SettingsViewController: NSViewController {
         NSLayoutConstraint.activate([
             stack.topAnchor.constraint(equalTo: container.topAnchor),
             stack.centerXAnchor.constraint(equalTo: container.centerXAnchor),
-            stack.leadingAnchor.constraint(greaterThanOrEqualTo: container.leadingAnchor, constant: 24),
-            stack.trailingAnchor.constraint(lessThanOrEqualTo: container.trailingAnchor, constant: -24),
+            stack.leadingAnchor.constraint(
+                greaterThanOrEqualTo: container.leadingAnchor, constant: 24),
+            stack.trailingAnchor.constraint(
+                lessThanOrEqualTo: container.trailingAnchor, constant: -24),
             stack.bottomAnchor.constraint(equalTo: container.bottomAnchor),
         ])
 
@@ -565,8 +598,10 @@ final class SettingsViewController: NSViewController {
         aboutTextView.isHorizontallyResizable = false
         aboutTextView.isVerticallyResizable = true
         aboutTextView.minSize = .zero
-        aboutTextView.maxSize = NSSize(width: Metrics.aboutBlockWidth, height: .greatestFiniteMagnitude)
-        aboutTextView.textContainer?.containerSize = NSSize(width: Metrics.aboutBlockWidth, height: .greatestFiniteMagnitude)
+        aboutTextView.maxSize = NSSize(
+            width: Metrics.aboutBlockWidth, height: .greatestFiniteMagnitude)
+        aboutTextView.textContainer?.containerSize = NSSize(
+            width: Metrics.aboutBlockWidth, height: .greatestFiniteMagnitude)
         aboutTextView.textContainer?.widthTracksTextView = true
         aboutTextView.textContainer?.lineFragmentPadding = 0
         aboutTextView.onHoveredLinkChange = { [weak self] link in
@@ -578,7 +613,8 @@ final class SettingsViewController: NSViewController {
             self?.handleAboutLinkActivation(link)
         }
         updateAboutTextView()
-        aboutTextView.heightAnchor.constraint(equalToConstant: ceil(aboutTextView.frame.height)).isActive = true
+        aboutTextView.heightAnchor.constraint(equalToConstant: ceil(aboutTextView.frame.height))
+            .isActive = true
 
         let container = NSView()
         container.translatesAutoresizingMaskIntoConstraints = false
@@ -588,8 +624,10 @@ final class SettingsViewController: NSViewController {
             aboutTextView.topAnchor.constraint(equalTo: container.topAnchor),
             aboutTextView.centerXAnchor.constraint(equalTo: container.centerXAnchor),
             aboutTextView.widthAnchor.constraint(equalToConstant: Metrics.aboutBlockWidth),
-            aboutTextView.leadingAnchor.constraint(greaterThanOrEqualTo: container.leadingAnchor, constant: 24),
-            aboutTextView.trailingAnchor.constraint(lessThanOrEqualTo: container.trailingAnchor, constant: -24),
+            aboutTextView.leadingAnchor.constraint(
+                greaterThanOrEqualTo: container.leadingAnchor, constant: 24),
+            aboutTextView.trailingAnchor.constraint(
+                lessThanOrEqualTo: container.trailingAnchor, constant: -24),
             aboutTextView.bottomAnchor.constraint(equalTo: container.bottomAnchor),
         ])
 
@@ -610,8 +648,12 @@ final class SettingsViewController: NSViewController {
 
         themeSwatchContainer.wantsLayer = true
         themeSwatchContainer.translatesAutoresizingMaskIntoConstraints = false
-        themeSwatchContainer.widthAnchor.constraint(equalToConstant: Metrics.themeSwatchContainerWidth).isActive = true
-        themeSwatchContainer.heightAnchor.constraint(equalToConstant: Metrics.themeSwatchContainerHeight).isActive = true
+        themeSwatchContainer.widthAnchor.constraint(
+            equalToConstant: Metrics.themeSwatchContainerWidth
+        ).isActive = true
+        themeSwatchContainer.heightAnchor.constraint(
+            equalToConstant: Metrics.themeSwatchContainerHeight
+        ).isActive = true
     }
 
     private func configureIconApplyControls() {
@@ -619,7 +661,8 @@ final class SettingsViewController: NSViewController {
         iconStatusLabel.alignment = .left
         iconStatusLabel.lineBreakMode = .byTruncatingTail
         iconStatusLabel.translatesAutoresizingMaskIntoConstraints = false
-        iconStatusLabel.widthAnchor.constraint(equalToConstant: Metrics.iconStatusWidth).isActive = true
+        iconStatusLabel.widthAnchor.constraint(equalToConstant: Metrics.iconStatusWidth).isActive =
+            true
         secondaryLabels.append(iconStatusLabel)
 
         applyIconButton.target = self
@@ -648,7 +691,8 @@ final class SettingsViewController: NSViewController {
         transparencyLabel.translatesAutoresizingMaskIntoConstraints = false
         transparencyLabel.setContentHuggingPriority(.required, for: .horizontal)
         transparencyLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
-        transparencyLabel.widthAnchor.constraint(equalToConstant: Metrics.transparencyLabelWidth).isActive = true
+        transparencyLabel.widthAnchor.constraint(equalToConstant: Metrics.transparencyLabelWidth)
+            .isActive = true
         primaryLabels.append(transparencyLabel)
     }
 
@@ -694,7 +738,8 @@ final class SettingsViewController: NSViewController {
         borderRadiusSlider.target = self
         borderRadiusSlider.action = #selector(borderRadiusChanged(_:))
         borderRadiusSlider.translatesAutoresizingMaskIntoConstraints = false
-        borderRadiusSlider.widthAnchor.constraint(equalToConstant: Metrics.sliderWidth).isActive = true
+        borderRadiusSlider.widthAnchor.constraint(equalToConstant: Metrics.sliderWidth).isActive =
+            true
 
         configureValueLabel(borderRadiusValueLabel)
         secondaryLabels.append(borderRadiusValueLabel)
@@ -730,8 +775,10 @@ final class SettingsViewController: NSViewController {
         themeSwatchContainer.subviews.forEach { $0.removeFromSuperview() }
         themeSwatchContainer.addSubview(swatchRow)
         NSLayoutConstraint.activate([
-            swatchRow.leadingAnchor.constraint(equalTo: themeSwatchContainer.leadingAnchor, constant: Metrics.themeSwatchInset),
-            swatchRow.trailingAnchor.constraint(equalTo: themeSwatchContainer.trailingAnchor, constant: -Metrics.themeSwatchInset),
+            swatchRow.leadingAnchor.constraint(
+                equalTo: themeSwatchContainer.leadingAnchor, constant: Metrics.themeSwatchInset),
+            swatchRow.trailingAnchor.constraint(
+                equalTo: themeSwatchContainer.trailingAnchor, constant: -Metrics.themeSwatchInset),
             swatchRow.centerYAnchor.constraint(equalTo: themeSwatchContainer.centerYAnchor),
         ])
 
@@ -755,12 +802,15 @@ final class SettingsViewController: NSViewController {
             blurToggle.leadingAnchor.constraint(equalTo: control.leadingAnchor),
             blurToggle.centerYAnchor.constraint(equalTo: control.centerYAnchor),
 
-            transparencyLabel.leadingAnchor.constraint(equalTo: blurToggle.trailingAnchor, constant: Metrics.transparencyItemSpacing),
+            transparencyLabel.leadingAnchor.constraint(
+                equalTo: blurToggle.trailingAnchor, constant: Metrics.transparencyItemSpacing),
             transparencyLabel.centerYAnchor.constraint(equalTo: control.centerYAnchor),
 
             transparencySlider.trailingAnchor.constraint(equalTo: control.trailingAnchor),
             transparencySlider.centerYAnchor.constraint(equalTo: control.centerYAnchor),
-            transparencySlider.leadingAnchor.constraint(equalTo: transparencyLabel.trailingAnchor, constant: Metrics.transparencyItemSpacing),
+            transparencySlider.leadingAnchor.constraint(
+                equalTo: transparencyLabel.trailingAnchor, constant: Metrics.transparencyItemSpacing
+            ),
         ])
 
         return control
@@ -792,7 +842,8 @@ final class SettingsViewController: NSViewController {
         sliderGroup.alignment = .centerY
         sliderGroup.spacing = Metrics.sliderValueSpacing
         sliderGroup.translatesAutoresizingMaskIntoConstraints = false
-        sliderGroup.widthAnchor.constraint(equalToConstant: Metrics.sliderGroupWidth).isActive = true
+        sliderGroup.widthAnchor.constraint(equalToConstant: Metrics.sliderGroupWidth).isActive =
+            true
 
         let stack = NSStackView(views: [sliderGroup, resetFontSizeButton])
         stack.orientation = .horizontal
@@ -809,7 +860,8 @@ final class SettingsViewController: NSViewController {
         sliderGroup.alignment = .centerY
         sliderGroup.spacing = Metrics.sliderValueSpacing
         sliderGroup.translatesAutoresizingMaskIntoConstraints = false
-        sliderGroup.widthAnchor.constraint(equalToConstant: Metrics.sliderGroupWidth).isActive = true
+        sliderGroup.widthAnchor.constraint(equalToConstant: Metrics.sliderGroupWidth).isActive =
+            true
 
         let stack = NSStackView(views: [sliderGroup, resetRadiusButton])
         stack.orientation = .horizontal
@@ -865,10 +917,13 @@ final class SettingsViewController: NSViewController {
         return totalWindowHeight(forContentHeight: measuredContentHeight(for: selectedTab))
     }
 
-    private func reportPreferredWindowHeight(forContentHeight contentHeight: CGFloat? = nil, animated: Bool) {
+    private func reportPreferredWindowHeight(
+        forContentHeight contentHeight: CGFloat? = nil, animated: Bool
+    ) {
         guard isViewLoaded else { return }
         let resolvedContentHeight = contentHeight ?? measuredContentHeight(for: selectedTab)
-        onPreferredWindowHeightChange?(totalWindowHeight(forContentHeight: resolvedContentHeight), animated)
+        onPreferredWindowHeightChange?(
+            totalWindowHeight(forContentHeight: resolvedContentHeight), animated)
     }
 
     private func measuredContentHeight(for tab: SettingsTab) -> CGFloat {
@@ -876,10 +931,13 @@ final class SettingsViewController: NSViewController {
     }
 
     private func totalWindowHeight(forContentHeight contentHeight: CGFloat) -> CGFloat {
-        Metrics.dividerTopInset + 1 + Metrics.contentTopInset + contentHeight + Metrics.outerPadding.bottom
+        Metrics.dividerTopInset + 1 + Metrics.contentTopInset + contentHeight
+            + Metrics.outerPadding.bottom
     }
 
-    private func transitionDisplayedContentHeight(to targetHeight: CGFloat, animated: Bool, completion: (() -> Void)? = nil) {
+    private func transitionDisplayedContentHeight(
+        to targetHeight: CGFloat, animated: Bool, completion: (() -> Void)? = nil
+    ) {
         guard let contentHostHeightConstraint else { return }
         let currentHeight = contentHostHeightConstraint.constant
 
@@ -916,7 +974,9 @@ final class SettingsViewController: NSViewController {
         displayedTab = tab
     }
 
-    private func preparePagesForTransition(from outgoingTab: SettingsTab, to incomingTab: SettingsTab) {
+    private func preparePagesForTransition(
+        from outgoingTab: SettingsTab, to incomingTab: SettingsTab
+    ) {
         for (key, page) in pages {
             page.container.layer?.removeAllAnimations()
             page.container.isHidden = false
@@ -933,14 +993,19 @@ final class SettingsViewController: NSViewController {
         displayedTab = outgoingTab
     }
 
-    private func crossfadeIfCurrent(from outgoingTab: SettingsTab, to incomingTab: SettingsTab, transitionID: Int) {
+    private func crossfadeIfCurrent(
+        from outgoingTab: SettingsTab, to incomingTab: SettingsTab, transitionID: Int
+    ) {
         guard transitionGeneration == transitionID else { return }
         crossfadePages(from: outgoingTab, to: incomingTab, transitionID: transitionID)
     }
 
-    private func crossfadePages(from outgoingTab: SettingsTab, to incomingTab: SettingsTab, transitionID: Int) {
+    private func crossfadePages(
+        from outgoingTab: SettingsTab, to incomingTab: SettingsTab, transitionID: Int
+    ) {
         guard let outgoingPage = pages[outgoingTab],
-              let incomingPage = pages[incomingTab] else {
+            let incomingPage = pages[incomingTab]
+        else {
             applyVisiblePage(incomingTab)
             return
         }
@@ -967,8 +1032,10 @@ final class SettingsViewController: NSViewController {
         descriptionLabel.font = .systemFont(ofSize: 12)
         descriptionLabel.alignment = .right
         descriptionLabel.translatesAutoresizingMaskIntoConstraints = false
-        descriptionLabel.widthAnchor.constraint(equalToConstant: Metrics.shortcutsColumnWidth).isActive = true
+        descriptionLabel.widthAnchor.constraint(equalToConstant: Metrics.shortcutsColumnWidth)
+            .isActive = true
         secondaryLabels.append(descriptionLabel)
+        shortcutDescriptionLabels.append(descriptionLabel)
 
         let keysRow = NSStackView(views: shortcut.map(makeKeycap))
         keysRow.orientation = .horizontal
@@ -978,7 +1045,8 @@ final class SettingsViewController: NSViewController {
 
         let keysContainer = NSView()
         keysContainer.translatesAutoresizingMaskIntoConstraints = false
-        keysContainer.widthAnchor.constraint(equalToConstant: Metrics.shortcutsColumnWidth).isActive = true
+        keysContainer.widthAnchor.constraint(equalToConstant: Metrics.shortcutsColumnWidth)
+            .isActive = true
         keysContainer.addSubview(keysRow)
 
         NSLayoutConstraint.activate([
@@ -1064,12 +1132,15 @@ final class SettingsViewController: NSViewController {
         }
 
         let fontSize = LayoutMetrics.nearestFontSizeOption(to: preferences.fontSize)
-        let fontSizeIndex = LayoutMetrics.fontSizeOptions.firstIndex(of: fontSize) ?? LayoutMetrics.defaultFontSizeIndex
+        let fontSizeIndex =
+            LayoutMetrics.fontSizeOptions.firstIndex(of: fontSize)
+            ?? LayoutMetrics.defaultFontSizeIndex
         fontSizeSlider.doubleValue = Double(fontSizeIndex)
         fontSizeDetailLabel.stringValue = "\(Int(fontSize)) pt"
 
         borderRadiusSlider.maxValue = preferences.maximumCornerRadius
-        borderRadiusSlider.doubleValue = min(preferences.cornerRadius, preferences.maximumCornerRadius)
+        borderRadiusSlider.doubleValue = min(
+            preferences.cornerRadius, preferences.maximumCornerRadius)
         borderRadiusValueLabel.stringValue = "\(Int(round(borderRadiusSlider.doubleValue))) px"
         updateAppIconControls()
         applyThemeAppearance()
@@ -1164,7 +1235,8 @@ final class SettingsViewController: NSViewController {
         guard !isApplyingPrimaryIconChange else { return }
         let controller = PrimaryAppIconRelaunchController.shared
         guard controller.canApplyIconChanges() else {
-            presentIconApplyError(message: "App icon rebuilding is only available from the local project checkout.")
+            presentIconApplyError(
+                message: "App icon rebuilding is only available from the local project checkout.")
             return
         }
         guard selectedTheme.supportsPrimaryAppIcon else {
@@ -1224,7 +1296,8 @@ final class SettingsViewController: NSViewController {
             return
         }
 
-        iconStatusLabel.stringValue = themeMatchesIcon ? "Icon matches this theme." : "Relaunch to apply current theme."
+        iconStatusLabel.stringValue =
+            themeMatchesIcon ? "Icon matches this theme." : "Relaunch to apply current theme."
         applyIconButton.title = themeMatchesIcon ? "Current" : "Relaunch"
         applyIconButton.isEnabled = !themeMatchesIcon
     }
@@ -1250,6 +1323,10 @@ final class SettingsViewController: NSViewController {
 
         primaryLabels.forEach { $0.textColor = preferences.primaryTextColor }
         secondaryLabels.forEach { $0.textColor = preferences.secondaryTextColor }
+        let boostedShortcutLabelColor = preferences.secondaryTextColor.withAlphaComponent(
+            min(1.0, preferences.secondaryTextColor.alphaComponent + 0.10)
+        )
+        shortcutDescriptionLabels.forEach { $0.textColor = boostedShortcutLabelColor }
         keycapLabels.forEach { $0.textColor = preferences.secondaryTextColor }
         keycapBackgroundViews.forEach {
             $0.layer?.backgroundColor = preferences.activeFillColor.cgColor
@@ -1268,12 +1345,15 @@ final class SettingsViewController: NSViewController {
     }
 
     private func applyThemeStyle(to button: NSButton) {
-        let titleColor = button.isEnabled
+        let titleColor =
+            button.isEnabled
             ? preferences.primaryTextColor
             : preferences.primaryTextColor.withAlphaComponent(0.42)
-        let fillColor = button.isEnabled
+        let fillColor =
+            button.isEnabled
             ? preferences.activeFillColor
-            : preferences.activeFillColor.withAlphaComponent(max(0.12, preferences.activeFillColor.alphaComponent * 0.48))
+            : preferences.activeFillColor.withAlphaComponent(
+                max(0.12, preferences.activeFillColor.alphaComponent * 0.48))
         let paragraphStyle = NSMutableParagraphStyle()
         paragraphStyle.alignment = .center
         button.attributedTitle = NSAttributedString(
@@ -1289,12 +1369,15 @@ final class SettingsViewController: NSViewController {
     }
 
     private func applyThemeStyle(to popup: NSPopUpButton) {
-        let fullContrastTitleColor = popup.isEnabled
+        let fullContrastTitleColor =
+            popup.isEnabled
             ? preferences.contentBaseColor
             : preferences.contentBaseColor.withAlphaComponent(0.42)
-        let fillColor = popup.isEnabled
+        let fillColor =
+            popup.isEnabled
             ? preferences.activeFillColor
-            : preferences.activeFillColor.withAlphaComponent(max(0.12, preferences.activeFillColor.alphaComponent * 0.48))
+            : preferences.activeFillColor.withAlphaComponent(
+                max(0.12, preferences.activeFillColor.alphaComponent * 0.48))
         let font = popup.font ?? .systemFont(ofSize: 12)
         let attributes: [NSAttributedString.Key: Any] = [
             .foregroundColor: fullContrastTitleColor,
@@ -1303,7 +1386,8 @@ final class SettingsViewController: NSViewController {
 
         popup.contentTintColor = fullContrastTitleColor
         popup.bezelColor = fillColor
-        popup.menu?.appearance = preferences.usesLightText
+        popup.menu?.appearance =
+            preferences.usesLightText
             ? NSAppearance(named: .darkAqua)
             : NSAppearance(named: .aqua)
         popup.itemArray.forEach { item in
@@ -1326,6 +1410,11 @@ final class SettingsViewController: NSViewController {
             return
         }
 
+        if link == "floatydo://theme" {
+            selectTab(.appearance)
+            return
+        }
+
         openAboutURL(link)
     }
 
@@ -1335,6 +1424,7 @@ final class SettingsViewController: NSViewController {
         let paragraphStyle = NSMutableParagraphStyle()
         paragraphStyle.alignment = .left
         paragraphStyle.lineSpacing = 2
+        paragraphStyle.paragraphSpacing = 20
 
         let bodyAttributes: [NSAttributedString.Key: Any] = [
             .foregroundColor: preferences.primaryTextColor.withAlphaComponent(0.85),
@@ -1343,6 +1433,9 @@ final class SettingsViewController: NSViewController {
         ]
 
         let text = NSMutableAttributedString()
+        func appendParagraphBreak() {
+            text.append(NSAttributedString(string: "\n", attributes: bodyAttributes))
+        }
         func appendBody(_ string: String) {
             text.append(NSAttributedString(string: string, attributes: bodyAttributes))
         }
@@ -1359,15 +1452,28 @@ final class SettingsViewController: NSViewController {
             text.append(NSAttributedString(string: title, attributes: attributes))
         }
 
-        appendBody("FloatyDo is a minimal app designed to keep you focused on your next few tasks and nothing else.\n\n")
-        appendBody("It is not a project management tool. It has no groups, scheduling, badges, or calendar sync. But for what it does I hope it works well and feels like it’s your own. I recommend taking some time to get familiar with the ")
+        appendBody(
+            "FloatyDo is a minimal app designed to keep you focused on your next few tasks and nothing else."
+        )
+        appendParagraphBreak()
+        appendBody(
+            "It is not a project management tool. It has no groups, scheduling, badges, or calendar sync. But for what it does I hope it works well and feels like it’s "
+        )
+        appendLink("your own", link: "floatydo://theme")
+        appendBody(".")
+        appendParagraphBreak()
+        appendBody("I recommend taking some time to get familiar with the ")
         appendLink("keyboard shortcuts", link: "floatydo://shortcuts")
-        appendBody(" as it makes the FloatyDo experience significantly better.\n\n")
+        appendBody(" as it makes the FloatyDo experience significantly better.")
+        appendParagraphBreak()
         appendBody("Feel free to ")
         appendLink("email me", link: "mailto:raffi.chilingaryan@gmail.com")
-        appendBody(" with any feedback or requests, and thanks for giving the app a try.\n\nRaffi\n\nApp icons and iconography by ")
+        appendBody(" with any feedback or requests, and thanks for giving the app a try.")
+        appendParagraphBreak()
+        appendBody("Raffi")
+        appendParagraphBreak()
+        appendBody("App icons and iconography by ")
         appendLink("Emirhan", link: "https://x.com/_eugrl")
-        appendBody(".")
 
         aboutTextView.textStorage?.setAttributedString(text)
         aboutTextView.linkTextAttributes = [
@@ -1375,8 +1481,10 @@ final class SettingsViewController: NSViewController {
             .underlineStyle: NSUnderlineStyle.single.rawValue,
         ]
         aboutTextView.layoutManager?.ensureLayout(for: aboutTextView.textContainer!)
-        let usedRect = aboutTextView.layoutManager?.usedRect(for: aboutTextView.textContainer!) ?? .zero
-        aboutTextView.frame.size = NSSize(width: Metrics.aboutBlockWidth, height: ceil(usedRect.height))
+        let usedRect =
+            aboutTextView.layoutManager?.usedRect(for: aboutTextView.textContainer!) ?? .zero
+        aboutTextView.frame.size = NSSize(
+            width: Metrics.aboutBlockWidth, height: ceil(usedRect.height))
         aboutTextView.invalidateIntrinsicContentSize()
     }
 

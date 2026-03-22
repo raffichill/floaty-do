@@ -1,6 +1,13 @@
 import AppKit
 
 public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
+    private enum DefaultsKeys {
+        static let didShowAboutOnFirstLaunch = "FloatyDo.didShowAboutOnFirstLaunch"
+        static let items = "floatydo.items"
+        static let archive = "floatydo.archived"
+        static let preferences = "floatydo.preferences"
+    }
+
     private enum PanelSnapDirection {
         case left
         case right
@@ -102,7 +109,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 return nil
             }
             if characters == "," {
-                self.todoVC.openSettingsWindow()
+                self.todoVC.openSettingsWindow(initialTab: .appearance)
                 return nil
             }
             if characters == "1" {
@@ -122,6 +129,11 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
         // Position panel near the status item and show it
         showPanel(activate: true)
+
+        if shouldShowFirstLaunchOnboarding() {
+            todoVC.openSettingsWindow(initialTab: .about)
+            UserDefaults.standard.set(true, forKey: DefaultsKeys.didShowAboutOnFirstLaunch)
+        }
     }
 
     public func applicationDidBecomeActive(_ notification: Notification) {
@@ -211,6 +223,18 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let image = NSWorkspace.shared.icon(forFile: Bundle.main.bundlePath)
         image.size = NSSize(width: 128, height: 128)
         NSApp.applicationIconImage = image
+    }
+
+    private func shouldShowFirstLaunchOnboarding() -> Bool {
+        guard !UserDefaults.standard.bool(forKey: DefaultsKeys.didShowAboutOnFirstLaunch) else {
+            return false
+        }
+
+        let hasPersistedState =
+            UserDefaults.standard.object(forKey: DefaultsKeys.items) != nil ||
+            UserDefaults.standard.object(forKey: DefaultsKeys.archive) != nil ||
+            UserDefaults.standard.object(forKey: DefaultsKeys.preferences) != nil
+        return !hasPersistedState
     }
 
     private func positionPanel() {

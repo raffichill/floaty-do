@@ -503,6 +503,8 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         let button = PressScaleButton(image: image.withSymbolConfiguration(config)!, target: self, action: action)
         button.isBordered = false
         button.imagePosition = .imageOnly
+        button.suppressSystemHighlight = true
+        button.pressedScale = 0.85
         button.translatesAutoresizingMaskIntoConstraints = false
         button.wantsLayer = true
         button.widthAnchor.constraint(equalToConstant: DebugMetrics.headerButtonWidth).isActive = true
@@ -515,6 +517,8 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         let button = HoverTrackingButton(image: image.withSymbolConfiguration(config)!, target: self, action: action)
         button.isBordered = false
         button.imagePosition = .imageOnly
+        button.suppressSystemHighlight = true
+        button.pressedScale = 0.85
         button.translatesAutoresizingMaskIntoConstraints = false
         button.wantsLayer = true
         button.widthAnchor.constraint(equalToConstant: DebugMetrics.headerButtonWidth).isActive = true
@@ -575,7 +579,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
 
     private func updateListScrollBehavior() {
         let allowsOverflowScrolling = currentTab == .archive
-        listScrollView.hasVerticalScroller = allowsOverflowScrolling
+        listScrollView.hasVerticalScroller = false
         listScrollView.verticalScrollElasticity = allowsOverflowScrolling ? .automatic : .none
     }
 
@@ -596,7 +600,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         return true
     }
 
-    func openSettingsWindow() {
+    func openSettingsWindow(initialTab: SettingsWindowController.InitialTab? = nil) {
         let controller = settingsWindowController ?? SettingsWindowController(preferences: store.preferences)
         controller.onPreferencesChange = { [weak self] preferences in
             guard let self else { return }
@@ -612,7 +616,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         controller.updatePreferences(store.preferences)
         settingsWindowController = controller
         updateTabAppearance()
-        controller.present(attachedTo: view.window)
+        controller.present(attachedTo: view.window, initialTab: initialTab)
     }
 
     func resetWindowSize() {
@@ -2001,37 +2005,6 @@ private extension NSWindow {
         let safeAreaHeight = contentView?.safeAreaInsets.top ?? 0
         let layoutChromeHeight = max(0, frame.height - contentLayoutRect.height)
         return max(safeAreaHeight, layoutChromeHeight)
-    }
-}
-
-class PressScaleButton: NSButton {
-    var pressedScale: CGFloat = 0.97
-
-    override var mouseDownCanMoveWindow: Bool { false }
-
-    override func mouseDown(with event: NSEvent) {
-        setPressedAppearance(true, duration: 0.08)
-        super.mouseDown(with: event)
-        setPressedAppearance(false, duration: 0.12)
-    }
-
-    private func setPressedAppearance(_ pressed: Bool, duration: CFTimeInterval) {
-        wantsLayer = true
-        guard let layer else { return }
-
-        let targetTransform = CATransform3DMakeScale(
-            pressed ? pressedScale : 1,
-            pressed ? pressedScale : 1,
-            1
-        )
-        let animation = CABasicAnimation(keyPath: "transform")
-        animation.fromValue = layer.presentation()?.transform ?? layer.transform
-        animation.toValue = targetTransform
-        animation.duration = duration
-        animation.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-        layer.removeAnimation(forKey: "pressScale")
-        layer.add(animation, forKey: "pressScale")
-        layer.transform = targetTransform
     }
 }
 
@@ -3513,11 +3486,8 @@ class PressScaleButton: NSButton {
         wantsLayer = true
         guard let layer else { return }
 
-        let targetTransform = CATransform3DMakeScale(
-            pressed ? pressedScale : 1,
-            pressed ? pressedScale : 1,
-            1
-        )
+        let scale = pressed ? pressedScale : 1
+        let targetTransform = centeredPressTransform(scale: scale)
         let animation = CABasicAnimation(keyPath: "transform")
         animation.fromValue = layer.presentation()?.transform ?? layer.transform
         animation.toValue = targetTransform
@@ -3526,6 +3496,17 @@ class PressScaleButton: NSButton {
         layer.removeAnimation(forKey: "pressScale")
         layer.add(animation, forKey: "pressScale")
         layer.transform = targetTransform
+    }
+
+    private func centeredPressTransform(scale: CGFloat) -> CATransform3D {
+        let centerX = bounds.midX
+        let centerY = bounds.midY
+
+        var transform = CATransform3DIdentity
+        transform = CATransform3DTranslate(transform, centerX, centerY, 0)
+        transform = CATransform3DScale(transform, scale, scale, 1)
+        transform = CATransform3DTranslate(transform, -centerX, -centerY, 0)
+        return transform
     }
 }
 
