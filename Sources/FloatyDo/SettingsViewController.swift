@@ -39,7 +39,7 @@ final class SettingsViewController: NSViewController {
         static let shortcutsColumnGap: CGFloat = 16
         static let shortcutsRowSpacing: CGFloat = 14
         static let aboutBlockWidth: CGFloat = 400
-        static let opacityStops: [Double] = [0.50, 0.67, 0.83, 1.0]
+        static let opacityStops: [Double] = [0.67, 0.78, 0.89, 1.0]
     }
 
     private enum AnimationMetrics {
