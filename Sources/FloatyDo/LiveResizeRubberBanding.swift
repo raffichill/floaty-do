@@ -1,7 +1,7 @@
 import AppKit
 
 struct LiveResizeRubberBanding {
-    static let resistance: CGFloat = 0.9
+    static let resistance: CGFloat = 0.05
     static let releaseDuration: TimeInterval = 0.24
 
     struct ResizeEdges: OptionSet {

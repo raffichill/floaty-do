@@ -97,9 +97,10 @@ final class FloatingPanelRubberBandingTests: XCTestCase {
     func testRubberBandDistanceKeepsGrowingWithoutHardCap() {
         let medium = LiveResizeRubberBanding.rubberBandDistance(overshoot: 400, dimension: 320)
         let large = LiveResizeRubberBanding.rubberBandDistance(overshoot: 4_000, dimension: 320)
+        let veryLarge = LiveResizeRubberBanding.rubberBandDistance(overshoot: 40_000, dimension: 320)
 
         XCTAssertGreaterThan(large, medium)
-        XCTAssertGreaterThan(large, 320)
+        XCTAssertGreaterThan(veryLarge, large)
     }
 
     func testRightEdgeOvershootFromExactMinimumStillRubberBands() {
