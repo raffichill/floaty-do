@@ -124,7 +124,10 @@ final class TodoListView: NSView {
             rowView.setSelectionState(
                 focused: model.id == selectedRowID,
                 selected: selectedRowIDs.contains(model.id),
-                animateFill: model.id == selectionRevealRowID && model.id == selectedRowID
+                animateFill: model.id == selectionRevealRowID && model.id == selectedRowID,
+                transitionDuration: animatedLayout && model.id == selectionRevealRowID && model.id == selectedRowID
+                    ? (animatedLayoutDuration ?? preferences.motion.collapse)
+                    : nil
             )
             rowView.setEditing(model.id == editingRowID)
             rowView.setPressed(model.id == pressedRowID)
@@ -516,7 +519,10 @@ final class TodoListView: NSView {
                 rowView.setSelectionState(
                     focused: rowID == self.selectedRowID,
                     selected: self.selectedRowIDs.contains(rowID),
-                    animateFill: rowID == self.selectionRevealRowID && rowID == self.selectedRowID
+                    animateFill: rowID == self.selectionRevealRowID && rowID == self.selectedRowID,
+                    transitionDuration: rowID == self.selectionRevealRowID && rowID == self.selectedRowID
+                        ? animationDuration
+                        : nil
                 )
                 rowView.setEditing(rowID == self.editingRowID)
                 rowView.setPressed(rowID == self.pressedRowID)
@@ -539,7 +545,10 @@ final class TodoListView: NSView {
             rowView.setSelectionState(
                 focused: rowID == selectedRowID,
                 selected: selectedRowIDs.contains(rowID),
-                animateFill: rowID == selectionRevealRowID && rowID == selectedRowID
+                animateFill: rowID == selectionRevealRowID && rowID == selectedRowID,
+                transitionDuration: rowID == selectionRevealRowID && rowID == selectedRowID
+                    ? animationDuration
+                    : nil
             )
             rowView.setEditing(rowID == editingRowID)
             rowView.setPressed(rowID == pressedRowID)
@@ -737,6 +746,12 @@ final class TodoListView: NSView {
 }
 
 final class TodoRowView: NSView {
+    private struct ContentRevealAnimation {
+        let textFromOpacity: Float
+        let circleFromOpacity: Float
+        let duration: CFTimeInterval
+    }
+
     private enum AppearanceMetrics {
         static let pressedScale: CGFloat = 0.99
         static let pressAnimationDuration: CFTimeInterval = 0.08
@@ -770,6 +785,7 @@ final class TodoRowView: NSView {
     }
 
     private var shouldAnimateNextSelectionFill = false
+    private var pendingContentRevealAnimation: ContentRevealAnimation?
 
     init(model: TodoRowModel, preferences: AppPreferences) {
         self.model = model
@@ -856,10 +872,31 @@ final class TodoRowView: NSView {
         needsLayout = true
     }
 
-    func setSelectionState(focused: Bool, selected: Bool, animateFill: Bool = false) {
+    func setSelectionState(
+        focused: Bool,
+        selected: Bool,
+        animateFill: Bool = false,
+        transitionDuration: CFTimeInterval? = nil
+    ) {
+        let previousTextAlpha = resolvedTextAlpha()
+        let previousCircleAlpha = resolvedCircleAlpha(textAlpha: previousTextAlpha)
         shouldAnimateNextSelectionFill = animateFill && focused
         isFocusedRow = focused
         let nextIsSelectedRow = (focused || selected) && model.isSelectable
+        if let transitionDuration,
+           nextIsSelectedRow,
+           !isSelectedRow {
+            let targetTextAlpha = max(CGFloat(model.textOpacity), 0.98)
+            let targetCircleAlpha = max(
+                CGFloat(model.circleOpacity),
+                model.isDone ? targetTextAlpha : 0.86
+            )
+            pendingContentRevealAnimation = ContentRevealAnimation(
+                textFromOpacity: Float(max(0.0, min(previousTextAlpha / max(targetTextAlpha, 0.001), 1.0))),
+                circleFromOpacity: Float(max(0.0, min(previousCircleAlpha / max(targetCircleAlpha, 0.001), 1.0))),
+                duration: transitionDuration
+            )
+        }
         if isSelectedRow != nextIsSelectedRow {
             isSelectedRow = nextIsSelectedRow
         } else if shouldAnimateNextSelectionFill {
@@ -1192,6 +1229,7 @@ final class TodoRowView: NSView {
         textLabel.alphaValue = 0.0
         editingTextView.alphaValue = 1.0
         circleView.alphaValue = 1.0
+        applyPendingContentRevealAnimation()
 
         updateScaleTransform()
     }
@@ -1209,6 +1247,46 @@ final class TodoRowView: NSView {
         return isAnySelected
             ? max(CGFloat(model.circleOpacity), model.isDone ? resolvedTextAlpha : 0.86)
             : CGFloat(model.circleOpacity)
+    }
+
+    private func applyPendingContentRevealAnimation() {
+        guard let animation = pendingContentRevealAnimation else { return }
+        pendingContentRevealAnimation = nil
+
+        animateLayerOpacity(
+            editingTextView.layer,
+            from: animation.textFromOpacity,
+            duration: animation.duration,
+            key: "rowTextReveal"
+        )
+        animateLayerOpacity(
+            circleView.layer,
+            from: animation.circleFromOpacity,
+            duration: animation.duration,
+            key: "rowCircleReveal"
+        )
+    }
+
+    private func animateLayerOpacity(
+        _ layer: CALayer?,
+        from: Float,
+        duration: CFTimeInterval,
+        key: String
+    ) {
+        guard let layer else { return }
+        layer.removeAnimation(forKey: key)
+
+        let animation = CABasicAnimation(keyPath: "opacity")
+        animation.fromValue = from
+        animation.toValue = 1.0
+        animation.duration = duration
+        animation.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        layer.add(animation, forKey: key)
+
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        layer.opacity = 1.0
+        CATransaction.commit()
     }
 
     private func updateBackgroundAppearance(

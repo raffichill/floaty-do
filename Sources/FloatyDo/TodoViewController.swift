@@ -1747,6 +1747,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         let taskRowID = TodoRowID.taskItem(itemID)
         guard let selectionIndex = batchSelectionIndex(for: taskRowID),
               let row = listView.rowView(for: taskRowID) else { return }
+        let removalDuration = motion.collapse * 0.75
 
         isAnimating = true
         detachEditor(makeListFirstResponder: false)
@@ -1754,23 +1755,26 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
 
         row.playCompletionAnimation(motion: motion) { [weak self] in
             guard let self else { return }
-            self.store.archive(id: itemID)
-            let updatedModels = self.buildRowModels(for: .tasks)
-            self.selectedRowID = self.taskSelectionIDAfterMutation(in: updatedModels, taskIndex: selectionIndex)
-            self.isAnimating = false
-            self.scheduleDeferredEditorActivation(for: self.selectedRowID, delay: self.motion.collapse * 0.75)
-            self.refreshRows(
-                animatedLayout: true,
-                animatedLayoutDuration: self.motion.collapse,
-                selectionRevealRowID: self.selectedRowID,
-                placeCaretAtEnd: false
-            )
-            self.registerUndoSnapshotIfChanged(undoSnapshot, actionName: "Complete")
+            self.listView.animateRemoval(of: taskRowID, duration: removalDuration) {
+                self.store.archive(id: itemID)
+                let updatedModels = self.buildRowModels(for: .tasks)
+                self.selectedRowID = self.taskSelectionIDAfterMutation(in: updatedModels, taskIndex: selectionIndex)
+                self.isAnimating = false
+                self.scheduleDeferredEditorActivation(for: self.selectedRowID, delay: self.motion.collapse * 0.75)
+                self.refreshRows(
+                    animatedLayout: true,
+                    animatedLayoutDuration: self.motion.collapse,
+                    selectionRevealRowID: self.selectedRowID,
+                    placeCaretAtEnd: false
+                )
+                self.registerUndoSnapshotIfChanged(undoSnapshot, actionName: "Complete")
+            }
         }
     }
 
     private func animateBatchCompletion(for rowIDs: [TodoRowID], selectionIndex: Int, undoSnapshot: TodoUndoSnapshot) {
         guard !isAnimating, !listView.isBusy else { return }
+        let removalDuration = motion.collapse * 0.75
 
         let itemIDs = rowIDs.compactMap { rowID -> UUID? in
             guard case .taskItem(let item) = rowModels.first(where: { $0.id == rowID })?.kind else { return nil }
@@ -1816,12 +1820,23 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         }
 
         animationGroup.notify(queue: .main) {
-            completeArchiveAndRefresh()
+            let removalGroup = DispatchGroup()
+            rowIDs.forEach { rowID in
+                removalGroup.enter()
+                self.listView.animateRemoval(of: rowID, duration: removalDuration) {
+                    removalGroup.leave()
+                }
+            }
+
+            removalGroup.notify(queue: .main) {
+                completeArchiveAndRefresh()
+            }
         }
     }
 
     private func animateArchiveRestore(for rowIDs: [TodoRowID], undoSnapshot: TodoUndoSnapshot) {
         guard !isAnimating, !listView.isBusy else { return }
+        let removalDuration = motion.collapse * 0.75
 
         let itemIDs = archiveItemIDs(for: rowIDs)
         guard !itemIDs.isEmpty else { return }
@@ -1870,7 +1885,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
             let removalGroup = DispatchGroup()
             rowIDs.forEach { rowID in
                 removalGroup.enter()
-                self.listView.animateRemoval(of: rowID, duration: self.motion.collapse) {
+                self.listView.animateRemoval(of: rowID, duration: removalDuration) {
                     removalGroup.leave()
                 }
             }
