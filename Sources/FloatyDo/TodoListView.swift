@@ -786,6 +786,7 @@ final class TodoRowView: NSView {
 
     private var shouldAnimateNextSelectionFill = false
     private var pendingContentRevealAnimation: ContentRevealAnimation?
+    private var pendingSelectionFillDuration: CFTimeInterval?
 
     init(model: TodoRowModel, preferences: AppPreferences) {
         self.model = model
@@ -896,6 +897,7 @@ final class TodoRowView: NSView {
                 circleFromOpacity: Float(max(0.0, min(previousCircleAlpha / max(targetCircleAlpha, 0.001), 1.0))),
                 duration: transitionDuration
             )
+            pendingSelectionFillDuration = transitionDuration
         }
         if isSelectedRow != nextIsSelectedRow {
             isSelectedRow = nextIsSelectedRow
@@ -1190,7 +1192,9 @@ final class TodoRowView: NSView {
         let borderColor: CGColor
         let borderWidth: CGFloat
         let animateSelectionFill = shouldAnimateNextSelectionFill && model.isSelectable && isFocusedRow
+        let selectionFillDuration = pendingSelectionFillDuration
         shouldAnimateNextSelectionFill = false
+        pendingSelectionFillDuration = nil
         if model.isSelectable && isSelectedRow {
             backgroundColor = activeFillColor.cgColor
             borderColor = NSColor.clear.cgColor
@@ -1205,7 +1209,8 @@ final class TodoRowView: NSView {
             backgroundColor: backgroundColor,
             borderColor: borderColor,
             borderWidth: borderWidth,
-            animate: animateSelectionFill
+            animate: animateSelectionFill,
+            duration: selectionFillDuration
         )
         circleView.contentTintColor = preferences.resolvedContentColor(multiplier: circleAlpha)
         textLabel.attributedStringValue = attributedText(alphaMultiplier: textAlpha)
@@ -1293,7 +1298,8 @@ final class TodoRowView: NSView {
         backgroundColor: CGColor,
         borderColor: CGColor,
         borderWidth: CGFloat,
-        animate: Bool
+        animate: Bool,
+        duration: CFTimeInterval?
     ) {
         guard let layer = backgroundView.layer else { return }
 
@@ -1307,7 +1313,7 @@ final class TodoRowView: NSView {
             let animation = CABasicAnimation(keyPath: "backgroundColor")
             animation.fromValue = currentBackground
             animation.toValue = backgroundColor
-            animation.duration = preferences.motion.collapse
+            animation.duration = duration ?? preferences.motion.collapse
             animation.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
             layer.add(animation, forKey: "rowBackgroundColor")
         }
@@ -1316,7 +1322,7 @@ final class TodoRowView: NSView {
             let animation = CABasicAnimation(keyPath: "borderColor")
             animation.fromValue = currentBorderColor
             animation.toValue = borderColor
-            animation.duration = preferences.motion.collapse
+            animation.duration = duration ?? preferences.motion.collapse
             animation.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
             layer.add(animation, forKey: "rowBorderColor")
         }
@@ -1325,7 +1331,7 @@ final class TodoRowView: NSView {
             let animation = CABasicAnimation(keyPath: "borderWidth")
             animation.fromValue = currentBorderWidth
             animation.toValue = borderWidth
-            animation.duration = preferences.motion.collapse
+            animation.duration = duration ?? preferences.motion.collapse
             animation.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
             layer.add(animation, forKey: "rowBorderWidth")
         }

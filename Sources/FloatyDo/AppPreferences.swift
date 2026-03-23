@@ -27,9 +27,9 @@ public enum AnimationPreset: String, Codable, CaseIterable {
                 checkSwapDelay: 0.08,
                 completionSettle: 0.42,
                 collapse: 0.24,
+                reflow: 0.18,
                 dragReorder: 0.12,
                 hoverFade: 0.10,
-                windowSnap: 0.18
             )
         case .balanced:
             return MotionProfile(
@@ -37,9 +37,9 @@ public enum AnimationPreset: String, Codable, CaseIterable {
                 checkSwapDelay: 0.10,
                 completionSettle: 0.60,
                 collapse: 0.35,
+                reflow: 0.22,
                 dragReorder: 0.16,
-                hoverFade: 0.14,
-                windowSnap: 0.22
+                hoverFade: 0.14
             )
         case .relaxed:
             return MotionProfile(
@@ -47,9 +47,9 @@ public enum AnimationPreset: String, Codable, CaseIterable {
                 checkSwapDelay: 0.12,
                 completionSettle: 0.76,
                 collapse: 0.42,
+                reflow: 0.28,
                 dragReorder: 0.20,
-                hoverFade: 0.18,
-                windowSnap: 0.28
+                hoverFade: 0.18
             )
         }
     }
@@ -60,9 +60,9 @@ public struct MotionProfile: Equatable {
     public let checkSwapDelay: TimeInterval
     public let completionSettle: TimeInterval
     public let collapse: TimeInterval
+    public let reflow: TimeInterval
     public let dragReorder: TimeInterval
     public let hoverFade: TimeInterval
-    public let windowSnap: TimeInterval
 }
 
 public enum FontStylePreset: String, Codable, CaseIterable {

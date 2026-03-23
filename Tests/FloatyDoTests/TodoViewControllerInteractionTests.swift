@@ -11,7 +11,7 @@ final class TodoViewControllerInteractionTests: XCTestCase {
     }
 
     func testReturnOnFirstItemInsertsDraftDirectlyBelow() {
-        let store = seededStore(["A", "B", "C"])
+        let store = seededStore(active: ["A", "B", "C"])
         let controller = TodoViewController(store: store)
         controller.testingLoadView()
         controller.testingSelectTask(at: 0)
@@ -25,7 +25,7 @@ final class TodoViewControllerInteractionTests: XCTestCase {
     }
 
     func testUpArrowFromFirstItemCreatesDraftAboveFirstItem() {
-        let store = seededStore(["A", "B", "C"])
+        let store = seededStore(active: ["A", "B", "C"])
         let controller = TodoViewController(store: store)
         controller.testingLoadView()
         controller.testingSelectTask(at: 0)
@@ -39,7 +39,7 @@ final class TodoViewControllerInteractionTests: XCTestCase {
     }
 
     func testExplicitEmptyDraftPlacementSurvivesGenericRefresh() {
-        let store = seededStore(["A", "B", "C"])
+        let store = seededStore(active: ["A", "B", "C"])
         let controller = TodoViewController(store: store)
         controller.testingLoadView()
         controller.testingSelectTask(at: 0)
@@ -53,9 +53,56 @@ final class TodoViewControllerInteractionTests: XCTestCase {
         XCTAssertEqual(snapshot.visibleTaskSequence, ["<draft>", "A", "B", "C"])
     }
 
-    private func seededStore(_ items: [String]) -> TodoStore {
+    func testArchiveRestoreIsDisabledWhenTaskListIsFull() {
+        let store = seededStore(
+            active: ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J"],
+            archived: ["Archived"]
+        )
+        let controller = TodoViewController(store: store)
+        controller.testingLoadView()
+        controller.testingSelectArchive(at: 0)
+
+        XCTAssertFalse(controller.testingCanRestoreArchiveSelection())
+
+        controller.testingRestoreArchiveSelection()
+
+        XCTAssertEqual(store.items.count, TodoStore.maxItems)
+        XCTAssertEqual(store.archivedItems.map(\.text), ["Archived"])
+    }
+
+    func testRecordedUserWidthSurvivesRefreshResize() {
+        let store = seededStore(active: ["A"])
+        let controller = TodoViewController(store: store)
+        controller.testingLoadView()
+
+        controller.recordUserResizedWindowSize(NSSize(width: 520, height: 320))
+        let resizedTarget = controller.testingResolvedTargetWindowSize(
+            fullWidth: 400,
+            fullHeight: 240,
+            minSize: .zero
+        )
+        XCTAssertEqual(resizedTarget.width, 520, accuracy: 0.5)
+        XCTAssertEqual(resizedTarget.height, 320, accuracy: 0.5)
+
+        controller.testingRefresh()
+        let refreshedTarget = controller.testingResolvedTargetWindowSize(
+            fullWidth: 400,
+            fullHeight: 240,
+            minSize: .zero
+        )
+        XCTAssertEqual(refreshedTarget.width, 520, accuracy: 0.5)
+        XCTAssertEqual(refreshedTarget.height, 320, accuracy: 0.5)
+    }
+
+    private func seededStore(active items: [String], archived: [String] = []) -> TodoStore {
         let store = TodoStore()
-        items.forEach { store.add($0) }
+        let activeItems = items.map(TodoItem.init(text:))
+        let archivedItems = archived.map { text -> TodoItem in
+            var item = TodoItem(text: text)
+            item.isDone = true
+            return item
+        }
+        store.restoreState(items: activeItems, archivedItems: archivedItems, preferences: .default)
         return store
     }
 }

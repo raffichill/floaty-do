@@ -25,6 +25,7 @@ When touching these paths, update the matching tests in `/Users/raffichilingarya
 - Completing a task animates on the task row, then archives it.
 - Restoring an archived task animates on the archive row, then removes it from archive.
 - Archive restore stays on the archive tab. It must not switch tabs as part of the animation flow.
+- Archive restore is unavailable when the active task list is already at max capacity.
 
 ## Resize Contract
 
