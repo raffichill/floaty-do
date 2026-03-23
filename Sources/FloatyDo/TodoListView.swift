@@ -214,15 +214,6 @@ final class TodoListView: NSView {
         fade.isRemovedOnCompletion = false
         rowView.layer?.add(fade, forKey: "rowFade")
 
-        let scale = CABasicAnimation(keyPath: "transform.scale")
-        scale.fromValue = 1.0
-        scale.toValue = 0.94
-        scale.duration = duration
-        scale.timingFunction = CAMediaTimingFunction(name: .easeOut)
-        scale.fillMode = .forwards
-        scale.isRemovedOnCompletion = false
-        rowView.layer?.add(scale, forKey: "rowScale")
-
         DispatchQueue.main.asyncAfter(deadline: .now() + duration) {
             completion()
         }
@@ -1005,7 +996,11 @@ final class TodoRowView: NSView {
         }
     }
 
-    func playRestoreAnimation(motion: MotionProfile, completion: @escaping () -> Void) {
+    func playRestoreAnimation(
+        motion: MotionProfile,
+        restoreModelAppearanceOnCompletion: Bool = true,
+        completion: @escaping () -> Void
+    ) {
         guard let circleLayer = circleView.layer else {
             completion()
             return
@@ -1048,7 +1043,7 @@ final class TodoRowView: NSView {
 
             DispatchQueue.main.asyncAfter(deadline: .now() + motion.checkSwapDelay) {
                 self.circleView.image = self.symbolImage(named: "circle", configuration: config)
-                self.circleView.contentTintColor = self.preferences.resolvedContentColor(multiplier: CGFloat(self.model.circleOpacity))
+                self.circleView.contentTintColor = self.preferences.resolvedContentColor(multiplier: self.resolvedCircleAlpha())
 
                 circleLayer.removeAnimation(forKey: "restoreShrinkOut")
                 centerAnchor()
@@ -1070,7 +1065,14 @@ final class TodoRowView: NSView {
                 self.editingTextView.layer?.removeAnimation(forKey: "restoreFadeText")
                 self.editingTextView.layer?.opacity = 1.0
                 self.circleView.image = self.symbolImage(named: "circle", configuration: config)
-                self.updateAppearance()
+                if restoreModelAppearanceOnCompletion {
+                    self.updateAppearance()
+                } else {
+                    self.editingTextView.textColor = self.preferences.resolvedContentColor(multiplier: self.resolvedTextAlpha())
+                    self.editingTextView.showsStrikethrough = false
+                    self.circleView.contentTintColor = self.preferences.resolvedContentColor(multiplier: self.resolvedCircleAlpha())
+                    self.needsDisplay = true
+                }
                 completion()
             }
         }
@@ -1144,13 +1146,8 @@ final class TodoRowView: NSView {
 
     private func updateAppearance() {
         let activeFillColor = preferences.activeFillColor
-        let isAnySelected = isSelectedRow && model.isSelectable
-        let textAlpha = isAnySelected
-            ? max(CGFloat(model.textOpacity), 0.98)
-            : CGFloat(model.textOpacity)
-        let circleAlpha = isAnySelected
-            ? max(CGFloat(model.circleOpacity), model.isDone ? textAlpha : 0.86)
-            : CGFloat(model.circleOpacity)
+        let textAlpha = resolvedTextAlpha()
+        let circleAlpha = resolvedCircleAlpha(textAlpha: textAlpha)
 
         let backgroundColor: CGColor
         let borderColor: CGColor
@@ -1197,6 +1194,21 @@ final class TodoRowView: NSView {
         circleView.alphaValue = 1.0
 
         updateScaleTransform()
+    }
+
+    private func resolvedTextAlpha() -> CGFloat {
+        let isAnySelected = isSelectedRow && model.isSelectable
+        return isAnySelected
+            ? max(CGFloat(model.textOpacity), 0.98)
+            : CGFloat(model.textOpacity)
+    }
+
+    private func resolvedCircleAlpha(textAlpha: CGFloat? = nil) -> CGFloat {
+        let isAnySelected = isSelectedRow && model.isSelectable
+        let resolvedTextAlpha = textAlpha ?? resolvedTextAlpha()
+        return isAnySelected
+            ? max(CGFloat(model.circleOpacity), model.isDone ? resolvedTextAlpha : 0.86)
+            : CGFloat(model.circleOpacity)
     }
 
     private func updateBackgroundAppearance(

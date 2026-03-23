@@ -1861,13 +1861,23 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         rows.forEach { row in
             row.setEditing(false)
             animationGroup.enter()
-            row.playRestoreAnimation(motion: motion) {
+            row.playRestoreAnimation(motion: motion, restoreModelAppearanceOnCompletion: false) {
                 animationGroup.leave()
             }
         }
 
         animationGroup.notify(queue: .main) {
-            finishRestoreAndRefresh()
+            let removalGroup = DispatchGroup()
+            rowIDs.forEach { rowID in
+                removalGroup.enter()
+                self.listView.animateRemoval(of: rowID, duration: self.motion.collapse) {
+                    removalGroup.leave()
+                }
+            }
+
+            removalGroup.notify(queue: .main) {
+                finishRestoreAndRefresh()
+            }
         }
     }
 
