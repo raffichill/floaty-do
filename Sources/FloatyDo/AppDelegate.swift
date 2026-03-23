@@ -190,6 +190,11 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         return todoVC.undoManager
     }
 
+    public func windowDidEndLiveResize(_ notification: Notification) {
+        guard notification.object as AnyObject? === panel else { return }
+        todoVC.recordUserResizedWindowSize(panel.frame.size)
+    }
+
     @objc private func statusItemClicked() {
         guard let event = NSApp.currentEvent else { return }
 
