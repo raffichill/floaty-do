@@ -110,4 +110,5 @@ public final class FloatingPanel: NSWindow {
             currentX += button.frame.width + spacing
         }
     }
+
 }

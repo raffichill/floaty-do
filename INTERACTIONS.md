@@ -31,3 +31,6 @@ When touching these paths, update the matching tests in `/Users/raffichilingarya
 
 - Manual user window resizing becomes the new floor for live task editing.
 - Typing, selection changes, and row refreshes must not snap width or height back down while the user is working.
+- Dragging a resize handle below the minimum width or height should rubber-band the whole panel in the drag direction while the content stays at minimum size.
+- Releasing a rubber-banded resize should settle the panel into its true minimum-sized final frame with a short ease-out.
+- `cmd+0` resets the main panel to its default size and then snaps it to the nearest screen corner.
