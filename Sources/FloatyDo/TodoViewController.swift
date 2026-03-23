@@ -85,6 +85,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
     required init?(coder: NSCoder) { fatalError() }
 
     private var motion: MotionProfile { store.preferences.motion }
+    private var completionReflowDuration: TimeInterval { 0.22 }
     private var rowHeight: CGFloat { CGFloat(store.preferences.rowHeight) }
     private var panelWidth: CGFloat { CGFloat(store.preferences.panelWidth) }
     private var visibleRowCount: Int { targetVisibleRowCount() }
@@ -929,6 +930,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         preferences: AppPreferences? = nil,
         resize: Bool = true,
         animateResize: Bool = true,
+        resizeDuration: TimeInterval? = nil,
         animatedLayout: Bool = false,
         animatedLayoutDuration: CFTimeInterval? = nil,
         selectionRevealRowID: TodoRowID? = nil,
@@ -954,7 +956,10 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         )
 
         if resize {
-            resizeWindow(animate: animateResize && shouldAnimateWindowResize(from: previousRowCount, to: rowModels.count))
+            resizeWindow(
+                animate: animateResize && shouldAnimateWindowResize(from: previousRowCount, to: rowModels.count),
+                duration: resizeDuration
+            )
         }
 
         updateHeaderLayoutInsets()
@@ -1762,8 +1767,9 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
                 self.isAnimating = false
                 self.scheduleDeferredEditorActivation(for: self.selectedRowID, delay: self.motion.collapse * 0.75)
                 self.refreshRows(
+                    resizeDuration: self.completionReflowDuration,
                     animatedLayout: true,
-                    animatedLayoutDuration: self.motion.collapse,
+                    animatedLayoutDuration: self.completionReflowDuration,
                     selectionRevealRowID: self.selectedRowID,
                     placeCaretAtEnd: false
                 )
@@ -1792,8 +1798,9 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
             self.isAnimating = false
             self.scheduleDeferredEditorActivation(for: self.selectedRowID, delay: self.motion.collapse * 0.75)
             self.refreshRows(
+                resizeDuration: self.completionReflowDuration,
                 animatedLayout: true,
-                animatedLayoutDuration: self.motion.collapse,
+                animatedLayoutDuration: self.completionReflowDuration,
                 selectionRevealRowID: self.selectedRowID,
                 placeCaretAtEnd: false
             )
@@ -1857,8 +1864,9 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
             self.updateListScrollBehavior()
             self.refreshRows(
                 animateResize: true,
+                resizeDuration: self.completionReflowDuration,
                 animatedLayout: true,
-                animatedLayoutDuration: self.motion.collapse,
+                animatedLayoutDuration: self.completionReflowDuration,
                 selectionRevealRowID: self.selectedRowID,
                 placeCaretAtEnd: false
             )
@@ -2043,7 +2051,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         }
     }
 
-    private func resizeWindow(animate: Bool = true) {
+    private func resizeWindow(animate: Bool = true, duration: TimeInterval? = nil) {
         guard let window = view.window else { return }
         guard !isInNativeFullScreen else { return }
         let rows = CGFloat(max(visibleRowCount, 1))
@@ -2078,7 +2086,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         }
 
         NSAnimationContext.runAnimationGroup { context in
-            context.duration = motion.collapse
+            context.duration = duration ?? motion.collapse
             context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
             window.animator().setFrame(newFrame, display: true)
         }
