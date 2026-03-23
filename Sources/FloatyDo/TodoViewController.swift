@@ -66,11 +66,12 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
     private var headerDebugHeightConstraint: NSLayoutConstraint?
     private var listTopConstraint: NSLayoutConstraint?
     private var lastKnownHeaderHeight: CGFloat = 0
-    private var lastReportedHeaderHeight: CGFloat = -1
     private let historyManager = UndoManager()
     private var isApplyingSettingsPreferenceChange = false
     private var nativeFullScreenState = false
     private var appliedPreferences: AppPreferences
+    private var userPreferredWindowWidth: CGFloat?
+    private var userPreferredWindowHeight: CGFloat?
 
     public init(store: TodoStore) {
         self.store = store
@@ -83,6 +84,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
     required init?(coder: NSCoder) { fatalError() }
 
     private var motion: MotionProfile { store.preferences.motion }
+    private var completionReflowDuration: TimeInterval { motion.reflow }
     private var rowHeight: CGFloat { CGFloat(store.preferences.rowHeight) }
     private var panelWidth: CGFloat { CGFloat(store.preferences.panelWidth) }
     private var visibleRowCount: Int { targetVisibleRowCount() }
@@ -106,6 +108,10 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
 
     private var draftIsAtDefaultPosition: Bool {
         taskDraft.insertionIndex == defaultDraftInsertionIndex
+    }
+
+    private var availableArchiveRestoreSlots: Int {
+        max(0, TodoStore.maxItems - store.items.count)
     }
 
     private var isRangeSelectionActive: Bool {
@@ -518,10 +524,6 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         let headerHeight = effectiveHeaderHeight(for: view.window)
         headerDebugHeightConstraint?.constant = headerHeight
         listTopConstraint?.constant = headerHeight + CGFloat(LayoutMetrics.contentTopPadding)
-        if abs(lastReportedHeaderHeight - headerHeight) > 0.5 {
-            lastReportedHeaderHeight = headerHeight
-            NSLog("Main panel header height: %.1f", headerHeight)
-        }
     }
 
     private func preferencesRequireRowRefresh(old: AppPreferences, new: AppPreferences) -> Bool {
@@ -625,6 +627,10 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         dismissSettingsWindowIfVisible()
     }
 
+    var isSettingsWindowVisible: Bool {
+        settingsWindowController?.window?.isVisible == true
+    }
+
     @discardableResult
     private func dismissSettingsWindowIfVisible() -> Bool {
         guard let window = settingsWindowController?.window, window.isVisible else {
@@ -676,8 +682,16 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
     }
 
     func resetWindowSize() {
+        userPreferredWindowWidth = nil
+        userPreferredWindowHeight = nil
         refreshRows(resize: false, animateResize: false, placeCaretAtEnd: false)
         resizeWindow(animate: false)
+    }
+
+    func recordUserResizedWindowSize(_ size: NSSize) {
+        guard size.width > 0, size.height > 0 else { return }
+        userPreferredWindowWidth = size.width
+        userPreferredWindowHeight = size.height
     }
 
     func setNativeFullScreenState(active: Bool) {
@@ -708,6 +722,13 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
 
     private func resetDraftToDefault() {
         taskDraft = TaskDraftState(insertionIndex: defaultDraftInsertionIndex, text: "")
+    }
+
+    private func resolvedTargetWindowSize(fullWidth: CGFloat, fullHeight: CGFloat, minSize: NSSize) -> NSSize {
+        NSSize(
+            width: max(max(fullWidth, minSize.width), userPreferredWindowWidth ?? 0),
+            height: max(max(fullHeight, minSize.height), userPreferredWindowHeight ?? 0)
+        )
     }
 
     private func rowID(afterRemovingDraftAt insertionIndex: Int) -> TodoRowID? {
@@ -816,21 +837,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
             let baseRowCount = store.items.count + (showsDraft ? 1 : 0)
             let fillerCount = max(visibleRowCount - baseRowCount, 0)
 
-            var models = store.items.map { item in
-                TodoRowModel(
-                    id: .taskItem(item.id),
-                    kind: .taskItem(item),
-                    text: item.text,
-                    isDone: false,
-                    isEditable: true,
-                    isSelectable: true,
-                    canComplete: true,
-                    canDrag: true,
-                    circleOpacity: 0.40,
-                    textOpacity: 0.90,
-                    showsStrikethrough: false
-                )
-            }
+            var models = store.items.map(makeTaskRowModel)
 
             if showsDraft {
                 let draftModel = TodoRowModel(
@@ -874,21 +881,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
 
         case .archive:
             let visibleRowCount = targetVisibleRowCount(for: .archive)
-            var models = store.archivedItems.map { item in
-                TodoRowModel(
-                    id: .archiveItem(item.id),
-                    kind: .archiveItem(item),
-                    text: item.text,
-                    isDone: true,
-                    isEditable: false,
-                    isSelectable: true,
-                    canComplete: false,
-                    canDrag: false,
-                    circleOpacity: 0.38,
-                    textOpacity: 0.38,
-                    showsStrikethrough: true
-                )
-            }
+            var models = store.archivedItems.map(makeArchiveRowModel)
 
             let fillerCount = visibleRowCount - store.archivedItems.count
             if fillerCount > 0 {
@@ -919,6 +912,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         preferences: AppPreferences? = nil,
         resize: Bool = true,
         animateResize: Bool = true,
+        resizeDuration: TimeInterval? = nil,
         animatedLayout: Bool = false,
         animatedLayoutDuration: CFTimeInterval? = nil,
         selectionRevealRowID: TodoRowID? = nil,
@@ -926,6 +920,10 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
     ) {
         let resolvedPreferences = preferences ?? store.preferences
         let previousRowCount = rowModels.count
+        // Preserve explicit empty draft placement across ordinary redraws.
+        // Keyboard navigation intentionally creates valid drafts above/between
+        // tasks, and generic refresh must not snap those back to the default
+        // bottom slot.
         rowModels = buildRowModels()
         ensureSelectedRowExists()
         listView.apply(
@@ -940,7 +938,10 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         )
 
         if resize {
-            resizeWindow(animate: animateResize && shouldAnimateWindowResize(from: previousRowCount, to: rowModels.count))
+            resizeWindow(
+                animate: animateResize && shouldAnimateWindowResize(from: previousRowCount, to: rowModels.count),
+                duration: resizeDuration
+            )
         }
 
         updateHeaderLayoutInsets()
@@ -962,6 +963,38 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         case 1: return 0.20
         default: return 0.30
         }
+    }
+
+    private func makeTaskRowModel(_ item: TodoItem) -> TodoRowModel {
+        TodoRowModel(
+            id: .taskItem(item.id),
+            kind: .taskItem(item),
+            text: item.text,
+            isDone: false,
+            isEditable: true,
+            isSelectable: true,
+            canComplete: true,
+            canDrag: true,
+            circleOpacity: 0.40,
+            textOpacity: 0.90,
+            showsStrikethrough: false
+        )
+    }
+
+    private func makeArchiveRowModel(_ item: TodoItem) -> TodoRowModel {
+        TodoRowModel(
+            id: .archiveItem(item.id),
+            kind: .archiveItem(item),
+            text: item.text,
+            isDone: true,
+            isEditable: false,
+            isSelectable: true,
+            canComplete: availableArchiveRestoreSlots > 0,
+            canDrag: false,
+            circleOpacity: 0.38,
+            textOpacity: 0.38,
+            showsStrikethrough: true
+        )
     }
 
     private func ensureSelectedRowExists() {
@@ -1236,6 +1269,13 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
     }
 
     private func restoreUndoSnapshot(_ snapshot: TodoUndoSnapshot) {
+        let previousTaskIDs = Set(store.items.map(\.id))
+        let previousArchivedIDs = Set(store.archivedItems.map(\.id))
+        let restoredTaskRowIDs = snapshot.items.compactMap { item -> TodoRowID? in
+            guard !previousTaskIDs.contains(item.id), previousArchivedIDs.contains(item.id) else { return nil }
+            return .taskItem(item.id)
+        }
+
         cancelDeferredEditorActivation()
         isAnimating = false
         detachEditor(makeListFirstResponder: false)
@@ -1252,7 +1292,18 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         taskDraft = snapshot.taskDraft
 
         updateTabAppearance()
-        refreshRows(animateResize: false, placeCaretAtEnd: true)
+        if currentTab == .tasks, !restoredTaskRowIDs.isEmpty {
+            isAnimating = true
+            refreshRows(
+                animateResize: false,
+                animatedLayout: true,
+                animatedLayoutDuration: motion.reflow,
+                placeCaretAtEnd: false
+            )
+            animateRestoredTasks(restoredTaskRowIDs)
+        } else {
+            refreshRows(animateResize: false, placeCaretAtEnd: true)
+        }
     }
 
     private func registerUndoSnapshot(_ snapshot: TodoUndoSnapshot, actionName: String) {
@@ -1323,35 +1374,11 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         switch rowID {
         case .taskItem(let itemID):
             guard let item = store.items.first(where: { $0.id == itemID }) else { return nil }
-            return TodoRowModel(
-                id: .taskItem(item.id),
-                kind: .taskItem(item),
-                text: item.text,
-                isDone: false,
-                isEditable: true,
-                isSelectable: true,
-                canComplete: true,
-                canDrag: true,
-                circleOpacity: 0.40,
-                textOpacity: 0.90,
-                showsStrikethrough: false
-            )
+            return makeTaskRowModel(item)
 
         case .archiveItem(let itemID):
             guard let item = store.archivedItems.first(where: { $0.id == itemID }) else { return nil }
-            return TodoRowModel(
-                id: .archiveItem(item.id),
-                kind: .archiveItem(item),
-                text: item.text,
-                isDone: true,
-                isEditable: false,
-                isSelectable: true,
-                canComplete: false,
-                canDrag: false,
-                circleOpacity: 0.38,
-                textOpacity: 0.38,
-                showsStrikethrough: true
-            )
+            return makeArchiveRowModel(item)
 
         case .taskDraft:
             guard let existingModel = rowModels.first(where: { $0.id == .taskDraft }) else { return nil }
@@ -1591,20 +1618,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
                 )
 
             case .archive:
-                performUndoableAction("Restore") {
-                    let selectableRowIDs = rowModels.filter(\.isSelectable).map(\.id)
-                    let selectionIndex = selectedBatchRows.compactMap { selectableRowIDs.firstIndex(of: $0) }.min() ?? 0
-                    let itemIDs = selectedBatchRows.compactMap { rowID -> UUID? in
-                        guard case .archiveItem(let item) = rowModels.first(where: { $0.id == rowID })?.kind else { return nil }
-                        return item.id
-                    }
-                    guard !itemIDs.isEmpty else { return }
-                    itemIDs.forEach { store.restore(id: $0) }
-                    clearRangeSelectionState()
-                    let updatedModels = buildRowModels(for: .archive)
-                    selectedRowID = buildSelectionID(in: updatedModels, selectableIndex: selectionIndex)
-                    refreshRows()
-                }
+                restoreArchiveSelection(rowIDs: selectedBatchRows)
             }
             return
         }
@@ -1627,14 +1641,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
             }
 
         case .archive:
-            performUndoableAction("Restore") {
-                guard case .archiveItem(let item) = selectedModel.kind else { return }
-                let selectionIndex = selectedRowIndex ?? 0
-                store.restore(id: item.id)
-                let updatedModels = buildRowModels(for: .archive)
-                selectedRowID = buildSelectionID(in: updatedModels, selectableIndex: selectionIndex)
-                refreshRows()
-            }
+            restoreArchiveSelection()
         }
     }
 
@@ -1661,20 +1668,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
                 }
 
             case .archive:
-                performUndoableAction("Delete") {
-                    let selectableRowIDs = rowModels.filter(\.isSelectable).map(\.id)
-                    let selectionIndex = selectedBatchRows.compactMap { selectableRowIDs.firstIndex(of: $0) }.min() ?? 0
-                    let itemIDs = selectedBatchRows.compactMap { rowID -> UUID? in
-                        guard case .archiveItem(let item) = rowModels.first(where: { $0.id == rowID })?.kind else { return nil }
-                        return item.id
-                    }
-                    guard !itemIDs.isEmpty else { return }
-                    itemIDs.forEach { store.deleteArchived(id: $0) }
-                    clearRangeSelectionState()
-                    let updatedModels = buildRowModels(for: .archive)
-                    selectedRowID = buildSelectionID(in: updatedModels, selectableIndex: selectionIndex)
-                    refreshRows()
-                }
+                permanentlyDeleteArchiveSelection(rowIDs: selectedBatchRows)
             }
             return
         }
@@ -1693,15 +1687,60 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
             }
 
         case .archive:
-            performUndoableAction("Delete") {
-                guard case .archiveItem(let item) = selectedModel.kind else { return }
-                let selectionIndex = selectedRowIndex ?? 0
-                store.deleteArchived(id: item.id)
-                let updatedModels = buildRowModels(for: .archive)
-                selectedRowID = buildSelectionID(in: updatedModels, selectableIndex: selectionIndex)
-                refreshRows()
-            }
+            permanentlyDeleteArchiveSelection()
         }
+    }
+
+    private func archiveItemIDs(for rowIDs: [TodoRowID]) -> [UUID] {
+        rowIDs.compactMap { rowID -> UUID? in
+            guard case .archiveItem(let item) = rowModels.first(where: { $0.id == rowID })?.kind else { return nil }
+            return item.id
+        }
+    }
+
+    private func canRestoreArchiveRows(_ rowIDs: [TodoRowID]) -> Bool {
+        let itemIDs = archiveItemIDs(for: rowIDs)
+        guard !itemIDs.isEmpty else { return false }
+        return itemIDs.count <= availableArchiveRestoreSlots
+    }
+
+    private func archiveSelectionIndex(for rowIDs: [TodoRowID]) -> Int {
+        let selectableRowIDs = rowModels.filter(\.isSelectable).map(\.id)
+        return rowIDs.compactMap { selectableRowIDs.firstIndex(of: $0) }.min() ?? 0
+    }
+
+    private func applyArchivePermanentDelete(to rowIDs: [TodoRowID]) {
+        let itemIDs = archiveItemIDs(for: rowIDs)
+        guard !itemIDs.isEmpty else { return }
+
+        let selectionIndex = archiveSelectionIndex(for: rowIDs)
+        itemIDs.forEach { store.deleteArchived(id: $0) }
+        clearRangeSelectionState()
+        let updatedModels = buildRowModels(for: .archive)
+        selectedRowID = buildSelectionID(in: updatedModels, selectableIndex: selectionIndex)
+        refreshRows()
+    }
+
+    private func restoreArchiveSelection(rowIDs: [TodoRowID]? = nil) {
+        let targetRowIDs = rowIDs ?? selectedBatchRowIDs()
+        guard canRestoreArchiveRows(targetRowIDs) else { return }
+        animateArchiveRestore(for: targetRowIDs, undoSnapshot: captureUndoSnapshot())
+    }
+
+    private func permanentlyDeleteArchiveSelection(rowIDs: [TodoRowID]? = nil) {
+        let targetRowIDs = rowIDs ?? selectedBatchRowIDs()
+        guard !targetRowIDs.isEmpty else { return }
+        performUndoableAction("Permanently Delete") {
+            self.applyArchivePermanentDelete(to: targetRowIDs)
+        }
+    }
+
+    @objc private func restoreArchiveSelectionFromContextMenu(_ sender: Any?) {
+        restoreArchiveSelection()
+    }
+
+    @objc private func permanentlyDeleteArchiveSelectionFromContextMenu(_ sender: Any?) {
+        permanentlyDeleteArchiveSelection()
     }
 
     private func animateCompletion(for itemID: UUID, undoSnapshot: TodoUndoSnapshot) {
@@ -1709,6 +1748,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         let taskRowID = TodoRowID.taskItem(itemID)
         guard let selectionIndex = batchSelectionIndex(for: taskRowID),
               let row = listView.rowView(for: taskRowID) else { return }
+        let removalDuration = motion.collapse * 0.75
 
         isAnimating = true
         detachEditor(makeListFirstResponder: false)
@@ -1716,23 +1756,27 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
 
         row.playCompletionAnimation(motion: motion) { [weak self] in
             guard let self else { return }
-            self.store.archive(id: itemID)
-            let updatedModels = self.buildRowModels(for: .tasks)
-            self.selectedRowID = self.taskSelectionIDAfterMutation(in: updatedModels, taskIndex: selectionIndex)
-            self.isAnimating = false
-            self.scheduleDeferredEditorActivation(for: self.selectedRowID, delay: self.motion.collapse * 0.75)
-            self.refreshRows(
-                animatedLayout: true,
-                animatedLayoutDuration: self.motion.collapse,
-                selectionRevealRowID: self.selectedRowID,
-                placeCaretAtEnd: false
-            )
-            self.registerUndoSnapshotIfChanged(undoSnapshot, actionName: "Complete")
+            self.listView.animateRemoval(of: taskRowID, duration: removalDuration) {
+                self.store.archive(id: itemID)
+                let updatedModels = self.buildRowModels(for: .tasks)
+                self.selectedRowID = self.taskSelectionIDAfterMutation(in: updatedModels, taskIndex: selectionIndex)
+                self.isAnimating = false
+                self.scheduleDeferredEditorActivation(for: self.selectedRowID, delay: self.motion.collapse * 0.75)
+                self.refreshRows(
+                    resizeDuration: self.completionReflowDuration,
+                    animatedLayout: true,
+                    animatedLayoutDuration: self.completionReflowDuration,
+                    selectionRevealRowID: self.selectedRowID,
+                    placeCaretAtEnd: false
+                )
+                self.registerUndoSnapshotIfChanged(undoSnapshot, actionName: "Complete")
+            }
         }
     }
 
     private func animateBatchCompletion(for rowIDs: [TodoRowID], selectionIndex: Int, undoSnapshot: TodoUndoSnapshot) {
         guard !isAnimating, !listView.isBusy else { return }
+        let removalDuration = motion.collapse * 0.75
 
         let itemIDs = rowIDs.compactMap { rowID -> UUID? in
             guard case .taskItem(let item) = rowModels.first(where: { $0.id == rowID })?.kind else { return nil }
@@ -1750,8 +1794,9 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
             self.isAnimating = false
             self.scheduleDeferredEditorActivation(for: self.selectedRowID, delay: self.motion.collapse * 0.75)
             self.refreshRows(
+                resizeDuration: self.completionReflowDuration,
                 animatedLayout: true,
-                animatedLayoutDuration: self.motion.collapse,
+                animatedLayoutDuration: self.completionReflowDuration,
                 selectionRevealRowID: self.selectedRowID,
                 placeCaretAtEnd: false
             )
@@ -1778,7 +1823,104 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         }
 
         animationGroup.notify(queue: .main) {
-            completeArchiveAndRefresh()
+            let removalGroup = DispatchGroup()
+            rowIDs.forEach { rowID in
+                removalGroup.enter()
+                self.listView.animateRemoval(of: rowID, duration: removalDuration) {
+                    removalGroup.leave()
+                }
+            }
+
+            removalGroup.notify(queue: .main) {
+                completeArchiveAndRefresh()
+            }
+        }
+    }
+
+    private func animateArchiveRestore(for rowIDs: [TodoRowID], undoSnapshot: TodoUndoSnapshot) {
+        guard !isAnimating, !listView.isBusy else { return }
+        let removalDuration = motion.collapse * 0.75
+
+        let itemIDs = archiveItemIDs(for: rowIDs)
+        guard !itemIDs.isEmpty else { return }
+
+        let archiveSelectionIndex = archiveSelectionIndex(for: rowIDs)
+        let rows = rowIDs.compactMap { listView.rowView(for: $0) }
+        let finishRestoreAndRefresh = { [weak self] in
+            guard let self else { return }
+            itemIDs.forEach { self.store.restore(id: $0) }
+            self.clearRangeSelectionState()
+            if self.taskDraft.isEmpty {
+                self.taskDraft.insertionIndex = self.defaultDraftInsertionIndex
+            }
+            let updatedModels = self.buildRowModels(for: .archive)
+            self.selectedRowID = self.buildSelectionID(in: updatedModels, selectableIndex: archiveSelectionIndex)
+            self.isAnimating = false
+            self.updateTabAppearance()
+            self.updateListScrollBehavior()
+            self.refreshRows(
+                animateResize: true,
+                resizeDuration: self.completionReflowDuration,
+                animatedLayout: true,
+                animatedLayoutDuration: self.completionReflowDuration,
+                selectionRevealRowID: self.selectedRowID,
+                placeCaretAtEnd: false
+            )
+            self.registerUndoSnapshotIfChanged(undoSnapshot, actionName: "Restore")
+        }
+
+        guard !rows.isEmpty else {
+            isAnimating = true
+            finishRestoreAndRefresh()
+            return
+        }
+
+        isAnimating = true
+        let animationGroup = DispatchGroup()
+        rows.forEach { row in
+            row.setEditing(false)
+            animationGroup.enter()
+            row.playRestoreAnimation(motion: motion, restoreModelAppearanceOnCompletion: false) {
+                animationGroup.leave()
+            }
+        }
+
+        animationGroup.notify(queue: .main) {
+            let removalGroup = DispatchGroup()
+            rowIDs.forEach { rowID in
+                removalGroup.enter()
+                self.listView.animateRemoval(of: rowID, duration: removalDuration) {
+                    removalGroup.leave()
+                }
+            }
+
+            removalGroup.notify(queue: .main) {
+                finishRestoreAndRefresh()
+            }
+        }
+    }
+
+    private func animateRestoredTasks(_ rowIDs: [TodoRowID]) {
+        let rows = rowIDs.compactMap { listView.rowView(for: $0) }
+        guard !rows.isEmpty else {
+            isAnimating = false
+            syncSelectionUI(placeCaretAtEnd: true)
+            return
+        }
+
+        let animationGroup = DispatchGroup()
+        rows.forEach { row in
+            row.setEditing(false)
+            animationGroup.enter()
+            row.playRestoreAnimation(motion: motion) {
+                animationGroup.leave()
+            }
+        }
+
+        animationGroup.notify(queue: .main) { [weak self] in
+            guard let self else { return }
+            self.isAnimating = false
+            self.syncSelectionUI(placeCaretAtEnd: true)
         }
     }
 
@@ -1798,6 +1940,9 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
                let itemIndex = store.items.firstIndex(where: { $0.id == item.id }),
                itemIndex == 0,
                canShowDraftRow {
+                // Top-edge up-arrow enters an empty draft above the first task.
+                // This is an explicit interaction contract and must never wrap
+                // to the default bottom draft.
                 activateDraft(at: 0)
                 return true
             }
@@ -1883,6 +2028,8 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
                 normalizeDraftBeforeStructuralAction()
                 guard let itemIndex = store.items.firstIndex(where: { $0.id == item.id }),
                       canShowDraftRow else { return }
+                // Return on a task inserts the draft directly below that task,
+                // not at the default bottom position.
                 activateDraft(at: itemIndex + 1)
 
             case .taskDraft:
@@ -1900,7 +2047,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         }
     }
 
-    private func resizeWindow(animate: Bool = true) {
+    private func resizeWindow(animate: Bool = true, duration: TimeInterval? = nil) {
         guard let window = view.window else { return }
         guard !isInNativeFullScreen else { return }
         let rows = CGFloat(max(visibleRowCount, 1))
@@ -1908,21 +2055,26 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         let titlebarHeight = window.titlebarHeight
         let fullHeight = max(contentHeight + titlebarHeight, window.minSize.height)
         let fullWidth = max(panelWidth, window.minSize.width)
+        let targetSize = resolvedTargetWindowSize(
+            fullWidth: fullWidth,
+            fullHeight: fullHeight,
+            minSize: window.minSize
+        )
         let oldFrame = window.frame
         let padding = CGFloat(store.preferences.snapPadding)
         let visibleFrame = window.screen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? oldFrame
 
         let unclampedOrigin = NSPoint(
             x: oldFrame.origin.x,
-            y: oldFrame.maxY - fullHeight
+            y: oldFrame.maxY - targetSize.height
         )
 
         let clampedOrigin = NSPoint(
-            x: min(max(unclampedOrigin.x, visibleFrame.minX + padding), visibleFrame.maxX - fullWidth - padding),
-            y: min(max(unclampedOrigin.y, visibleFrame.minY + padding), visibleFrame.maxY - fullHeight - padding)
+            x: min(max(unclampedOrigin.x, visibleFrame.minX + padding), visibleFrame.maxX - targetSize.width - padding),
+            y: min(max(unclampedOrigin.y, visibleFrame.minY + padding), visibleFrame.maxY - targetSize.height - padding)
         )
 
-        let newFrame = NSRect(origin: clampedOrigin, size: NSSize(width: fullWidth, height: fullHeight))
+        let newFrame = NSRect(origin: clampedOrigin, size: targetSize)
         guard abs(newFrame.height - oldFrame.height) > 0.5 || abs(newFrame.width - oldFrame.width) > 0.5 || newFrame.origin != oldFrame.origin else {
             return
         }
@@ -1933,7 +2085,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         }
 
         NSAnimationContext.runAnimationGroup { context in
-            context.duration = motion.collapse
+            context.duration = duration ?? motion.collapse
             context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
             window.animator().setFrame(newFrame, display: true)
         }
@@ -2031,10 +2183,52 @@ extension TodoViewController: TodoListViewDelegate {
     }
 
     func listView(_ listView: TodoListView, didActivateCheckboxFor rowID: TodoRowID) {
-        guard case .taskItem(let item) = rowModels.first(where: { $0.id == rowID })?.kind else { return }
-        clearRangeSelectionState()
-        selectedRowID = rowID
-        animateCompletion(for: item.id, undoSnapshot: captureUndoSnapshot())
+        switch rowModels.first(where: { $0.id == rowID })?.kind {
+        case .taskItem(let item):
+            clearRangeSelectionState()
+            selectedRowID = rowID
+            animateCompletion(for: item.id, undoSnapshot: captureUndoSnapshot())
+        case .archiveItem:
+            guard canRestoreArchiveRows([rowID]) else { return }
+            clearRangeSelectionState()
+            selectedRowID = rowID
+            restoreArchiveSelection(rowIDs: [rowID])
+        case .taskDraft, .filler, .none:
+            return
+        }
+    }
+
+    func listView(_ listView: TodoListView, contextMenuFor rowID: TodoRowID) -> NSMenu? {
+        guard currentTab == .archive,
+              case .archiveItem = rowModels.first(where: { $0.id == rowID })?.kind else {
+            return nil
+        }
+
+        if isRangeSelectionActive, selectedRowIDs.contains(rowID) {
+            selectedRowID = rowID
+            syncSelectionUI(placeCaretAtEnd: false)
+        } else if selectedRowID != rowID || isRangeSelectionActive {
+            activateRow(rowID, placeCaretAtEnd: false)
+        }
+
+        let menu = NSMenu()
+        let restoreItem = NSMenuItem(
+            title: "Restore",
+            action: #selector(restoreArchiveSelectionFromContextMenu(_:)),
+            keyEquivalent: ""
+        )
+        restoreItem.target = self
+        restoreItem.isEnabled = canRestoreArchiveRows(selectedBatchRowIDs())
+        menu.addItem(restoreItem)
+
+        let deleteItem = NSMenuItem(
+            title: "Permanently Delete",
+            action: #selector(permanentlyDeleteArchiveSelectionFromContextMenu(_:)),
+            keyEquivalent: ""
+        )
+        deleteItem.target = self
+        menu.addItem(deleteItem)
+        return menu
     }
 
     func listViewWillPressRowBody(_ listView: TodoListView, rowID: TodoRowID) {
@@ -2055,6 +2249,101 @@ extension TodoViewController: TodoListViewDelegate {
         }
     }
 }
+
+#if DEBUG
+enum TodoInteractionTestingSelection: Equatable {
+    case taskItem(String)
+    case archiveItem(String)
+    case taskDraft
+    case filler
+}
+
+struct TodoInteractionTestingSnapshot: Equatable {
+    let selected: TodoInteractionTestingSelection?
+    let visibleTaskSequence: [String]
+    let draftInsertionIndex: Int
+    let draftText: String
+}
+
+extension TodoViewController {
+    @MainActor
+    func testingLoadView() {
+        loadViewIfNeeded()
+    }
+
+    @MainActor
+    func testingSelectTask(at index: Int) {
+        precondition(store.items.indices.contains(index))
+        selectedRowID = .taskItem(store.items[index].id)
+        clearRangeSelectionState()
+        refreshRows(resize: false, animateResize: false, placeCaretAtEnd: false)
+    }
+
+    @MainActor
+    func testingRefresh() {
+        refreshRows(resize: false, animateResize: false, placeCaretAtEnd: false)
+    }
+
+    @MainActor
+    func testingSelectArchive(at index: Int) {
+        precondition(store.archivedItems.indices.contains(index))
+        currentTab = .archive
+        selectedRowID = .archiveItem(store.archivedItems[index].id)
+        clearRangeSelectionState()
+        refreshRows(resize: false, animateResize: false, placeCaretAtEnd: false)
+    }
+
+    @MainActor
+    func testingCanRestoreArchiveSelection() -> Bool {
+        canRestoreArchiveRows(selectedBatchRowIDs())
+    }
+
+    @MainActor
+    func testingRestoreArchiveSelection() {
+        restoreArchiveSelection()
+    }
+
+    @MainActor
+    func testingResolvedTargetWindowSize(fullWidth: CGFloat, fullHeight: CGFloat, minSize: NSSize) -> NSSize {
+        resolvedTargetWindowSize(fullWidth: fullWidth, fullHeight: fullHeight, minSize: minSize)
+    }
+
+    @MainActor
+    func testingSnapshot() -> TodoInteractionTestingSnapshot {
+        TodoInteractionTestingSnapshot(
+            selected: testingSelectionKind(for: selectedRowID),
+            visibleTaskSequence: rowModels.compactMap { model in
+                switch model.kind {
+                case .taskItem(let item):
+                    return item.text
+                case .taskDraft:
+                    return "<draft>"
+                case .archiveItem, .filler:
+                    return nil
+                }
+            },
+            draftInsertionIndex: taskDraft.insertionIndex,
+            draftText: taskDraft.text
+        )
+    }
+
+    private func testingSelectionKind(for rowID: TodoRowID?) -> TodoInteractionTestingSelection? {
+        guard let rowID,
+              let model = rowModels.first(where: { $0.id == rowID }) else { return nil }
+
+        switch model.kind {
+        case .taskItem(let item):
+            return .taskItem(item.text)
+        case .archiveItem(let item):
+            return .archiveItem(item.text)
+        case .taskDraft:
+            return .taskDraft
+        case .filler:
+            return .filler
+        }
+    }
+}
+#endif
 
 private extension NSWindow {
     var titlebarHeight: CGFloat {

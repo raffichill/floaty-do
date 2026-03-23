@@ -10,6 +10,7 @@ enum TodoListSelectionMode {
 protocol TodoListViewDelegate: AnyObject {
     func listView(_ listView: TodoListView, didActivateRow rowID: TodoRowID, selectionMode: TodoListSelectionMode)
     func listView(_ listView: TodoListView, didActivateCheckboxFor rowID: TodoRowID)
+    func listView(_ listView: TodoListView, contextMenuFor rowID: TodoRowID) -> NSMenu?
     func listViewWillPressRowBody(_ listView: TodoListView, rowID: TodoRowID)
     func listViewWillBeginDragging(_ listView: TodoListView, rowID: TodoRowID)
     func listView(_ listView: TodoListView, didFinishDraggingRow rowID: TodoRowID, orderedItemIDs: [UUID])
@@ -123,7 +124,10 @@ final class TodoListView: NSView {
             rowView.setSelectionState(
                 focused: model.id == selectedRowID,
                 selected: selectedRowIDs.contains(model.id),
-                animateFill: model.id == selectionRevealRowID && model.id == selectedRowID
+                animateFill: model.id == selectionRevealRowID && model.id == selectedRowID,
+                transitionDuration: animatedLayout && model.id == selectionRevealRowID && model.id == selectedRowID
+                    ? (animatedLayoutDuration ?? preferences.motion.collapse)
+                    : nil
             )
             rowView.setEditing(model.id == editingRowID)
             rowView.setPressed(model.id == pressedRowID)
@@ -212,15 +216,6 @@ final class TodoListView: NSView {
         fade.fillMode = .forwards
         fade.isRemovedOnCompletion = false
         rowView.layer?.add(fade, forKey: "rowFade")
-
-        let scale = CABasicAnimation(keyPath: "transform.scale")
-        scale.fromValue = 1.0
-        scale.toValue = 0.94
-        scale.duration = duration
-        scale.timingFunction = CAMediaTimingFunction(name: .easeOut)
-        scale.fillMode = .forwards
-        scale.isRemovedOnCompletion = false
-        rowView.layer?.add(scale, forKey: "rowScale")
 
         DispatchQueue.main.asyncAfter(deadline: .now() + duration) {
             completion()
@@ -378,6 +373,22 @@ final class TodoListView: NSView {
         }
     }
 
+    override func rightMouseDown(with event: NSEvent) {
+        guard case .idle = interactionState else { return }
+
+        let location = convert(event.locationInWindow, from: nil)
+        guard let rowID = rowID(at: location),
+              let model = rowModelsByID[rowID],
+              model.isSelectable,
+              let menu = delegate?.listView(self, contextMenuFor: rowID) else {
+            super.rightMouseDown(with: event)
+            return
+        }
+
+        window?.makeFirstResponder(self)
+        NSMenu.popUpContextMenu(menu, with: event, for: self)
+    }
+
     private func beginDrag(from press: PressState, pointerLocation: CGPoint) {
         guard let rowView = rowViews[press.rowID],
               let taskOrdinal = taskOrdinal(for: press.rowID) else {
@@ -508,7 +519,10 @@ final class TodoListView: NSView {
                 rowView.setSelectionState(
                     focused: rowID == self.selectedRowID,
                     selected: self.selectedRowIDs.contains(rowID),
-                    animateFill: rowID == self.selectionRevealRowID && rowID == self.selectedRowID
+                    animateFill: rowID == self.selectionRevealRowID && rowID == self.selectedRowID,
+                    transitionDuration: rowID == self.selectionRevealRowID && rowID == self.selectedRowID
+                        ? animationDuration
+                        : nil
                 )
                 rowView.setEditing(rowID == self.editingRowID)
                 rowView.setPressed(rowID == self.pressedRowID)
@@ -531,7 +545,10 @@ final class TodoListView: NSView {
             rowView.setSelectionState(
                 focused: rowID == selectedRowID,
                 selected: selectedRowIDs.contains(rowID),
-                animateFill: rowID == selectionRevealRowID && rowID == selectedRowID
+                animateFill: rowID == selectionRevealRowID && rowID == selectedRowID,
+                transitionDuration: rowID == selectionRevealRowID && rowID == selectedRowID
+                    ? animationDuration
+                    : nil
             )
             rowView.setEditing(rowID == editingRowID)
             rowView.setPressed(rowID == pressedRowID)
@@ -729,6 +746,12 @@ final class TodoListView: NSView {
 }
 
 final class TodoRowView: NSView {
+    private struct ContentRevealAnimation {
+        let textFromOpacity: Float
+        let circleFromOpacity: Float
+        let duration: CFTimeInterval
+    }
+
     private enum AppearanceMetrics {
         static let pressedScale: CGFloat = 0.99
         static let pressAnimationDuration: CFTimeInterval = 0.08
@@ -762,6 +785,8 @@ final class TodoRowView: NSView {
     }
 
     private var shouldAnimateNextSelectionFill = false
+    private var pendingContentRevealAnimation: ContentRevealAnimation?
+    private var pendingSelectionFillDuration: CFTimeInterval?
 
     init(model: TodoRowModel, preferences: AppPreferences) {
         self.model = model
@@ -838,9 +863,8 @@ final class TodoRowView: NSView {
         self.preferences = preferences
 
         let symbolName = model.isDone ? "checkmark.circle.fill" : "circle"
-        let config = NSImage.SymbolConfiguration(pointSize: 14, weight: .regular)
-        let image = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)!
-        circleView.image = image.withSymbolConfiguration(config)
+        let config = symbolConfiguration()
+        circleView.image = symbolImage(named: symbolName, configuration: config)
         textLabel.font = preferences.appFont()
         editingTextView.font = preferences.appFont()
         backgroundView.layer?.cornerRadius = CGFloat(preferences.cornerRadius)
@@ -849,10 +873,32 @@ final class TodoRowView: NSView {
         needsLayout = true
     }
 
-    func setSelectionState(focused: Bool, selected: Bool, animateFill: Bool = false) {
+    func setSelectionState(
+        focused: Bool,
+        selected: Bool,
+        animateFill: Bool = false,
+        transitionDuration: CFTimeInterval? = nil
+    ) {
+        let previousTextAlpha = resolvedTextAlpha()
+        let previousCircleAlpha = resolvedCircleAlpha(textAlpha: previousTextAlpha)
         shouldAnimateNextSelectionFill = animateFill && focused
         isFocusedRow = focused
         let nextIsSelectedRow = (focused || selected) && model.isSelectable
+        if let transitionDuration,
+           nextIsSelectedRow,
+           !isSelectedRow {
+            let targetTextAlpha = max(CGFloat(model.textOpacity), 0.98)
+            let targetCircleAlpha = max(
+                CGFloat(model.circleOpacity),
+                model.isDone ? targetTextAlpha : 0.86
+            )
+            pendingContentRevealAnimation = ContentRevealAnimation(
+                textFromOpacity: Float(max(0.0, min(previousTextAlpha / max(targetTextAlpha, 0.001), 1.0))),
+                circleFromOpacity: Float(max(0.0, min(previousCircleAlpha / max(targetCircleAlpha, 0.001), 1.0))),
+                duration: transitionDuration
+            )
+            pendingSelectionFillDuration = transitionDuration
+        }
         if isSelectedRow != nextIsSelectedRow {
             isSelectedRow = nextIsSelectedRow
         } else if shouldAnimateNextSelectionFill {
@@ -902,14 +948,17 @@ final class TodoRowView: NSView {
         setEditing(false)
         layoutSubtreeIfNeeded()
 
-        let textContentFrame = editingTextView.convert(editingTextView.debugContentRect, to: self)
         if !model.text.isEmpty {
-            let textWidth = min((model.text as NSString).size(withAttributes: [.font: preferences.appFont()]).width, textContentFrame.width)
+            guard let strikeMetrics = editingTextView.strikethroughMetrics(in: self) else {
+                DispatchQueue.main.asyncAfter(deadline: .now() + motion.completionSettle) {
+                    completion()
+                }
+                return
+            }
             let strikeLayer = CAShapeLayer()
-            let midY = textContentFrame.midY
             let path = CGMutablePath()
-            path.move(to: CGPoint(x: textContentFrame.minX, y: midY))
-            path.addLine(to: CGPoint(x: textContentFrame.minX + textWidth, y: midY))
+            path.move(to: strikeMetrics.start)
+            path.addLine(to: strikeMetrics.end)
             strikeLayer.path = path
             strikeLayer.strokeColor = preferences.strikethroughColor.cgColor
             strikeLayer.lineWidth = 1.0
@@ -986,6 +1035,126 @@ final class TodoRowView: NSView {
         }
     }
 
+    func playRestoreAnimation(
+        motion: MotionProfile,
+        restoreModelAppearanceOnCompletion: Bool = true,
+        completion: @escaping () -> Void
+    ) {
+        guard let circleLayer = circleView.layer else {
+            completion()
+            return
+        }
+
+        setEditing(false)
+        layoutSubtreeIfNeeded()
+
+        let config = symbolConfiguration()
+        circleView.image = symbolImage(named: "checkmark.circle.fill", configuration: config)
+        circleView.contentTintColor = preferences.resolvedContentColor(multiplier: 0.86)
+
+        let strikeLayer = CAShapeLayer()
+        let startAnimations = {
+            func centerAnchor() {
+                CATransaction.begin()
+                CATransaction.setDisableActions(true)
+                let position = circleLayer.position
+                let anchor = circleLayer.anchorPoint
+                let bounds = circleLayer.bounds
+                circleLayer.anchorPoint = CGPoint(x: 0.5, y: 0.5)
+                circleLayer.position = CGPoint(
+                    x: position.x + bounds.width * (0.5 - anchor.x),
+                    y: position.y + bounds.height * (0.5 - anchor.y)
+                )
+                CATransaction.commit()
+            }
+
+            centerAnchor()
+
+            let shrink = CASpringAnimation(keyPath: "transform.scale")
+            shrink.fromValue = 1.0
+            shrink.toValue = 0.0
+            shrink.stiffness = 200
+            shrink.damping = 15
+            shrink.duration = motion.completionSettle
+            shrink.fillMode = .forwards
+            shrink.isRemovedOnCompletion = false
+            circleLayer.add(shrink, forKey: "restoreShrinkOut")
+
+            DispatchQueue.main.asyncAfter(deadline: .now() + motion.checkSwapDelay) {
+                self.circleView.image = self.symbolImage(named: "circle", configuration: config)
+                self.circleView.contentTintColor = self.preferences.resolvedContentColor(multiplier: self.resolvedCircleAlpha())
+
+                circleLayer.removeAnimation(forKey: "restoreShrinkOut")
+                centerAnchor()
+
+                let growIn = CASpringAnimation(keyPath: "transform.scale")
+                growIn.fromValue = 0.0
+                growIn.toValue = 1.0
+                growIn.stiffness = 200
+                growIn.damping = 15
+                growIn.duration = motion.completionSettle
+                growIn.fillMode = .forwards
+                growIn.isRemovedOnCompletion = false
+                circleLayer.add(growIn, forKey: "restoreGrowIn")
+            }
+
+            let completionDelay = max(motion.completionSettle, motion.completionSweep)
+            DispatchQueue.main.asyncAfter(deadline: .now() + completionDelay) {
+                strikeLayer.removeFromSuperlayer()
+                self.editingTextView.layer?.removeAnimation(forKey: "restoreFadeText")
+                self.editingTextView.layer?.opacity = 1.0
+                self.circleView.image = self.symbolImage(named: "circle", configuration: config)
+                if restoreModelAppearanceOnCompletion {
+                    self.updateAppearance()
+                } else {
+                    self.editingTextView.textColor = self.preferences.resolvedContentColor(multiplier: self.resolvedTextAlpha())
+                    self.editingTextView.showsStrikethrough = false
+                    self.circleView.contentTintColor = self.preferences.resolvedContentColor(multiplier: self.resolvedCircleAlpha())
+                    self.needsDisplay = true
+                }
+                completion()
+            }
+        }
+
+        if !model.text.isEmpty, let strikeMetrics = editingTextView.strikethroughMetrics(in: self) {
+            editingTextView.showsStrikethrough = false
+            let path = CGMutablePath()
+            path.move(to: strikeMetrics.start)
+            path.addLine(to: strikeMetrics.end)
+            strikeLayer.path = path
+            strikeLayer.strokeColor = preferences.strikethroughColor.cgColor
+            strikeLayer.lineWidth = 1.0
+            strikeLayer.strokeStart = 0.0
+            strikeLayer.strokeEnd = 1.0
+            layer?.addSublayer(strikeLayer)
+
+            let fadeText = CABasicAnimation(keyPath: "opacity")
+            fadeText.fromValue = 0.30
+            fadeText.toValue = 1.0
+            fadeText.duration = motion.completionSweep
+            fadeText.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            fadeText.fillMode = .forwards
+            fadeText.isRemovedOnCompletion = false
+            editingTextView.layer?.opacity = 0.30
+            editingTextView.layer?.add(fadeText, forKey: "restoreFadeText")
+
+            let strokeAnim = CABasicAnimation(keyPath: "strokeStart")
+            strokeAnim.fromValue = 0.0
+            strokeAnim.toValue = 1.0
+            strokeAnim.duration = motion.completionSweep
+            strokeAnim.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            strokeAnim.fillMode = .forwards
+            strokeAnim.isRemovedOnCompletion = false
+            strikeLayer.add(strokeAnim, forKey: "restoreStrikethrough")
+        }
+
+        needsDisplay = true
+        displayIfNeeded()
+        circleView.displayIfNeeded()
+        editingTextView.displayIfNeeded()
+        DispatchQueue.main.async(execute: startAnimations)
+    }
+
     private var checkboxRect: NSRect {
         NSRect(
             x: LayoutMetrics.rowHorizontalInset,
@@ -1005,21 +1174,27 @@ final class TodoRowView: NSView {
         return NSRect(x: textX, y: textY, width: textWidth, height: textHeight)
     }
 
+    private func symbolConfiguration() -> NSImage.SymbolConfiguration {
+        NSImage.SymbolConfiguration(pointSize: 14, weight: .regular)
+    }
+
+    private func symbolImage(named symbolName: String, configuration: NSImage.SymbolConfiguration) -> NSImage {
+        let image = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)!
+        return image.withSymbolConfiguration(configuration) ?? image
+    }
+
     private func updateAppearance() {
         let activeFillColor = preferences.activeFillColor
-        let isAnySelected = isSelectedRow && model.isSelectable
-        let textAlpha = isAnySelected
-            ? max(CGFloat(model.textOpacity), 0.98)
-            : CGFloat(model.textOpacity)
-        let circleAlpha = isAnySelected
-            ? max(CGFloat(model.circleOpacity), model.isDone ? textAlpha : 0.86)
-            : CGFloat(model.circleOpacity)
+        let textAlpha = resolvedTextAlpha()
+        let circleAlpha = resolvedCircleAlpha(textAlpha: textAlpha)
 
         let backgroundColor: CGColor
         let borderColor: CGColor
         let borderWidth: CGFloat
         let animateSelectionFill = shouldAnimateNextSelectionFill && model.isSelectable && isFocusedRow
+        let selectionFillDuration = pendingSelectionFillDuration
         shouldAnimateNextSelectionFill = false
+        pendingSelectionFillDuration = nil
         if model.isSelectable && isSelectedRow {
             backgroundColor = activeFillColor.cgColor
             borderColor = NSColor.clear.cgColor
@@ -1034,12 +1209,14 @@ final class TodoRowView: NSView {
             backgroundColor: backgroundColor,
             borderColor: borderColor,
             borderWidth: borderWidth,
-            animate: animateSelectionFill
+            animate: animateSelectionFill,
+            duration: selectionFillDuration
         )
         circleView.contentTintColor = preferences.resolvedContentColor(multiplier: circleAlpha)
         textLabel.attributedStringValue = attributedText(alphaMultiplier: textAlpha)
         editingTextView.text = model.text
         editingTextView.textColor = preferences.resolvedContentColor(multiplier: textAlpha)
+        editingTextView.strikethroughColor = preferences.strikethroughColor
         editingTextView.showsStrikethrough = model.showsStrikethrough
         editingTextView.selectionColor = preferences.selectionOverlayColor
         editingTextView.caretColor = preferences.caretColor
@@ -1057,15 +1234,72 @@ final class TodoRowView: NSView {
         textLabel.alphaValue = 0.0
         editingTextView.alphaValue = 1.0
         circleView.alphaValue = 1.0
+        applyPendingContentRevealAnimation()
 
         updateScaleTransform()
+    }
+
+    private func resolvedTextAlpha() -> CGFloat {
+        let isAnySelected = isSelectedRow && model.isSelectable
+        return isAnySelected
+            ? max(CGFloat(model.textOpacity), 0.98)
+            : CGFloat(model.textOpacity)
+    }
+
+    private func resolvedCircleAlpha(textAlpha: CGFloat? = nil) -> CGFloat {
+        let isAnySelected = isSelectedRow && model.isSelectable
+        let resolvedTextAlpha = textAlpha ?? resolvedTextAlpha()
+        return isAnySelected
+            ? max(CGFloat(model.circleOpacity), model.isDone ? resolvedTextAlpha : 0.86)
+            : CGFloat(model.circleOpacity)
+    }
+
+    private func applyPendingContentRevealAnimation() {
+        guard let animation = pendingContentRevealAnimation else { return }
+        pendingContentRevealAnimation = nil
+
+        animateLayerOpacity(
+            editingTextView.layer,
+            from: animation.textFromOpacity,
+            duration: animation.duration,
+            key: "rowTextReveal"
+        )
+        animateLayerOpacity(
+            circleView.layer,
+            from: animation.circleFromOpacity,
+            duration: animation.duration,
+            key: "rowCircleReveal"
+        )
+    }
+
+    private func animateLayerOpacity(
+        _ layer: CALayer?,
+        from: Float,
+        duration: CFTimeInterval,
+        key: String
+    ) {
+        guard let layer else { return }
+        layer.removeAnimation(forKey: key)
+
+        let animation = CABasicAnimation(keyPath: "opacity")
+        animation.fromValue = from
+        animation.toValue = 1.0
+        animation.duration = duration
+        animation.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        layer.add(animation, forKey: key)
+
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        layer.opacity = 1.0
+        CATransaction.commit()
     }
 
     private func updateBackgroundAppearance(
         backgroundColor: CGColor,
         borderColor: CGColor,
         borderWidth: CGFloat,
-        animate: Bool
+        animate: Bool,
+        duration: CFTimeInterval?
     ) {
         guard let layer = backgroundView.layer else { return }
 
@@ -1079,7 +1313,7 @@ final class TodoRowView: NSView {
             let animation = CABasicAnimation(keyPath: "backgroundColor")
             animation.fromValue = currentBackground
             animation.toValue = backgroundColor
-            animation.duration = preferences.motion.collapse
+            animation.duration = duration ?? preferences.motion.collapse
             animation.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
             layer.add(animation, forKey: "rowBackgroundColor")
         }
@@ -1088,7 +1322,7 @@ final class TodoRowView: NSView {
             let animation = CABasicAnimation(keyPath: "borderColor")
             animation.fromValue = currentBorderColor
             animation.toValue = borderColor
-            animation.duration = preferences.motion.collapse
+            animation.duration = duration ?? preferences.motion.collapse
             animation.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
             layer.add(animation, forKey: "rowBorderColor")
         }
@@ -1097,7 +1331,7 @@ final class TodoRowView: NSView {
             let animation = CABasicAnimation(keyPath: "borderWidth")
             animation.fromValue = currentBorderWidth
             animation.toValue = borderWidth
-            animation.duration = preferences.motion.collapse
+            animation.duration = duration ?? preferences.motion.collapse
             animation.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
             layer.add(animation, forKey: "rowBorderWidth")
         }
@@ -1269,6 +1503,10 @@ final class EditingTextDisplayView: NSView {
         }
     }
 
+    var strikethroughColor: NSColor = .white {
+        didSet { needsDisplay = true }
+    }
+
     var showsStrikethrough = false {
         didSet { needsDisplay = true }
     }
@@ -1355,6 +1593,15 @@ final class EditingTextDisplayView: NSView {
         NSAttributedString(string: text, attributes: textAttributes())
             .draw(with: drawRect, options: [.usesLineFragmentOrigin, .usesFontLeading, .truncatesLastVisibleLine])
 
+        if showsStrikethrough, let metrics = strikethroughMetrics() {
+            strikethroughColor.setStroke()
+            let line = NSBezierPath()
+            line.lineWidth = 1.0
+            line.move(to: CGPoint(x: metrics.startX, y: metrics.y))
+            line.line(to: CGPoint(x: metrics.endX, y: metrics.y))
+            line.stroke()
+        }
+
         if showsCaret {
             let caretX = contentRect.minX + width(toUTF16Index: clampedLocation) - horizontalOffset
             if caretX >= contentRect.minX - 1 && caretX <= contentRect.maxX + 1 {
@@ -1412,6 +1659,27 @@ final class EditingTextDisplayView: NSView {
         alignedContentRect().offsetBy(dx: 0, dy: visualVerticalOffset)
     }
 
+    func strikethroughMetrics() -> (startX: CGFloat, endX: CGFloat, y: CGFloat)? {
+        guard !text.isEmpty else { return nil }
+        let contentRect = visualContentRect
+        let totalTextWidth = width(toUTF16Index: (text as NSString).length)
+        let visibleTextWidth = min(totalTextWidth, contentRect.width + horizontalOffset)
+        guard visibleTextWidth > 0 else { return nil }
+
+        let baselineY = contentRect.minY - font.descender
+        let strikeY = alignToHalfBackingPixel(baselineY + (font.xHeight * 0.5))
+        let startX = contentRect.minX - horizontalOffset
+        let endX = startX + visibleTextWidth
+        return (startX, endX, strikeY)
+    }
+
+    func strikethroughMetrics(in view: NSView) -> (start: CGPoint, end: CGPoint)? {
+        guard let metrics = strikethroughMetrics() else { return nil }
+        let start = convert(CGPoint(x: metrics.startX, y: metrics.y), to: view)
+        let end = convert(CGPoint(x: metrics.endX, y: metrics.y), to: view)
+        return (start, end)
+    }
+
     private func textAttributes() -> [NSAttributedString.Key: Any] {
         let paragraphStyle = NSMutableParagraphStyle()
         paragraphStyle.lineBreakMode = .byTruncatingTail
@@ -1419,7 +1687,6 @@ final class EditingTextDisplayView: NSView {
             .font: font,
             .foregroundColor: textColor,
             .paragraphStyle: paragraphStyle,
-            .strikethroughStyle: showsStrikethrough ? NSUnderlineStyle.single.rawValue : 0,
         ]
     }
 

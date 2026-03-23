@@ -49,10 +49,12 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
         }
 
-        // App-level shortcuts: cmd+1/cmd+2 to switch tabs, cmd+Q to quit,
-        // cmd+W to hide panel, cmd+, for theme, cmd+0 to reset the main
-        // window size, cmd+z/cmd+shift+z for undo/redo, and ctrl+option+arrow
-        // to snap the panel to screen edges/corners.
+        // App-level shortcuts: cmd+1/cmd+2 switch main tabs unless settings is
+        // visible, in which case cmd+1/cmd+2/cmd+3 switch settings tabs.
+        // cmd+3 opens settings on About, cmd+, opens settings on Theme, cmd+Q
+        // quits, cmd+W hides panel, cmd+0 resets the main window size,
+        // cmd+z/cmd+shift+z undo/redo, and ctrl+option+arrow snaps the panel
+        // to screen edges/corners.
         appEventMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self else { return event }
             let mods = event.modifierFlags.intersection([.command, .option, .control, .shift])
@@ -113,11 +115,23 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 return nil
             }
             if characters == "1" {
-                self.todoVC.showTasksTab()
+                if self.todoVC.isSettingsWindowVisible {
+                    self.todoVC.openSettingsWindow(initialTab: .appearance)
+                } else {
+                    self.todoVC.showTasksTab()
+                }
                 return nil
             }
             if characters == "2" {
-                self.todoVC.showArchiveTab()
+                if self.todoVC.isSettingsWindowVisible {
+                    self.todoVC.openSettingsWindow(initialTab: .shortcuts)
+                } else {
+                    self.todoVC.showArchiveTab()
+                }
+                return nil
+            }
+            if characters == "3" {
+                self.todoVC.openSettingsWindow(initialTab: .about)
                 return nil
             }
             if characters == "0" {
@@ -188,6 +202,11 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     public func windowWillReturnUndoManager(_ window: NSWindow) -> UndoManager? {
         guard window === panel else { return nil }
         return todoVC.undoManager
+    }
+
+    public func windowDidEndLiveResize(_ notification: Notification) {
+        guard notification.object as AnyObject? === panel else { return }
+        todoVC.recordUserResizedWindowSize(panel.frame.size)
     }
 
     @objc private func statusItemClicked() {
