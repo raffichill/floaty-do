@@ -292,8 +292,8 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             y: min(max(origin.y, visibleFrame.minY + padding), visibleFrame.maxY - size.height - padding)
         )
 
-        let targetFrame = NSRect(origin: clampedOrigin, size: size)
-        panel.setFrame(targetFrame, display: true, animate: false)
+        guard clampedOrigin != currentOrigin else { return }
+        panel.setFrameOrigin(clampedOrigin)
     }
 
     private func togglePanelFullScreen() {
