@@ -936,6 +936,10 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
     ) {
         let resolvedPreferences = preferences ?? store.preferences
         let previousRowCount = rowModels.count
+        // Preserve explicit empty draft placement across ordinary redraws.
+        // Keyboard navigation intentionally creates valid drafts above/between
+        // tasks, and generic refresh must not snap those back to the default
+        // bottom slot.
         rowModels = buildRowModels()
         ensureSelectedRowExists()
         listView.apply(
@@ -1907,6 +1911,9 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
                let itemIndex = store.items.firstIndex(where: { $0.id == item.id }),
                itemIndex == 0,
                canShowDraftRow {
+                // Top-edge up-arrow enters an empty draft above the first task.
+                // This is an explicit interaction contract and must never wrap
+                // to the default bottom draft.
                 activateDraft(at: 0)
                 return true
             }
@@ -1992,6 +1999,8 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
                 normalizeDraftBeforeStructuralAction()
                 guard let itemIndex = store.items.firstIndex(where: { $0.id == item.id }),
                       canShowDraftRow else { return }
+                // Return on a task inserts the draft directly below that task,
+                // not at the default bottom position.
                 activateDraft(at: itemIndex + 1)
 
             case .taskDraft:
@@ -2206,6 +2215,77 @@ extension TodoViewController: TodoListViewDelegate {
         }
     }
 }
+
+#if DEBUG
+enum TodoInteractionTestingSelection: Equatable {
+    case taskItem(String)
+    case archiveItem(String)
+    case taskDraft
+    case filler
+}
+
+struct TodoInteractionTestingSnapshot: Equatable {
+    let selected: TodoInteractionTestingSelection?
+    let visibleTaskSequence: [String]
+    let draftInsertionIndex: Int
+    let draftText: String
+}
+
+extension TodoViewController {
+    @MainActor
+    func testingLoadView() {
+        loadViewIfNeeded()
+    }
+
+    @MainActor
+    func testingSelectTask(at index: Int) {
+        precondition(store.items.indices.contains(index))
+        selectedRowID = .taskItem(store.items[index].id)
+        clearRangeSelectionState()
+        refreshRows(resize: false, animateResize: false, placeCaretAtEnd: false)
+    }
+
+    @MainActor
+    func testingRefresh() {
+        refreshRows(resize: false, animateResize: false, placeCaretAtEnd: false)
+    }
+
+    @MainActor
+    func testingSnapshot() -> TodoInteractionTestingSnapshot {
+        TodoInteractionTestingSnapshot(
+            selected: testingSelectionKind(for: selectedRowID),
+            visibleTaskSequence: rowModels.compactMap { model in
+                switch model.kind {
+                case .taskItem(let item):
+                    return item.text
+                case .taskDraft:
+                    return "<draft>"
+                case .archiveItem, .filler:
+                    return nil
+                }
+            },
+            draftInsertionIndex: taskDraft.insertionIndex,
+            draftText: taskDraft.text
+        )
+    }
+
+    private func testingSelectionKind(for rowID: TodoRowID?) -> TodoInteractionTestingSelection? {
+        guard let rowID,
+              let model = rowModels.first(where: { $0.id == rowID }) else { return nil }
+
+        switch model.kind {
+        case .taskItem(let item):
+            return .taskItem(item.text)
+        case .archiveItem(let item):
+            return .archiveItem(item.text)
+        case .taskDraft:
+            return .taskDraft
+        case .filler:
+            return .filler
+        }
+    }
+}
+#endif
 
 private extension NSWindow {
     var titlebarHeight: CGFloat {
