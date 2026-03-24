@@ -1033,6 +1033,27 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         // bottom slot.
         rowModels = buildRowModels()
         ensureSelectedRowExists()
+        let effectiveAnimateResize = animateResize
+            && heightResizeMode.shouldAnimateWindowResize
+            && shouldAnimateWindowResize(from: previousRowCount, to: rowModels.count)
+
+        let shouldPrestartAnimatedResize = resize
+            && !deferTaskHeightFitUntilAfterEditorAttachment
+            && effectiveAnimateResize
+            && animatedLayout
+
+        // Start the window tween before listView.apply() kicks off row reflow.
+        // Otherwise the rows get a small head start because their layer
+        // animations are added first and the window animation begins after the
+        // apply pass returns.
+        if shouldPrestartAnimatedResize {
+            resizeWindow(
+                animate: true,
+                duration: resizeDuration,
+                heightResizeMode: heightResizeMode
+            )
+        }
+
         listView.apply(
             models: rowModels,
             selectedRowID: selectedRowID,
@@ -1044,14 +1065,11 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
             selectionRevealRowID: selectionRevealRowID
         )
 
-        if resize && !deferTaskHeightFitUntilAfterEditorAttachment {
+        if resize && !deferTaskHeightFitUntilAfterEditorAttachment && !shouldPrestartAnimatedResize {
             // Draft insertion is the only task-height path that needs a
             // post-editor second pass. Completion-driven shrink should resize
             // on this normal refresh path so it stays coupled to the reflow
             // animation instead of waiting on draft/editor attachment logic.
-            let effectiveAnimateResize = animateResize
-                && heightResizeMode.shouldAnimateWindowResize
-                && shouldAnimateWindowResize(from: previousRowCount, to: rowModels.count)
             resizeWindow(
                 animate: effectiveAnimateResize,
                 duration: resizeDuration,
