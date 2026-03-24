@@ -98,6 +98,32 @@ final class TodoViewControllerInteractionTests: XCTestCase {
         XCTAssertLessThanOrEqual(selectedFrame.maxY - originY, visibleHeight - buffer + 0.5)
     }
 
+    func testTaskKeyboardNavigationKeepsContextVisibleWhenOverflowing() {
+        let store = seededStore(
+            active: ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J"]
+        )
+        let controller = TodoViewController(store: store)
+        controller.testingLoadView()
+        controller.testingSetViewSize(NSSize(width: 400, height: 240))
+        controller.testingSelectTask(at: 0)
+
+        for _ in 0..<6 {
+            XCTAssertTrue(controller.moveDown())
+        }
+
+        guard let selectedFrame = controller.testingFrameForSelectedRow() else {
+            return XCTFail("Expected a selected task row frame")
+        }
+
+        let buffer = CGFloat(store.preferences.rowHeight) * 1.0
+        let originY = controller.testingListScrollOriginY()
+        let visibleHeight = controller.testingListViewportHeight()
+
+        XCTAssertGreaterThan(controller.testingListDocumentHeight(), visibleHeight)
+        XCTAssertGreaterThanOrEqual(selectedFrame.minY - originY, buffer - 0.5)
+        XCTAssertLessThanOrEqual(selectedFrame.maxY - originY, visibleHeight - buffer + 0.5)
+    }
+
     func testArchiveKeyboardNavigationToLastItemScrollsToBottomEdge() {
         let store = seededStore(
             active: [],
@@ -138,6 +164,147 @@ final class TodoViewControllerInteractionTests: XCTestCase {
         )
         XCTAssertEqual(refreshedTarget.width, 520, accuracy: 0.5)
         XCTAssertEqual(refreshedTarget.height, 320, accuracy: 0.5)
+    }
+
+    func testManualResizeFloorDoesNotBlockStructuralGrowth() {
+        let store = seededStore(active: ["A"])
+        let controller = TodoViewController(store: store)
+        controller.testingLoadView()
+
+        controller.recordUserResizedWindowSize(NSSize(width: 420, height: 200))
+        let grownTarget = controller.testingResolvedTargetWindowSize(
+            fullWidth: 420,
+            fullHeight: 320,
+            minSize: .zero
+        )
+
+        XCTAssertEqual(grownTarget.width, 420, accuracy: 0.5)
+        XCTAssertEqual(grownTarget.height, 320, accuracy: 0.5)
+    }
+
+    func testTaskStructuralHeightIgnoresRecordedUserHeightFloor() {
+        let store = seededStore(active: ["A"])
+        let controller = TodoViewController(store: store)
+        controller.testingLoadView()
+
+        controller.recordUserResizedWindowSize(NSSize(width: 420, height: 320))
+
+        let ordinaryTarget = controller.testingResolvedTargetWindowSize(
+            fullWidth: 420,
+            fullHeight: 240,
+            minSize: .zero
+        )
+        let structuralTarget = controller.testingResolvedTargetWindowSize(
+            fullWidth: 420,
+            fullHeight: 240,
+            minSize: .zero,
+            fitTaskStructuralContent: true
+        )
+
+        XCTAssertEqual(ordinaryTarget.height, 320, accuracy: 0.5)
+        XCTAssertEqual(structuralTarget.height, 240, accuracy: 0.5)
+    }
+
+    func testActivatingDraftAddsOneMoreVisibleRowOfRunway() {
+        let store = seededStore(active: ["A", "B"])
+        let controller = TodoViewController(store: store)
+        controller.testingLoadView()
+        controller.testingSelectTask(at: 1)
+
+        XCTAssertEqual(controller.testingVisibleRowCount(), 5)
+
+        controller.submitRow()
+
+        let snapshot = controller.testingSnapshot()
+        XCTAssertEqual(snapshot.selected, .taskDraft)
+        XCTAssertEqual(snapshot.draftInsertionIndex, 2)
+        XCTAssertEqual(controller.testingVisibleRowCount(), 6)
+    }
+
+    func testDraftRunwayCapsAtTenVisibleRows() {
+        let store = seededStore(active: ["A", "B", "C", "D", "E", "F", "G"])
+        let controller = TodoViewController(store: store)
+        controller.testingLoadView()
+        controller.testingSelectTask(at: 6)
+
+        controller.submitRow()
+
+        XCTAssertEqual(controller.testingVisibleRowCount(), TodoStore.maxItems)
+    }
+
+    func testCollapsingFreshDraftRemovesExtraRunwayRow() {
+        let store = seededStore(active: ["A", "B"])
+        let controller = TodoViewController(store: store)
+        controller.testingLoadView()
+        controller.testingSelectTask(at: 1)
+
+        controller.submitRow()
+        XCTAssertEqual(controller.testingVisibleRowCount(), 6)
+
+        XCTAssertTrue(controller.moveUp())
+
+        let snapshot = controller.testingSnapshot()
+        XCTAssertEqual(snapshot.selected, .taskItem("B"))
+        XCTAssertEqual(controller.testingVisibleRowCount(), 5)
+    }
+
+    func testSubmitRowGrowsRealWindowFrameForStructuralDraftRunway() {
+        let store = seededStore(active: ["A", "B", "C"])
+        let controller = TodoViewController(store: store)
+        controller.testingLoadView()
+        let window = controller.testingAttachWindow(frame: NSRect(x: 0, y: 0, width: 400, height: 300))
+        controller.resetWindowSize()
+        controller.testingSelectTask(at: 2)
+
+        let initialHeight = window.frame.height
+        controller.submitRow()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.5))
+
+        XCTAssertEqual(controller.testingVisibleRowCount(), 7)
+        XCTAssertGreaterThan(window.frame.height, initialHeight + 20)
+    }
+
+    func testRepeatedReturnDrivenRowCreationKeepsGrowingRealWindowFrame() {
+        let store = seededStore(active: ["A", "B", "C"])
+        let controller = TodoViewController(store: store)
+        controller.testingLoadView()
+        let window = controller.testingAttachWindow(frame: NSRect(x: 0, y: 0, width: 400, height: 300))
+        controller.resetWindowSize()
+        controller.testingSelectTask(at: 2)
+
+        let initialHeight = window.frame.height
+
+        controller.submitRow()
+        let afterFirstReturn = window.frame.height
+
+        controller.testingTypeIntoCurrentEditor("asd")
+        controller.submitRow()
+        let afterSecondReturn = window.frame.height
+
+        controller.testingTypeIntoCurrentEditor("asd")
+        controller.submitRow()
+        let afterThirdReturn = window.frame.height
+
+        XCTAssertGreaterThan(afterFirstReturn, initialHeight + 20)
+        XCTAssertGreaterThan(afterSecondReturn, afterFirstReturn + 20)
+        XCTAssertGreaterThan(afterThirdReturn, afterSecondReturn + 20)
+    }
+
+    func testCollapsingFreshDraftShrinksRealWindowFrameImmediately() {
+        let store = seededStore(active: ["A", "B", "C"])
+        let controller = TodoViewController(store: store)
+        controller.testingLoadView()
+        let window = controller.testingAttachWindow(frame: NSRect(x: 0, y: 0, width: 400, height: 300))
+        controller.resetWindowSize()
+        controller.testingSelectTask(at: 2)
+
+        controller.submitRow()
+        let grownHeight = window.frame.height
+
+        XCTAssertTrue(controller.moveUp())
+
+        let collapsedHeight = window.frame.height
+        XCTAssertLessThan(collapsedHeight, grownHeight - 20)
     }
 
     private func seededStore(active items: [String], archived: [String] = []) -> TodoStore {

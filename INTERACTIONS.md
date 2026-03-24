@@ -27,9 +27,10 @@ When touching these paths, update the matching tests in `/Users/raffichilingarya
 - Archive restore stays on the archive tab. It must not switch tabs as part of the animation flow.
 - Archive restore is unavailable when the active task list is already at max capacity.
 
-## Archive Overflow Keyboard Scrolling Contract
+## Overflow Keyboard Scrolling Contract
 
 - In an overflowing archive list, keyboard navigation should keep about `1.0` row of context visible above and below the selected row whenever possible.
+- In an overflowing task list caused by intentional manual clipping, keyboard navigation should use that same immediate `1.0`-row context rule.
 - That keyboard-driven scroll reposition should be immediate/snappy, not animated.
 - When the selected archive row reaches the true top or bottom of the list, scrolling should clamp cleanly to that edge.
 
@@ -37,6 +38,11 @@ When touching these paths, update the matching tests in `/Users/raffichilingarya
 
 - Manual user window resizing becomes the new floor for live task editing.
 - Typing, selection changes, and row refreshes must not snap width or height back down while the user is working.
+- Structural growth actions that create more visible content may still grow the panel beyond that floor when needed to reveal the new rows.
+- Navigation alone must not trigger that growth.
+- While the active row is the task draft, the panel should preserve roughly three available rows below it until the 10-row cap is reached.
+- Return-created task drafts and the matching collapse back out of that empty draft should fit the task-list height explicitly, including the symmetric shrink when the fresh empty draft is dismissed with `Up Arrow` or `Shift-Tab`.
+- That structural task grow/shrink should happen immediately, not through a longer animated window resize that can lag behind rapid keyboard entry.
 - Dragging a resize handle below the minimum width or height should rubber-band the whole panel in the drag direction while the content stays at minimum size.
 - Releasing a rubber-banded resize should settle the panel into its true minimum-sized final frame with a short ease-out.
 - `cmd+0` resets the main panel to its default size and then snaps it to the nearest screen corner.
