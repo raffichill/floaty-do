@@ -271,7 +271,7 @@ final class HotkeyRecorderButton: PressScaleButton {
     }
 }
 
-private final class HotkeyCaptureView: NSView {
+class HotkeyCaptureView: NSView {
     var onPreviewTokens: (([String]) -> Void)?
     var onCapture: ((GlobalHotkey) -> Void)?
     var onCancel: (() -> Void)?
@@ -326,10 +326,19 @@ private final class HotkeyCaptureView: NSView {
     }
 }
 
-final class HotkeyCapturePopoverViewController: NSViewController {
-    var onCapture: ((GlobalHotkey) -> Void)?
-    var onCancel: (() -> Void)?
+private enum HotkeyCapturePopoverMetrics {
+    static let width: CGFloat = 244
+    static let bodyHeight: CGFloat = 118
+    static let nubWidth: CGFloat = 34
+    static let nubHeight: CGFloat = 14
+    static let cornerRadius: CGFloat = 14
+    static let shadowRadius: CGFloat = 18
+    static let shadowOpacity: Float = 0.16
+    static let shadowOffset = CGSize(width: 0, height: -2)
+    static let anchorSpacing: CGFloat = 4
+}
 
+final class HotkeyCapturePopoverView: HotkeyCaptureView {
     var backgroundColor: NSColor = .windowBackgroundColor {
         didSet { updateAppearance() }
     }
@@ -350,32 +359,34 @@ final class HotkeyCapturePopoverViewController: NSViewController {
         didSet { updateKeycapAppearance() }
     }
 
-    private let root = HotkeyCaptureView()
-    private let bubble = NSView()
+    private let chromeLayer = CAShapeLayer()
+    private let contentContainer = NSView()
     private let keycapsRow = NSStackView()
     private let statusLabel = NSTextField(labelWithString: "Recording…")
     private let hintLabel = NSTextField(labelWithString: "Press Esc to cancel")
     private let closeButton = NSButton()
 
-    private var previewTokens: [String] = []
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        translatesAutoresizingMaskIntoConstraints = false
+        widthAnchor.constraint(equalToConstant: HotkeyCapturePopoverMetrics.width).isActive = true
+        heightAnchor.constraint(
+            equalToConstant: HotkeyCapturePopoverMetrics.bodyHeight
+                + HotkeyCapturePopoverMetrics.nubHeight
+        ).isActive = true
 
-    override func loadView() {
-        root.wantsLayer = true
-        root.translatesAutoresizingMaskIntoConstraints = false
-        root.onPreviewTokens = { [weak self] tokens in
+        layer?.backgroundColor = NSColor.clear.cgColor
+        layer?.addSublayer(chromeLayer)
+        layer?.shadowColor = NSColor.black.cgColor
+        layer?.shadowOpacity = HotkeyCapturePopoverMetrics.shadowOpacity
+        layer?.shadowRadius = HotkeyCapturePopoverMetrics.shadowRadius
+        layer?.shadowOffset = HotkeyCapturePopoverMetrics.shadowOffset
+        onPreviewTokens = { [weak self] tokens in
             self?.setPreviewTokens(tokens)
         }
-        root.onCapture = { [weak self] hotkey in
-            self?.onCapture?(hotkey)
-        }
-        root.onCancel = { [weak self] in
-            self?.onCancel?()
-        }
 
-        bubble.wantsLayer = true
-        bubble.translatesAutoresizingMaskIntoConstraints = false
-        bubble.layer?.cornerRadius = 14
-        bubble.layer?.borderWidth = 1
+        contentContainer.translatesAutoresizingMaskIntoConstraints = false
 
         keycapsRow.orientation = .horizontal
         keycapsRow.alignment = .centerY
@@ -399,46 +410,129 @@ final class HotkeyCapturePopoverViewController: NSViewController {
         closeButton.target = self
         closeButton.action = #selector(closeTapped)
 
-        root.addSubview(bubble)
-        bubble.addSubview(closeButton)
-        bubble.addSubview(keycapsRow)
-        bubble.addSubview(statusLabel)
-        bubble.addSubview(hintLabel)
+        addSubview(contentContainer)
+        contentContainer.addSubview(closeButton)
+        contentContainer.addSubview(keycapsRow)
+        contentContainer.addSubview(statusLabel)
+        contentContainer.addSubview(hintLabel)
 
         NSLayoutConstraint.activate([
-            root.widthAnchor.constraint(equalToConstant: 244),
-            root.heightAnchor.constraint(equalToConstant: 118),
+            contentContainer.leadingAnchor.constraint(equalTo: leadingAnchor),
+            contentContainer.trailingAnchor.constraint(equalTo: trailingAnchor),
+            contentContainer.topAnchor.constraint(
+                equalTo: topAnchor, constant: HotkeyCapturePopoverMetrics.nubHeight),
+            contentContainer.bottomAnchor.constraint(equalTo: bottomAnchor),
 
-            bubble.leadingAnchor.constraint(equalTo: root.leadingAnchor),
-            bubble.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-            bubble.topAnchor.constraint(equalTo: root.topAnchor),
-            bubble.bottomAnchor.constraint(equalTo: root.bottomAnchor),
-
-            closeButton.topAnchor.constraint(equalTo: bubble.topAnchor, constant: 10),
-            closeButton.trailingAnchor.constraint(equalTo: bubble.trailingAnchor, constant: -10),
+            closeButton.topAnchor.constraint(equalTo: contentContainer.topAnchor, constant: 10),
+            closeButton.trailingAnchor.constraint(equalTo: contentContainer.trailingAnchor, constant: -10),
             closeButton.widthAnchor.constraint(equalToConstant: 16),
             closeButton.heightAnchor.constraint(equalToConstant: 16),
 
-            keycapsRow.centerXAnchor.constraint(equalTo: bubble.centerXAnchor),
-            keycapsRow.topAnchor.constraint(equalTo: bubble.topAnchor, constant: 24),
+            keycapsRow.centerXAnchor.constraint(equalTo: contentContainer.centerXAnchor),
+            keycapsRow.topAnchor.constraint(equalTo: contentContainer.topAnchor, constant: 24),
 
             statusLabel.topAnchor.constraint(equalTo: keycapsRow.bottomAnchor, constant: 12),
-            statusLabel.centerXAnchor.constraint(equalTo: bubble.centerXAnchor),
+            statusLabel.centerXAnchor.constraint(equalTo: contentContainer.centerXAnchor),
 
             hintLabel.topAnchor.constraint(equalTo: statusLabel.bottomAnchor, constant: 6),
-            hintLabel.centerXAnchor.constraint(equalTo: bubble.centerXAnchor),
+            hintLabel.centerXAnchor.constraint(equalTo: contentContainer.centerXAnchor),
         ])
 
-        view = root
         updateAppearance()
     }
 
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func layout() {
+        super.layout()
+        updateChromePath()
+    }
+
     func beginRecording(currentHotkey: GlobalHotkey) {
-        root.beginRecording(showing: currentHotkey.displayTokens)
+        super.beginRecording(showing: currentHotkey.displayTokens)
+    }
+
+    private func updateChromePath() {
+        let path = popoverPath(in: bounds)
+        chromeLayer.path = path
+        chromeLayer.frame = bounds
+        layer?.shadowPath = path
+    }
+
+    private func popoverPath(in bounds: CGRect) -> CGPath {
+        let radius = HotkeyCapturePopoverMetrics.cornerRadius
+        let nubWidth = HotkeyCapturePopoverMetrics.nubWidth
+        let nubHeight = HotkeyCapturePopoverMetrics.nubHeight
+        let nubShoulder: CGFloat = 8
+        let bodyTop = bounds.maxY - nubHeight
+        let centerX = bounds.midX
+        let left = bounds.minX
+        let right = bounds.maxX
+        let bottom = bounds.minY
+
+        let path = CGMutablePath()
+        path.move(to: CGPoint(x: left + radius, y: bottom))
+        path.addLine(to: CGPoint(x: right - radius, y: bottom))
+        path.addArc(
+            center: CGPoint(x: right - radius, y: bottom + radius),
+            radius: radius,
+            startAngle: -.pi / 2,
+            endAngle: 0,
+            clockwise: false
+        )
+        path.addLine(to: CGPoint(x: right, y: bodyTop - radius))
+        path.addArc(
+            center: CGPoint(x: right - radius, y: bodyTop - radius),
+            radius: radius,
+            startAngle: 0,
+            endAngle: .pi / 2,
+            clockwise: false
+        )
+        path.addLine(to: CGPoint(x: centerX + nubWidth / 2 + nubShoulder, y: bodyTop))
+        path.addCurve(
+            to: CGPoint(x: centerX + nubWidth / 2, y: bodyTop),
+            control1: CGPoint(x: centerX + nubWidth / 2 + 4, y: bodyTop),
+            control2: CGPoint(x: centerX + nubWidth / 2 + 2, y: bodyTop)
+        )
+        path.addCurve(
+            to: CGPoint(x: centerX, y: bounds.maxY),
+            control1: CGPoint(x: centerX + nubWidth / 2 - 5, y: bodyTop),
+            control2: CGPoint(x: centerX + 6, y: bounds.maxY)
+        )
+        path.addCurve(
+            to: CGPoint(x: centerX - nubWidth / 2, y: bodyTop),
+            control1: CGPoint(x: centerX - 6, y: bounds.maxY),
+            control2: CGPoint(x: centerX - nubWidth / 2 + 5, y: bodyTop)
+        )
+        path.addCurve(
+            to: CGPoint(x: centerX - nubWidth / 2 - nubShoulder, y: bodyTop),
+            control1: CGPoint(x: centerX - nubWidth / 2 - 2, y: bodyTop),
+            control2: CGPoint(x: centerX - nubWidth / 2 - 4, y: bodyTop)
+        )
+        path.addLine(to: CGPoint(x: left + radius, y: bodyTop))
+        path.addArc(
+            center: CGPoint(x: left + radius, y: bodyTop - radius),
+            radius: radius,
+            startAngle: .pi / 2,
+            endAngle: .pi,
+            clockwise: false
+        )
+        path.addLine(to: CGPoint(x: left, y: bottom + radius))
+        path.addArc(
+            center: CGPoint(x: left + radius, y: bottom + radius),
+            radius: radius,
+            startAngle: .pi,
+            endAngle: 3 * .pi / 2,
+            clockwise: false
+        )
+        path.closeSubpath()
+        return path
     }
 
     private func setPreviewTokens(_ tokens: [String]) {
-        previewTokens = tokens
         keycapsRow.arrangedSubviews.forEach {
             keycapsRow.removeArrangedSubview($0)
             $0.removeFromSuperview()
@@ -473,8 +567,9 @@ final class HotkeyCapturePopoverViewController: NSViewController {
     }
 
     private func updateAppearance() {
-        bubble.layer?.backgroundColor = backgroundColor.cgColor
-        bubble.layer?.borderColor = borderColor.cgColor
+        chromeLayer.fillColor = backgroundColor.cgColor
+        chromeLayer.strokeColor = borderColor.cgColor
+        chromeLayer.lineWidth = 1
         statusLabel.textColor = primaryTextColor
         hintLabel.textColor = secondaryTextColor
         closeButton.contentTintColor = secondaryTextColor
@@ -490,5 +585,38 @@ final class HotkeyCapturePopoverViewController: NSViewController {
 
     @objc private func closeTapped() {
         onCancel?()
+    }
+}
+
+final class HotkeyCaptureOverlayView: NSView {
+    let popoverView = HotkeyCapturePopoverView()
+    var onOutsideClick: (() -> Void)?
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        translatesAutoresizingMaskIntoConstraints = false
+        layer?.backgroundColor = NSColor.clear.cgColor
+
+        addSubview(popoverView)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        let hitView = super.hitTest(point)
+        return hitView ?? self
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        guard !popoverView.frame.contains(point) else {
+            super.mouseDown(with: event)
+            return
+        }
+        onOutsideClick?()
     }
 }

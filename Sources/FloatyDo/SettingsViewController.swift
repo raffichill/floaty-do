@@ -1,6 +1,6 @@
 import AppKit
 
-final class SettingsViewController: NSViewController, NSPopoverDelegate {
+final class SettingsViewController: NSViewController {
     private enum Metrics {
         static let outerPadding = NSEdgeInsets(top: 20, left: 34, bottom: 56, right: 34)
         static let titleTopInset: CGFloat = 10
@@ -232,7 +232,7 @@ final class SettingsViewController: NSViewController, NSPopoverDelegate {
 
     private var currentAppliedIconTheme: BuiltInTheme
     private var isApplyingPrimaryIconChange = false
-    private var hotkeyCapturePopover: NSPopover?
+    private var hotkeyCaptureOverlay: HotkeyCaptureOverlayView?
 
     private var themeableButtons: [NSButton] {
         [
@@ -341,7 +341,7 @@ final class SettingsViewController: NSViewController, NSPopoverDelegate {
     }
 
     var isHotkeyCaptureActive: Bool {
-        hotkeyCapturePopover?.isShown == true
+        hotkeyCaptureOverlay != nil
     }
 
     func showAppearanceTab(animated: Bool = false) {
@@ -452,7 +452,7 @@ final class SettingsViewController: NSViewController, NSPopoverDelegate {
     private func selectTab(_ tab: SettingsTab, animated explicitAnimated: Bool? = nil) {
         let outgoingTab = displayedTab ?? tab
         selectedTab = tab
-        if hotkeyCapturePopover?.isShown == true {
+        if hotkeyCaptureOverlay != nil {
             dismissHotkeyCapturePopover()
         }
         if tab != .about, hoveredAboutLink != nil {
@@ -1354,44 +1354,49 @@ final class SettingsViewController: NSViewController, NSPopoverDelegate {
     }
 
     @objc private func toggleHotkeyCapturePopover(_ sender: NSButton) {
-        if hotkeyCapturePopover?.isShown == true {
+        if hotkeyCaptureOverlay != nil {
             dismissHotkeyCapturePopover()
             return
         }
 
-        let contentController = HotkeyCapturePopoverViewController()
-        contentController.backgroundColor = preferences.panelBackgroundColor.withAlphaComponent(0.98)
-        contentController.borderColor = preferences.subtleStrokeColor
-        contentController.primaryTextColor = preferences.primaryTextColor
-        contentController.secondaryTextColor = preferences.secondaryTextColor
-        contentController.keycapFillColor = preferences.activeFillColor
-        contentController.onCapture = { [weak self] hotkey in
+        let overlay = HotkeyCaptureOverlayView()
+        overlay.onOutsideClick = { [weak self] in
+            self?.dismissHotkeyCapturePopover()
+        }
+        applyHotkeyCaptureAppearance(to: overlay.popoverView)
+        overlay.popoverView.onCapture = { [weak self] hotkey in
             self?.dismissHotkeyCapturePopover()
             self?.commitPreferenceChange { updated in
                 updated.globalHotkey = hotkey
             }
         }
-        contentController.onCancel = { [weak self] in
+        overlay.popoverView.onCancel = { [weak self] in
             self?.dismissHotkeyCapturePopover()
         }
 
-        let popover = NSPopover()
-        popover.animates = true
-        popover.behavior = .transient
-        popover.contentViewController = contentController
-        popover.delegate = self
-        hotkeyCapturePopover = popover
-        popover.show(relativeTo: sender.bounds, of: sender, preferredEdge: .maxY)
-        contentController.beginRecording(currentHotkey: preferences.globalHotkey)
+        view.addSubview(overlay)
+        NSLayoutConstraint.activate([
+            overlay.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            overlay.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            overlay.topAnchor.constraint(equalTo: view.topAnchor),
+            overlay.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+
+            overlay.popoverView.centerXAnchor.constraint(equalTo: hotkeyRecorder.centerXAnchor),
+            overlay.popoverView.topAnchor.constraint(
+                equalTo: hotkeyRecorder.bottomAnchor,
+                constant: 4
+            ),
+        ])
+
+        hotkeyCaptureOverlay = overlay
+        view.layoutSubtreeIfNeeded()
+        overlay.popoverView.beginRecording(currentHotkey: preferences.globalHotkey)
     }
 
     private func dismissHotkeyCapturePopover() {
-        hotkeyCapturePopover?.performClose(nil)
-        hotkeyCapturePopover = nil
-    }
-
-    func popoverDidClose(_ notification: Notification) {
-        hotkeyCapturePopover = nil
+        hotkeyCaptureOverlay?.removeFromSuperview()
+        hotkeyCaptureOverlay = nil
+        view.window?.makeFirstResponder(view)
     }
 
     @objc private func fontChanged(_ sender: NSPopUpButton) {
@@ -1547,6 +1552,9 @@ final class SettingsViewController: NSViewController, NSPopoverDelegate {
         hotkeyRecorder.textColor = preferences.primaryTextColor
         hotkeyRecorder.borderColor = preferences.subtleStrokeColor
         hotkeyRecorder.hoverBorderColor = preferences.secondaryTextColor.withAlphaComponent(0.42)
+        if let hotkeyCaptureOverlay {
+            applyHotkeyCaptureAppearance(to: hotkeyCaptureOverlay.popoverView)
+        }
         themeableButtons.forEach { applyThemeStyle(to: $0) }
         applyThemeStyle(to: fontPopup)
         updateAboutTextView()
@@ -1613,6 +1621,14 @@ final class SettingsViewController: NSViewController, NSPopoverDelegate {
 
         let selectedTitle = popup.titleOfSelectedItem ?? ""
         popup.attributedTitle = NSAttributedString(string: selectedTitle, attributes: attributes)
+    }
+
+    private func applyHotkeyCaptureAppearance(to popoverView: HotkeyCapturePopoverView) {
+        popoverView.backgroundColor = preferences.panelBackgroundColor.withAlphaComponent(0.98)
+        popoverView.borderColor = preferences.subtleStrokeColor
+        popoverView.primaryTextColor = preferences.primaryTextColor
+        popoverView.secondaryTextColor = preferences.secondaryTextColor
+        popoverView.keycapFillColor = preferences.activeFillColor
     }
 
     private func openAboutURL(_ urlString: String) {
