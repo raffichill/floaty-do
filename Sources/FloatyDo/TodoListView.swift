@@ -1004,7 +1004,7 @@ final class TodoRowView: NSView {
         layer.removeAnimation(forKey: "boundaryShake")
 
         let shake = CAKeyframeAnimation(keyPath: "transform.translation.x")
-        shake.values = [0.0, -5.0, 4.0, -2.5, 1.5, 0.0]
+        shake.values = [0.0, -2.5, 2.0, -1.25, 0.75, 0.0]
         shake.keyTimes = [0.0, 0.18, 0.42, 0.68, 0.86, 1.0]
         shake.duration = 0.24
         shake.isAdditive = true

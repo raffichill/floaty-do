@@ -11,7 +11,7 @@ When touching these paths, update the matching tests in `/Users/raffichilingarya
 - `Return` on the draft commits the draft as a task, then creates a new draft immediately below the inserted task.
 - `Up Arrow` from the first todo item moves into an empty draft above the first item. It must not wrap to the bottom.
 - `Down Arrow` from the last todo item moves into the default empty draft at the bottom of the list.
-- `Down Arrow` / `Tab` from the default empty draft at the bottom of the list must keep focus on that draft and provide boundary feedback rather than collapsing the draft upward.
+- `Down Arrow` / `Tab` / `Return` from the default empty draft at the bottom of the list must keep focus on that draft and provide boundary feedback rather than collapsing the draft upward.
 - A draft created above or between tasks must keep its explicit insertion position across ordinary redraws and selection updates.
 - An empty non-default draft may collapse back into the list when the user navigates away with the matching directional behavior.
 

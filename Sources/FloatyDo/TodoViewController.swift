@@ -814,9 +814,8 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         return true
     }
 
-    private func handleTerminalBottomDraftBoundary(step: Int) -> Bool {
+    private func handleTerminalBottomDraftBoundary() -> Bool {
         guard currentTab == .tasks,
-              step > 0,
               selectedRowID == .taskDraft,
               taskDraft.isEmpty,
               taskDraft.insertionIndex == defaultDraftInsertionIndex else {
@@ -824,9 +823,9 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         }
 
         // The default bottom draft is the terminal input state for the task
-        // list. Down-arrow / Tab should not collapse it upward or move
-        // selection away; they should simply indicate that the user is already
-        // at the end and should type into this row.
+        // list. Down-arrow / Tab / Return should not collapse it upward or
+        // move selection away; they should simply indicate that the user is
+        // already at the end and should type into this row.
         listView.indicateBoundaryShake(for: .taskDraft)
         syncVisibleEditorState()
         return true
@@ -2124,7 +2123,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         if collapsedRangeSelection {
             clearRangeSelectionState()
         }
-        if handleTerminalBottomDraftBoundary(step: 1) {
+        if handleTerminalBottomDraftBoundary() {
             return true
         }
         if currentTab == .tasks, collapseSelectedDraftForNavigation(step: 1) {
@@ -2178,6 +2177,9 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
                 activateDraft(at: itemIndex + 1, heightResizeMode: .fitTaskStructuralContent)
 
             case .taskDraft:
+                if handleTerminalBottomDraftBoundary() {
+                    return
+                }
                 if let insertedItem = promoteDraftToItem(selectInsertedItem: true),
                    let insertedIndex = store.items.firstIndex(where: { $0.id == insertedItem.id }),
                    canShowDraftRow {
