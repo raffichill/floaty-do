@@ -89,7 +89,7 @@ final class TodoViewControllerInteractionTests: XCTestCase {
             return XCTFail("Expected a selected archive row frame")
         }
 
-        let buffer = CGFloat(store.preferences.rowHeight) * 1.5
+        let buffer = CGFloat(store.preferences.rowHeight) * 1.0
         let originY = controller.testingListScrollOriginY()
         let visibleHeight = controller.testingListViewportHeight()
 

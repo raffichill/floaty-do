@@ -29,7 +29,7 @@ When touching these paths, update the matching tests in `/Users/raffichilingarya
 
 ## Archive Overflow Keyboard Scrolling Contract
 
-- In an overflowing archive list, keyboard navigation should keep about `1.5` rows of context visible above and below the selected row whenever possible.
+- In an overflowing archive list, keyboard navigation should keep about `1.0` row of context visible above and below the selected row whenever possible.
 - That keyboard-driven scroll reposition should be immediate/snappy, not animated.
 - When the selected archive row reaches the true top or bottom of the list, scrolling should clamp cleanly to that edge.
 

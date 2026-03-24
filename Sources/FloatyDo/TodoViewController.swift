@@ -1051,7 +1051,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         // visibility scrolling. This scroll reposition is intentionally
         // immediate, not animated.
         currentTab == .archive
-            ? .keyboardNavigation(edgeBufferRows: 1.5)
+            ? .keyboardNavigation(edgeBufferRows: 1.0)
             : .ensureVisible
     }
 
