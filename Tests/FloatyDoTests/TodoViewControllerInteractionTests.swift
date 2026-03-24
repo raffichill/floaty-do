@@ -323,6 +323,27 @@ final class TodoViewControllerInteractionTests: XCTestCase {
         XCTAssertLessThan(collapsedHeight, grownHeight - 20)
     }
 
+    func testCollapsingDraftCreatedByDeletingTaskTextShrinksRealWindowFrame() {
+        let store = seededStore(active: ["A", "B", "C", "D", "E", "F"])
+        let controller = TodoViewController(store: store)
+        controller.testingLoadView()
+        let window = controller.testingAttachWindow(frame: NSRect(x: 0, y: 0, width: 400, height: 300))
+        controller.resetWindowSize()
+        controller.testingSelectTask(at: 5)
+
+        let initialHeight = window.frame.height
+        controller.testingTypeIntoCurrentEditor("")
+        let convertedHeight = window.frame.height
+
+        XCTAssertEqual(controller.testingSnapshot().selected, .taskDraft)
+        XCTAssertEqual(convertedHeight, initialHeight, accuracy: 0.5)
+
+        XCTAssertTrue(controller.moveUp())
+
+        let collapsedHeight = window.frame.height
+        XCTAssertLessThan(collapsedHeight, convertedHeight - 20)
+    }
+
     func testDeleteSelectedTaskShrinksRealWindowFrame() {
         let store = seededStore(active: ["A", "B", "C", "D", "E", "F"])
         let controller = TodoViewController(store: store)

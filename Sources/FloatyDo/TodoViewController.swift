@@ -867,10 +867,13 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
     private func convertItemToDraft(_ item: TodoItem, newText: String) {
         guard let itemIndex = store.items.firstIndex(where: { $0.id == item.id }) else { return }
         store.deleteItem(id: item.id)
-        setDraftPosition(itemIndex, text: newText, isStructuralRunway: false)
+        // Editing a task down to empty semantically converts that row into a
+        // structural draft. Backing out with Up Arrow / Shift-Tab should shrink
+        // the panel the same way as a Return-created runway draft.
+        setDraftPosition(itemIndex, text: newText, isStructuralRunway: true)
         selectedRowID = .taskDraft
         clearRangeSelectionState()
-        refreshRows(placeCaretAtEnd: false)
+        refreshRows(placeCaretAtEnd: false, heightResizeMode: .fitTaskStructuralContent)
     }
 
     private func targetVisibleRowCount(for tab: Tab? = nil) -> Int {
