@@ -202,6 +202,7 @@ public final class TodoStore: ObservableObject {
             LayoutMetrics.maximumCornerRadius(forRowHeight: clampedRowHeight)
         )
         let blurEnabled = newPreferences.blurEnabled
+        let globalHotkey = newPreferences.globalHotkey.normalized
         return AppPreferences(
             rowHeight: clampedRowHeight,
             panelWidth: clampedPanelWidth,
@@ -213,7 +214,8 @@ public final class TodoStore: ObservableObject {
             fontSize: LayoutMetrics.nearestFontSizeOption(to: newPreferences.fontSize),
             cornerRadius: clampedCornerRadius,
             blurEnabled: blurEnabled,
-            windowOpacity: min(max(newPreferences.windowOpacity, LayoutMetrics.minWindowOpacity), 1.0)
+            windowOpacity: min(max(newPreferences.windowOpacity, LayoutMetrics.minWindowOpacity), 1.0),
+            globalHotkey: globalHotkey
         )
     }
 

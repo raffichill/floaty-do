@@ -1,4 +1,19 @@
 import AppKit
+import Combine
+import Carbon.HIToolbox
+
+private let globalHotkeySignature: OSType = 0x4644484B  // "FDHK"
+
+private func handleGlobalHotkeyEvent(
+    _ nextHandler: EventHandlerCallRef?,
+    _ event: EventRef?,
+    _ userData: UnsafeMutableRawPointer?
+) -> OSStatus {
+    guard let userData else { return noErr }
+    let delegate = Unmanaged<AppDelegate>.fromOpaque(userData).takeUnretainedValue()
+    delegate.handleRegisteredGlobalHotkey()
+    return noErr
+}
 
 struct PanelResetPlacement {
     static func nearestCornerOrigin(
@@ -66,6 +81,10 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var liveResizeSession: LiveResizeSession?
     private var liveResizeTrackingTimer: Timer?
     private var isApplyingRubberBandFrame = false
+    private var preferencesObserver: AnyCancellable?
+    private var globalHotKeyRef: EventHotKeyRef?
+    private var globalHotKeyHandlerRef: EventHandlerRef?
+    private var registeredGlobalHotkey: GlobalHotkey?
 
     public func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
@@ -95,6 +114,12 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
         }
 
+        installGlobalHotkeyHandlerIfNeeded()
+        if case .failure = registerGlobalHotkey(store.preferences.globalHotkey) {
+            _ = registerGlobalHotkey(.defaultToggle)
+        }
+        observePreferences()
+
         // App-level shortcuts: cmd+1/cmd+2 switch main tabs unless settings is
         // visible, in which case cmd+1/cmd+2/cmd+3 switch settings tabs.
         // cmd+3 opens settings on Theme unless settings is already visible,
@@ -105,6 +130,9 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         // to screen edges/corners.
         appEventMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self else { return event }
+            if self.todoVC.isSettingsHotkeyCaptureActive {
+                return event
+            }
             let mods = event.modifierFlags.intersection([.command, .option, .control, .shift])
             let characters = event.charactersIgnoringModifiers?.lowercased()
 
@@ -213,6 +241,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     public func applicationWillTerminate(_ notification: Notification) {
+        unregisterGlobalHotkey()
         store.flushPendingSaves()
     }
 
@@ -331,12 +360,15 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             statusItem.button?.performClick(nil)
             statusItem.menu = nil
         } else {
-            if panel.isVisible {
-                panel.orderOut(nil)
-            } else {
-                showPanel(activate: true)
-            }
+            togglePanelVisibility()
         }
+    }
+
+    fileprivate func handleRegisteredGlobalHotkey() {
+        if todoVC.isSettingsHotkeyCaptureActive {
+            return
+        }
+        togglePanelVisibility()
     }
 
     private func showPanel(activate: Bool) {
@@ -348,6 +380,105 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
         panel.makeKeyAndOrderFront(nil)
         panel.orderFront(nil)
+    }
+
+    private func togglePanelVisibility() {
+        if panel.isVisible {
+            _ = todoVC.closeSettingsWindowIfVisible()
+            panel.orderOut(nil)
+        } else {
+            showPanel(activate: true)
+        }
+    }
+
+    private func observePreferences() {
+        preferencesObserver = store.$preferences
+            .removeDuplicates()
+            .sink { [weak self] preferences in
+                _ = self?.registerGlobalHotkey(preferences.globalHotkey)
+            }
+    }
+
+    private func installGlobalHotkeyHandlerIfNeeded() {
+        guard globalHotKeyHandlerRef == nil else { return }
+        var eventType = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
+        InstallEventHandler(
+            GetApplicationEventTarget(),
+            handleGlobalHotkeyEvent,
+            1,
+            &eventType,
+            UnsafeMutableRawPointer(Unmanaged.passUnretained(self).toOpaque()),
+            &globalHotKeyHandlerRef
+        )
+    }
+
+    func validateGlobalHotkey(_ hotkey: GlobalHotkey) -> Result<Void, GlobalHotkeyRegistrationError> {
+        let normalized = hotkey.normalized
+        if registeredGlobalHotkey == normalized {
+            return .success(())
+        }
+        return probeGlobalHotkeyRegistration(normalized, hotKeyID: temporaryGlobalHotkeyID())
+    }
+
+    @discardableResult
+    private func registerGlobalHotkey(_ hotkey: GlobalHotkey) -> Result<Void, GlobalHotkeyRegistrationError> {
+        let normalized = hotkey.normalized
+        guard registeredGlobalHotkey != normalized else { return .success(()) }
+        let hotKeyID = EventHotKeyID(signature: globalHotkeySignature, id: 1)
+        let result = probeGlobalHotkeyRegistration(normalized, hotKeyID: hotKeyID)
+        guard case .success = result else { return result }
+
+        var newRef: EventHotKeyRef?
+        let status = RegisterEventHotKey(
+            UInt32(normalized.keyCode),
+            normalized.carbonModifiers,
+            hotKeyID,
+            GetApplicationEventTarget(),
+            0,
+            &newRef
+        )
+
+        guard status == noErr, let newRef else {
+            return .failure(.reservedOrUnavailable)
+        }
+        if let existing = globalHotKeyRef {
+            UnregisterEventHotKey(existing)
+        }
+        globalHotKeyRef = newRef
+        registeredGlobalHotkey = normalized
+        return .success(())
+    }
+
+    private func unregisterGlobalHotkey() {
+        if let existing = globalHotKeyRef {
+            UnregisterEventHotKey(existing)
+            globalHotKeyRef = nil
+        }
+        registeredGlobalHotkey = nil
+    }
+
+    private func probeGlobalHotkeyRegistration(
+        _ hotkey: GlobalHotkey,
+        hotKeyID: EventHotKeyID
+    ) -> Result<Void, GlobalHotkeyRegistrationError> {
+        var probeRef: EventHotKeyRef?
+        let status = RegisterEventHotKey(
+            UInt32(hotkey.keyCode),
+            hotkey.carbonModifiers,
+            hotKeyID,
+            GetApplicationEventTarget(),
+            0,
+            &probeRef
+        )
+        guard status == noErr, let probeRef else {
+            return .failure(.reservedOrUnavailable)
+        }
+        UnregisterEventHotKey(probeRef)
+        return .success(())
+    }
+
+    private func temporaryGlobalHotkeyID() -> EventHotKeyID {
+        EventHotKeyID(signature: globalHotkeySignature, id: 2)
     }
 
     private func syncLiveApplicationIcon() {

@@ -509,7 +509,14 @@ final class TodoStoreTests: XCTestCase {
             fontStyle: .rounded,
             fontSize: 16,
             cornerRadius: 18,
-            blurEnabled: false
+            blurEnabled: false,
+            globalHotkey: GlobalHotkey(
+                keyCode: 18,
+                command: true,
+                option: false,
+                control: false,
+                shift: true
+            )
         )
         store1.updatePreferences(updatedPreferences)
 
@@ -589,6 +596,7 @@ final class TodoStoreTests: XCTestCase {
         XCTAssertEqual(store.preferences.cornerRadius, 10.0)
         XCTAssertTrue(store.preferences.blurEnabled)
         XCTAssertEqual(store.preferences.windowOpacity, 1.0)
+        XCTAssertEqual(store.preferences.globalHotkey, .defaultToggle)
     }
 
     func testRestoreStateReplacesItemsArchiveAndPreferences() {

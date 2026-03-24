@@ -97,6 +97,7 @@ public struct AppPreferences: Codable, Equatable {
     public var cornerRadius: Double
     public var blurEnabled: Bool
     public var windowOpacity: Double
+    public var globalHotkey: GlobalHotkey
 
     private enum CodingKeys: String, CodingKey {
         case rowHeight
@@ -111,6 +112,7 @@ public struct AppPreferences: Codable, Equatable {
         case cornerRadius
         case blurEnabled
         case windowOpacity
+        case globalHotkey
     }
 
     public static let `default` = AppPreferences(
@@ -124,7 +126,8 @@ public struct AppPreferences: Codable, Equatable {
         fontSize: LayoutMetrics.defaultFontSize,
         cornerRadius: 10,
         blurEnabled: true,
-        windowOpacity: 1.0
+        windowOpacity: 1.0,
+        globalHotkey: .defaultToggle
     )
 
     public init(
@@ -138,7 +141,8 @@ public struct AppPreferences: Codable, Equatable {
         fontSize: Double = 13,
         cornerRadius: Double = 10,
         blurEnabled: Bool = true,
-        windowOpacity: Double = 1.0
+        windowOpacity: Double = 1.0,
+        globalHotkey: GlobalHotkey = .defaultToggle
     ) {
         self.rowHeight = rowHeight
         self.panelWidth = panelWidth
@@ -151,6 +155,7 @@ public struct AppPreferences: Codable, Equatable {
         self.cornerRadius = cornerRadius
         self.blurEnabled = blurEnabled
         self.windowOpacity = windowOpacity
+        self.globalHotkey = globalHotkey
     }
 
     public init(from decoder: Decoder) throws {
@@ -174,6 +179,7 @@ public struct AppPreferences: Codable, Equatable {
         cornerRadius = try container.decodeIfPresent(Double.self, forKey: .cornerRadius) ?? fallback.cornerRadius
         blurEnabled = try container.decodeIfPresent(Bool.self, forKey: .blurEnabled) ?? fallback.blurEnabled
         windowOpacity = try container.decodeIfPresent(Double.self, forKey: .windowOpacity) ?? fallback.windowOpacity
+        globalHotkey = (try container.decodeIfPresent(GlobalHotkey.self, forKey: .globalHotkey) ?? fallback.globalHotkey).normalized
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -189,6 +195,7 @@ public struct AppPreferences: Codable, Equatable {
         try container.encode(cornerRadius, forKey: .cornerRadius)
         try container.encode(blurEnabled, forKey: .blurEnabled)
         try container.encode(windowOpacity, forKey: .windowOpacity)
+        try container.encode(globalHotkey.normalized, forKey: .globalHotkey)
     }
 
     var motion: MotionProfile { animationPreset.motion }
