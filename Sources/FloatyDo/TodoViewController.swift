@@ -141,7 +141,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         archiveTabButton.onHoverChange = { [weak self] _ in
             self?.updateTabAppearance()
         }
-        settingsButton = makeHeaderButton(symbolName: "paintpalette", action: #selector(toggleSettings(_:)))
+        settingsButton = makeHeaderButton(symbolName: "gearshape", action: #selector(toggleSettings(_:)))
         settingsButton.onHoverChange = { [weak self] _ in
             self?.updateTabAppearance()
         }

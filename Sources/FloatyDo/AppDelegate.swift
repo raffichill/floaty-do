@@ -84,7 +84,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         // Menu bar item
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         if let button = statusItem.button {
-            if let image = NSImage(systemSymbolName: "checklist", accessibilityDescription: "FloatyDo") {
+            if let image = NSImage(systemSymbolName: "checkmark.app.fill", accessibilityDescription: "FloatyDo") {
                 image.isTemplate = true
                 button.image = image
             } else {
