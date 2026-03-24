@@ -1045,6 +1045,16 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         syncSelectionUI(placeCaretAtEnd: placeCaretAtEnd)
     }
 
+    private var keyboardSelectionScrollBehavior: TodoListView.ScrollBehavior {
+        // Overflowing archive keyboard navigation should keep context above and
+        // below the selected row instead of using generic edge-triggered
+        // visibility scrolling. This scroll reposition is intentionally
+        // immediate, not animated.
+        currentTab == .archive
+            ? .keyboardNavigation(edgeBufferRows: 1.5)
+            : .ensureVisible
+    }
+
     private func batchSelectableRowIDs(in models: [TodoRowModel]? = nil) -> [TodoRowID] {
         let source = models ?? rowModels
         return source.compactMap { model in
@@ -1122,7 +1132,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         let lowerBound = min(anchorIndex, nextIndex)
         let upperBound = max(anchorIndex, nextIndex)
         selectedRowIDs = Set(orderedBatchRows[lowerBound...upperBound])
-        syncSelectionUI(placeCaretAtEnd: false)
+        syncSelectionUI(placeCaretAtEnd: false, scrollBehavior: keyboardSelectionScrollBehavior)
     }
 
     private func extendSelection(to destination: BoundaryDestination) {
@@ -1147,7 +1157,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         let lowerBound = min(anchorIndex, targetIndex)
         let upperBound = max(anchorIndex, targetIndex)
         selectedRowIDs = Set(orderedBatchRows[lowerBound...upperBound])
-        syncSelectionUI(placeCaretAtEnd: false)
+        syncSelectionUI(placeCaretAtEnd: false, scrollBehavior: keyboardSelectionScrollBehavior)
     }
 
     private func extendSelection(to rowID: TodoRowID) {
@@ -1167,7 +1177,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         }
 
         guard targetIndex != anchorIndex || isRangeSelectionActive else {
-            syncSelectionUI(placeCaretAtEnd: false)
+            syncSelectionUI(placeCaretAtEnd: false, scrollBehavior: keyboardSelectionScrollBehavior)
             return
         }
 
@@ -1236,26 +1246,33 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         guard !navigableRows.isEmpty else { return }
         let targetRowID = destination == .top ? navigableRows.first : navigableRows.last
         if let targetRowID {
-            activateRow(targetRowID, placeCaretAtEnd: true)
+            activateRow(targetRowID, placeCaretAtEnd: true, scrollBehavior: keyboardSelectionScrollBehavior)
         }
     }
 
-    private func activateRow(_ rowID: TodoRowID, placeCaretAtEnd: Bool = true) {
+    private func activateRow(
+        _ rowID: TodoRowID,
+        placeCaretAtEnd: Bool = true,
+        scrollBehavior: TodoListView.ScrollBehavior = .ensureVisible
+    ) {
         guard rowModels.contains(where: { $0.id == rowID && $0.isSelectable }) else { return }
         cancelDeferredEditorActivation()
         clearRangeSelectionState()
         selectedRowID = rowID
-        syncSelectionUI(placeCaretAtEnd: placeCaretAtEnd)
+        syncSelectionUI(placeCaretAtEnd: placeCaretAtEnd, scrollBehavior: scrollBehavior)
     }
 
-    private func syncSelectionUI(placeCaretAtEnd: Bool) {
+    private func syncSelectionUI(
+        placeCaretAtEnd: Bool,
+        scrollBehavior: TodoListView.ScrollBehavior = .ensureVisible
+    ) {
         listView.updateInteractionState(
             selectedRowID: selectedRowID,
             selectedRowIDs: selectedRowIDs,
             editingRowID: currentEditingRowID
         )
         listView.layoutSubtreeIfNeeded()
-        listView.scrollRowToVisible(selectedRowID)
+        listView.scrollRowToVisible(selectedRowID, behavior: scrollBehavior)
         attachEditorIfNeeded(placeCaretAtEnd: placeCaretAtEnd)
     }
 
@@ -1955,18 +1972,18 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         let navigationRows = navigationSelectableRowIDs()
         guard !navigationRows.isEmpty else {
             if collapsedRangeSelection {
-                syncSelectionUI(placeCaretAtEnd: true)
+                syncSelectionUI(placeCaretAtEnd: true, scrollBehavior: keyboardSelectionScrollBehavior)
             }
             return false
         }
 
         if currentTab == .tasks, selectedRowID == .taskDraft, draftIsAtDefaultPosition {
             if let targetRowID = navigationRows.last {
-                activateRow(targetRowID, placeCaretAtEnd: true)
+                activateRow(targetRowID, placeCaretAtEnd: true, scrollBehavior: keyboardSelectionScrollBehavior)
                 return true
             }
             if collapsedRangeSelection {
-                syncSelectionUI(placeCaretAtEnd: true)
+                syncSelectionUI(placeCaretAtEnd: true, scrollBehavior: keyboardSelectionScrollBehavior)
             }
             return false
         }
@@ -1975,11 +1992,11 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
               let currentIndex = navigationRows.firstIndex(of: selectedRowID),
               currentIndex > 0 else {
             if collapsedRangeSelection {
-                syncSelectionUI(placeCaretAtEnd: true)
+                syncSelectionUI(placeCaretAtEnd: true, scrollBehavior: keyboardSelectionScrollBehavior)
             }
             return false
         }
-        activateRow(navigationRows[currentIndex - 1], placeCaretAtEnd: true)
+        activateRow(navigationRows[currentIndex - 1], placeCaretAtEnd: true, scrollBehavior: keyboardSelectionScrollBehavior)
         return true
     }
 
@@ -2006,7 +2023,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         let navigationRows = navigationSelectableRowIDs()
         guard !navigationRows.isEmpty else {
             if collapsedRangeSelection {
-                syncSelectionUI(placeCaretAtEnd: true)
+                syncSelectionUI(placeCaretAtEnd: true, scrollBehavior: keyboardSelectionScrollBehavior)
             }
             return false
         }
@@ -2014,11 +2031,11 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
               let currentIndex = navigationRows.firstIndex(of: selectedRowID),
               currentIndex < navigationRows.count - 1 else {
             if collapsedRangeSelection {
-                syncSelectionUI(placeCaretAtEnd: true)
+                syncSelectionUI(placeCaretAtEnd: true, scrollBehavior: keyboardSelectionScrollBehavior)
             }
             return false
         }
-        activateRow(navigationRows[currentIndex + 1], placeCaretAtEnd: true)
+        activateRow(navigationRows[currentIndex + 1], placeCaretAtEnd: true, scrollBehavior: keyboardSelectionScrollBehavior)
         return true
     }
 
@@ -2276,6 +2293,13 @@ extension TodoViewController {
     }
 
     @MainActor
+    func testingSetViewSize(_ size: NSSize) {
+        view.frame = NSRect(origin: .zero, size: size)
+        view.layoutSubtreeIfNeeded()
+        listView.layoutSubtreeIfNeeded()
+    }
+
+    @MainActor
     func testingSelectTask(at index: Int) {
         precondition(store.items.indices.contains(index))
         selectedRowID = .taskItem(store.items[index].id)
@@ -2310,6 +2334,27 @@ extension TodoViewController {
     @MainActor
     func testingResolvedTargetWindowSize(fullWidth: CGFloat, fullHeight: CGFloat, minSize: NSSize) -> NSSize {
         resolvedTargetWindowSize(fullWidth: fullWidth, fullHeight: fullHeight, minSize: minSize)
+    }
+
+    @MainActor
+    func testingListScrollOriginY() -> CGFloat {
+        listView.enclosingScrollView?.contentView.bounds.origin.y ?? 0
+    }
+
+    @MainActor
+    func testingListViewportHeight() -> CGFloat {
+        listView.enclosingScrollView?.contentView.bounds.height ?? 0
+    }
+
+    @MainActor
+    func testingListDocumentHeight() -> CGFloat {
+        listView.bounds.height
+    }
+
+    @MainActor
+    func testingFrameForSelectedRow() -> CGRect? {
+        guard let selectedRowID else { return nil }
+        return listView.testingFrame(for: selectedRowID)
     }
 
     @MainActor

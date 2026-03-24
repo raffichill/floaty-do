@@ -27,6 +27,12 @@ When touching these paths, update the matching tests in `/Users/raffichilingarya
 - Archive restore stays on the archive tab. It must not switch tabs as part of the animation flow.
 - Archive restore is unavailable when the active task list is already at max capacity.
 
+## Archive Overflow Keyboard Scrolling Contract
+
+- In an overflowing archive list, keyboard navigation should keep about `1.5` rows of context visible above and below the selected row whenever possible.
+- That keyboard-driven scroll reposition should be immediate/snappy, not animated.
+- When the selected archive row reaches the true top or bottom of the list, scrolling should clamp cleanly to that edge.
+
 ## Resize Contract
 
 - Manual user window resizing becomes the new floor for live task editing.

@@ -17,6 +17,11 @@ protocol TodoListViewDelegate: AnyObject {
 }
 
 final class TodoListView: NSView {
+    enum ScrollBehavior {
+        case ensureVisible
+        case keyboardNavigation(edgeBufferRows: CGFloat)
+    }
+
     enum HitZone {
         case checkbox
         case body
@@ -191,13 +196,53 @@ final class TodoListView: NSView {
         rowViews[rowID]
     }
 
-    func scrollRowToVisible(_ rowID: TodoRowID?) {
+    func scrollRowToVisible(_ rowID: TodoRowID?, behavior: ScrollBehavior = .ensureVisible) {
         guard let rowID,
               let rowFrame = frameForRow(withID: rowID) else {
             return
         }
 
-        scrollToVisible(rowFrame.insetBy(dx: 0, dy: -4))
+        guard let clipView = superview as? NSClipView else {
+            scrollToVisible(rowFrame.insetBy(dx: 0, dy: -4))
+            return
+        }
+
+        switch behavior {
+        case .ensureVisible:
+            if displayOrder.last == rowID {
+                let maxOffsetY = max(0, bounds.height - clipView.bounds.height)
+                clipView.scroll(to: NSPoint(x: clipView.bounds.origin.x, y: maxOffsetY))
+                enclosingScrollView?.reflectScrolledClipView(clipView)
+                return
+            }
+
+            scrollToVisible(rowFrame.insetBy(dx: 0, dy: -4))
+
+        case .keyboardNavigation(let edgeBufferRows):
+            let maxOffsetY = max(0, bounds.height - clipView.bounds.height)
+            guard maxOffsetY > 0 else {
+                scrollToVisible(rowFrame.insetBy(dx: 0, dy: -4))
+                return
+            }
+
+            let buffer = CGFloat(preferences.rowHeight) * edgeBufferRows
+            let visibleHeight = clipView.bounds.height
+            var targetOffsetY = clipView.bounds.origin.y
+
+            if rowFrame.minY < targetOffsetY + buffer {
+                targetOffsetY = rowFrame.minY - buffer
+            }
+
+            if rowFrame.maxY > targetOffsetY + visibleHeight - buffer {
+                targetOffsetY = rowFrame.maxY + buffer - visibleHeight
+            }
+
+            targetOffsetY = min(max(targetOffsetY, 0), maxOffsetY)
+            guard abs(targetOffsetY - clipView.bounds.origin.y) > 0.5 else { return }
+
+            clipView.scroll(to: NSPoint(x: clipView.bounds.origin.x, y: targetOffsetY))
+            enclosingScrollView?.reflectScrolledClipView(clipView)
+        }
     }
 
     func animateRemoval(of rowID: TodoRowID, duration: TimeInterval, completion: @escaping () -> Void) {
@@ -734,16 +779,26 @@ final class TodoListView: NSView {
 
     private func syncDocumentFrameToContent() {
         guard let clipView = superview as? NSClipView else { return }
+        let contentHeight = CGFloat(displayOrder.count) * CGFloat(preferences.rowHeight)
+            + CGFloat(LayoutMetrics.rowBackgroundInset)
 
         let targetSize = NSSize(
             width: clipView.bounds.width,
-            height: max(CGFloat(displayOrder.count) * CGFloat(preferences.rowHeight), clipView.bounds.height)
+            height: max(contentHeight, clipView.bounds.height)
         )
 
         guard frame.size != targetSize else { return }
         frame.size = targetSize
     }
 }
+
+#if DEBUG
+extension TodoListView {
+    func testingFrame(for rowID: TodoRowID) -> CGRect? {
+        frameForRow(withID: rowID)
+    }
+}
+#endif
 
 final class TodoRowView: NSView {
     private struct ContentRevealAnimation {
