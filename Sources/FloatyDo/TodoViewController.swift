@@ -590,7 +590,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         clearRangeSelectionState()
         updateTabAppearance()
         updateListScrollBehavior()
-        refreshRows(resize: true, animateResize: true)
+        refreshRows(resize: false, animateResize: false)
     }
 
     @objc private func switchToArchive() {
@@ -607,7 +607,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         clearRangeSelectionState()
         updateTabAppearance()
         updateListScrollBehavior()
-        refreshRows(resize: true, animateResize: true)
+        refreshRows(resize: false, animateResize: false)
     }
 
     func showTasksTab() {
@@ -983,6 +983,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
     ) {
         let resolvedPreferences = preferences ?? store.preferences
         let previousRowCount = rowModels.count
+        let usesStructuralTaskResize = resize && heightResizeMode == .fitTaskStructuralContent
         // Preserve explicit empty draft placement across ordinary redraws.
         // Keyboard navigation intentionally creates valid drafts above/between
         // tasks, and generic refresh must not snap those back to the default
@@ -1000,7 +1001,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
             selectionRevealRowID: selectionRevealRowID
         )
 
-        if resize {
+        if resize && !usesStructuralTaskResize {
             // Task draft growth/collapse is intentionally immediate. Rapid
             // Return / Shift-Tab / Up-arrow structural edits should never be
             // able to outrun an in-flight NSWindow frame animation.
@@ -1017,8 +1018,25 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         updateHeaderLayoutInsets()
         view.layoutSubtreeIfNeeded()
         listView.layoutSubtreeIfNeeded()
-        listView.scrollRowToVisible(selectedRowID, behavior: scrollBehavior)
         attachEditorIfNeeded(placeCaretAtEnd: placeCaretAtEnd)
+
+        if usesStructuralTaskResize {
+            // In the live text-editing path, the hidden editor and selection
+            // state can still be settling when Return/Down inserts a new draft.
+            // Refit the window after that state is attached so structural
+            // growth/shrink survives the real responder chain, not just direct
+            // controller calls in tests.
+            resizeWindow(
+                animate: false,
+                duration: resizeDuration,
+                heightResizeMode: heightResizeMode
+            )
+            updateHeaderLayoutInsets()
+            view.layoutSubtreeIfNeeded()
+            listView.layoutSubtreeIfNeeded()
+        }
+
+        listView.scrollRowToVisible(selectedRowID, behavior: scrollBehavior)
     }
 
     private func shouldAnimateWindowResize(from previousRowCount: Int, to newRowCount: Int) -> Bool {
@@ -1751,7 +1769,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
                     clearRangeSelectionState()
                     let updatedModels = buildRowModels(for: .tasks)
                     selectedRowID = taskSelectionIDAfterMutation(in: updatedModels, taskIndex: selectionIndex)
-                    refreshRows()
+                    refreshRows(heightResizeMode: .fitTaskStructuralContent)
                 }
 
             case .archive:
@@ -1770,7 +1788,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
                 store.deleteItem(id: item.id)
                 let updatedModels = buildRowModels(for: .tasks)
                 selectedRowID = taskSelectionIDAfterMutation(in: updatedModels, taskIndex: selectionIndex)
-                refreshRows()
+                refreshRows(heightResizeMode: .fitTaskStructuralContent)
             }
 
         case .archive:
@@ -1854,7 +1872,8 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
                     animatedLayout: true,
                     animatedLayoutDuration: self.completionReflowDuration,
                     selectionRevealRowID: self.selectedRowID,
-                    placeCaretAtEnd: false
+                    placeCaretAtEnd: false,
+                    heightResizeMode: .fitTaskStructuralContent
                 )
                 self.registerUndoSnapshotIfChanged(undoSnapshot, actionName: "Complete")
             }
@@ -1885,7 +1904,8 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
                 animatedLayout: true,
                 animatedLayoutDuration: self.completionReflowDuration,
                 selectionRevealRowID: self.selectedRowID,
-                placeCaretAtEnd: false
+                placeCaretAtEnd: false,
+                heightResizeMode: .fitTaskStructuralContent
             )
             self.registerUndoSnapshotIfChanged(undoSnapshot, actionName: "Complete")
         }
@@ -2031,7 +2051,11 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
                 // Top-edge up-arrow enters an empty draft above the first task.
                 // This is an explicit interaction contract and must never wrap
                 // to the default bottom draft.
-                activateDraft(at: 0, scrollBehavior: keyboardSelectionScrollBehavior)
+                activateDraft(
+                    at: 0,
+                    scrollBehavior: keyboardSelectionScrollBehavior,
+                    heightResizeMode: .fitTaskStructuralContent
+                )
                 return true
             }
         }
@@ -2083,7 +2107,11 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
            let itemIndex = store.items.firstIndex(where: { $0.id == item.id }),
            itemIndex == store.items.count - 1,
            canShowDraftRow {
-            activateDraft(at: defaultDraftInsertionIndex, scrollBehavior: keyboardSelectionScrollBehavior)
+            activateDraft(
+                at: defaultDraftInsertionIndex,
+                scrollBehavior: keyboardSelectionScrollBehavior,
+                heightResizeMode: .fitTaskStructuralContent
+            )
             return true
         }
 
@@ -2380,6 +2408,19 @@ extension TodoViewController {
     }
 
     @MainActor
+    func testingSelectTaskRange(_ indexes: [Int]) {
+        precondition(!indexes.isEmpty)
+        let rowIDs = indexes.map { index -> TodoRowID in
+            precondition(store.items.indices.contains(index))
+            return .taskItem(store.items[index].id)
+        }
+        selectedRowID = rowIDs.last
+        selectionAnchorRowID = rowIDs.first
+        selectedRowIDs = Set(rowIDs)
+        refreshRows(resize: false, animateResize: false, placeCaretAtEnd: false)
+    }
+
+    @MainActor
     func testingRefresh() {
         refreshRows(resize: false, animateResize: false, placeCaretAtEnd: false)
     }
@@ -2401,6 +2442,26 @@ extension TodoViewController {
     @MainActor
     func testingRestoreArchiveSelection() {
         restoreArchiveSelection()
+    }
+
+    @MainActor
+    func testingDeleteSelected() {
+        handleCommandDelete()
+    }
+
+    @MainActor
+    func testingCompleteSelected() {
+        handleCommandReturn()
+    }
+
+    @MainActor
+    func testingShowTasksTab() {
+        showTasksTab()
+    }
+
+    @MainActor
+    func testingShowArchiveTab() {
+        showArchiveTab()
     }
 
     @MainActor

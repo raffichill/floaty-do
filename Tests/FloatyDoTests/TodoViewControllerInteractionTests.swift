@@ -264,6 +264,22 @@ final class TodoViewControllerInteractionTests: XCTestCase {
         XCTAssertGreaterThan(window.frame.height, initialHeight + 20)
     }
 
+    func testMoveDownIntoBottomDraftGrowsRealWindowFrameForStructuralDraftRunway() {
+        let store = seededStore(active: ["A", "B", "C"])
+        let controller = TodoViewController(store: store)
+        controller.testingLoadView()
+        let window = controller.testingAttachWindow(frame: NSRect(x: 0, y: 0, width: 400, height: 300))
+        controller.resetWindowSize()
+        controller.testingSelectTask(at: 2)
+
+        let initialHeight = window.frame.height
+        XCTAssertTrue(controller.moveDown())
+
+        let snapshot = controller.testingSnapshot()
+        XCTAssertEqual(snapshot.selected, .taskDraft)
+        XCTAssertGreaterThan(window.frame.height, initialHeight + 20)
+    }
+
     func testRepeatedReturnDrivenRowCreationKeepsGrowingRealWindowFrame() {
         let store = seededStore(active: ["A", "B", "C"])
         let controller = TodoViewController(store: store)
@@ -305,6 +321,84 @@ final class TodoViewControllerInteractionTests: XCTestCase {
 
         let collapsedHeight = window.frame.height
         XCTAssertLessThan(collapsedHeight, grownHeight - 20)
+    }
+
+    func testDeleteSelectedTaskShrinksRealWindowFrame() {
+        let store = seededStore(active: ["A", "B", "C", "D", "E", "F"])
+        let controller = TodoViewController(store: store)
+        controller.testingLoadView()
+        let window = controller.testingAttachWindow(frame: NSRect(x: 0, y: 0, width: 400, height: 300))
+        controller.resetWindowSize()
+        controller.testingSelectTask(at: 5)
+
+        let initialHeight = window.frame.height
+        controller.testingDeleteSelected()
+
+        XCTAssertLessThan(window.frame.height, initialHeight - 20)
+    }
+
+    func testDeleteSelectedTaskRangeShrinksRealWindowFrame() {
+        let store = seededStore(active: ["A", "B", "C", "D", "E", "F", "G"])
+        let controller = TodoViewController(store: store)
+        controller.testingLoadView()
+        let window = controller.testingAttachWindow(frame: NSRect(x: 0, y: 0, width: 400, height: 300))
+        controller.resetWindowSize()
+        controller.testingSelectTaskRange([5, 6])
+
+        let initialHeight = window.frame.height
+        controller.testingDeleteSelected()
+
+        XCTAssertLessThan(window.frame.height, initialHeight - 20)
+    }
+
+    func testCompleteSelectedTaskShrinksRealWindowFrame() {
+        let store = seededStore(active: ["A", "B", "C", "D", "E", "F"])
+        let controller = TodoViewController(store: store)
+        controller.testingLoadView()
+        let window = controller.testingAttachWindow(frame: NSRect(x: 0, y: 0, width: 400, height: 300))
+        controller.resetWindowSize()
+        controller.testingSelectTask(at: 5)
+
+        let initialHeight = window.frame.height
+        controller.testingCompleteSelected()
+        RunLoop.main.run(until: Date().addingTimeInterval(1.1))
+
+        XCTAssertLessThan(window.frame.height, initialHeight - 20)
+    }
+
+    func testCompleteSelectedTaskRangeShrinksRealWindowFrame() {
+        let store = seededStore(active: ["A", "B", "C", "D", "E", "F", "G"])
+        let controller = TodoViewController(store: store)
+        controller.testingLoadView()
+        let window = controller.testingAttachWindow(frame: NSRect(x: 0, y: 0, width: 400, height: 300))
+        controller.resetWindowSize()
+        controller.testingSelectTaskRange([5, 6])
+
+        let initialHeight = window.frame.height
+        controller.testingCompleteSelected()
+        RunLoop.main.run(until: Date().addingTimeInterval(1.1))
+
+        XCTAssertLessThan(window.frame.height, initialHeight - 20)
+    }
+
+    func testSwitchingTabsPreservesWindowHeight() {
+        let store = seededStore(
+            active: ["A", "B", "C", "D", "E", "F", "G"],
+            archived: ["Archived 1", "Archived 2"]
+        )
+        let controller = TodoViewController(store: store)
+        controller.testingLoadView()
+        let window = controller.testingAttachWindow(frame: NSRect(x: 0, y: 0, width: 400, height: 300))
+        controller.resetWindowSize()
+
+        let tasksHeight = window.frame.height
+        controller.testingShowArchiveTab()
+        let archiveHeight = window.frame.height
+        controller.testingShowTasksTab()
+        let tasksHeightAgain = window.frame.height
+
+        XCTAssertEqual(archiveHeight, tasksHeight, accuracy: 0.5)
+        XCTAssertEqual(tasksHeightAgain, tasksHeight, accuracy: 0.5)
     }
 
     private func seededStore(active items: [String], archived: [String] = []) -> TodoStore {
