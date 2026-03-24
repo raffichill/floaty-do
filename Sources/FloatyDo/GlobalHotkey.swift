@@ -44,6 +44,19 @@ public struct GlobalHotkey: Codable, Equatable {
     }
 }
 
+public enum GlobalHotkeyRegistrationError: Error, Equatable {
+    case reservedOrUnavailable
+}
+
+extension GlobalHotkeyRegistrationError: LocalizedError {
+    public var errorDescription: String? {
+        switch self {
+        case .reservedOrUnavailable:
+            return "That shortcut couldn’t be registered. It may already be in use by macOS or another app."
+        }
+    }
+}
+
 #if canImport(Carbon)
 extension GlobalHotkey {
     var carbonModifiers: UInt32 {

@@ -1365,10 +1365,7 @@ final class SettingsViewController: NSViewController {
         }
         applyHotkeyCaptureAppearance(to: overlay.popoverView)
         overlay.popoverView.onCapture = { [weak self] hotkey in
-            self?.dismissHotkeyCapturePopover()
-            self?.commitPreferenceChange { updated in
-                updated.globalHotkey = hotkey
-            }
+            self?.handleCapturedGlobalHotkey(hotkey)
         }
         overlay.popoverView.onCancel = { [weak self] in
             self?.dismissHotkeyCapturePopover()
@@ -1397,6 +1394,33 @@ final class SettingsViewController: NSViewController {
         hotkeyCaptureOverlay?.removeFromSuperview()
         hotkeyCaptureOverlay = nil
         view.window?.makeFirstResponder(view)
+    }
+
+    private func handleCapturedGlobalHotkey(_ hotkey: GlobalHotkey) {
+        let normalized = hotkey.normalized
+        if normalized == preferences.globalHotkey.normalized {
+            dismissHotkeyCapturePopover()
+            return
+        }
+
+        if let appDelegate = NSApp.delegate as? AppDelegate {
+            switch appDelegate.validateGlobalHotkey(normalized) {
+            case .success:
+                dismissHotkeyCapturePopover()
+                commitPreferenceChange { updated in
+                    updated.globalHotkey = normalized
+                }
+            case .failure(let error):
+                dismissHotkeyCapturePopover()
+                presentHotkeyCaptureError(message: error.localizedDescription)
+            }
+            return
+        }
+
+        dismissHotkeyCapturePopover()
+        commitPreferenceChange { updated in
+            updated.globalHotkey = normalized
+        }
     }
 
     @objc private func fontChanged(_ sender: NSPopUpButton) {
@@ -1524,6 +1548,19 @@ final class SettingsViewController: NSViewController {
         let alert = NSAlert()
         alert.alertStyle = .warning
         alert.messageText = "Couldn’t update the app icon"
+        alert.informativeText = message
+        if let window = view.window ?? NSApp.mainWindow {
+            alert.beginSheetModal(for: window, completionHandler: nil)
+        } else {
+            alert.runModal()
+        }
+    }
+
+    private func presentHotkeyCaptureError(message: String) {
+        guard isViewLoaded else { return }
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Couldn’t update the global hotkey"
         alert.informativeText = message
         if let window = view.window ?? NSApp.mainWindow {
             alert.beginSheetModal(for: window, completionHandler: nil)

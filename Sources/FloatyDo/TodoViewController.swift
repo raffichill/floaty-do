@@ -4,20 +4,6 @@ import QuartzCore
 
 public enum Tab: Equatable { case tasks, archive }
 
-private struct TaskDraftState: Equatable {
-    var insertionIndex: Int
-    var text: String
-    var isStructuralRunway: Bool = false
-
-    var trimmedText: String {
-        text.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    var isEmpty: Bool {
-        trimmedText.isEmpty
-    }
-}
-
 private struct TodoUndoSnapshot: Equatable {
     let items: [TodoItem]
     let archivedItems: [TodoItem]
@@ -37,6 +23,8 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         static let headerButtonOutlineColor = NSColor.systemPink.withAlphaComponent(0.9)
         static let headerAreaOutlineColor = NSColor.systemPink.withAlphaComponent(0.9)
     }
+
+    private static let completionResizeTraceURL = URL(fileURLWithPath: "/tmp/floatydo-completion-resize.log")
 
     private let store: TodoStore
     private let listScrollView = NSScrollView()
@@ -73,11 +61,11 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
     private var appliedPreferences: AppPreferences
     private var userPreferredWindowWidth: CGFloat?
     private var userPreferredWindowHeight: CGFloat?
-
-    private enum WindowHeightResizeMode {
-        case respectUserFloor
-        case fitTaskStructuralContent
-    }
+    private var windowResizeAnimationTimer: Timer?
+    private var windowResizeAnimationStartTime: CFTimeInterval = 0
+    private var windowResizeAnimationStartFrame: NSRect = .zero
+    private var windowResizeAnimationTargetFrame: NSRect = .zero
+    private var windowResizeAnimationGeneration = 0
 
     public init(store: TodoStore) {
         self.store = store
@@ -85,9 +73,31 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         self.appliedPreferences = store.preferences
         super.init(nibName: nil, bundle: nil)
         historyManager.levelsOfUndo = 100
+        Self.resetCompletionResizeTrace()
+        traceCompletionResize("controller:init pid=\(ProcessInfo.processInfo.processIdentifier)")
     }
 
     required init?(coder: NSCoder) { fatalError() }
+
+    private static func resetCompletionResizeTrace() {
+        try? FileManager.default.removeItem(at: completionResizeTraceURL)
+        try? "".write(to: completionResizeTraceURL, atomically: true, encoding: .utf8)
+    }
+
+    private func traceCompletionResize(_ message: String) {
+        let timestamp = ISO8601DateFormatter().string(from: Date())
+        let line = "[\(timestamp)] \(message)\n"
+        guard let data = line.data(using: .utf8) else { return }
+
+        if FileManager.default.fileExists(atPath: Self.completionResizeTraceURL.path),
+           let handle = try? FileHandle(forWritingTo: Self.completionResizeTraceURL) {
+            defer { try? handle.close() }
+            try? handle.seekToEnd()
+            try? handle.write(contentsOf: data)
+        } else {
+            try? data.write(to: Self.completionResizeTraceURL)
+        }
+    }
 
     private var motion: MotionProfile { store.preferences.motion }
     private var completionReflowDuration: TimeInterval { motion.reflow }
@@ -117,7 +127,10 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
     }
 
     private var draftShouldCollapseStructurally: Bool {
-        taskDraft.isStructuralRunway || !draftIsAtDefaultPosition
+        TaskListStructurePolicy.shouldCollapseEmptyDraft(
+            taskDraft,
+            defaultInsertionIndex: defaultDraftInsertionIndex
+        )
     }
 
     private var availableArchiveRestoreSlots: Int {
@@ -420,6 +433,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         updateHeaderLayoutInsets()
         refreshRows(resize: false, animateResize: false, placeCaretAtEnd: false)
         resizeWindow(animate: false)
+        traceCompletionResize("viewDidAppear window=\(String(describing: view.window?.frame)) items=\(store.items.count) visibleRows=\(visibleRowCount)")
     }
 
     public override func viewDidLayout() {
@@ -429,6 +443,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
     }
 
     deinit {
+        windowResizeAnimationTimer?.invalidate()
         if let monitor = eventMonitor {
             NSEvent.removeMonitor(monitor)
         }
@@ -730,10 +745,10 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
     private func setDraftPosition(
         _ insertionIndex: Int,
         text: String? = nil,
-        isStructuralRunway: Bool = false
+        isStructuralDraft: Bool = false
     ) {
         taskDraft.insertionIndex = clampedDraftInsertionIndex(insertionIndex)
-        taskDraft.isStructuralRunway = isStructuralRunway
+        taskDraft.isStructuralDraft = isStructuralDraft
         if let text {
             taskDraft.text = text
         }
@@ -747,7 +762,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         fullWidth: CGFloat,
         fullHeight: CGFloat,
         minSize: NSSize,
-        heightResizeMode: WindowHeightResizeMode = .respectUserFloor
+        heightResizeMode: TaskListHeightResizeMode = .respectUserFloor
     ) -> NSSize {
         // A manual resize becomes the no-shrink floor for ordinary editing, but
         // structural growth is still allowed to expand the panel beyond that
@@ -756,7 +771,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         switch heightResizeMode {
         case .respectUserFloor:
             resolvedHeight = max(max(fullHeight, minSize.height), userPreferredWindowHeight ?? 0)
-        case .fitTaskStructuralContent:
+        case .fitActiveTaskRows:
             // Return-created draft growth and the matching collapse back out of
             // that empty draft should fit the task content height explicitly.
             // This keeps structural add/remove sizing separate from the normal
@@ -809,7 +824,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         refreshRows(
             placeCaretAtEnd: true,
             scrollBehavior: keyboardSelectionScrollBehavior,
-            heightResizeMode: .fitTaskStructuralContent
+            heightResizeMode: .fitActiveTaskRows(animated: false)
         )
         return true
     }
@@ -817,8 +832,10 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
     private func handleTerminalBottomDraftBoundary() -> Bool {
         guard currentTab == .tasks,
               selectedRowID == .taskDraft,
-              taskDraft.isEmpty,
-              taskDraft.insertionIndex == defaultDraftInsertionIndex else {
+              TaskListStructurePolicy.isTerminalBottomDraft(
+                taskDraft,
+                defaultInsertionIndex: defaultDraftInsertionIndex
+              ) else {
             return false
         }
 
@@ -859,7 +876,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         // Turning a draft into a real task is structural task-list growth and
         // should re-fit immediately, independent of the ordinary no-shrink
         // editing floor.
-        refreshRows(placeCaretAtEnd: false, heightResizeMode: .fitTaskStructuralContent)
+        refreshRows(placeCaretAtEnd: false, heightResizeMode: .fitActiveTaskRows(animated: false))
         return insertedItem
     }
 
@@ -867,13 +884,13 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         at insertionIndex: Int,
         placeCaretAtEnd: Bool = true,
         scrollBehavior: TodoListView.ScrollBehavior = .ensureVisible,
-        heightResizeMode: WindowHeightResizeMode = .respectUserFloor
+        heightResizeMode: TaskListHeightResizeMode = .respectUserFloor
     ) {
         guard canShowDraftRow else { return }
         setDraftPosition(
             insertionIndex,
             text: "",
-            isStructuralRunway: heightResizeMode == .fitTaskStructuralContent
+            isStructuralDraft: heightResizeMode.usesStructuralFit
         )
         selectedRowID = .taskDraft
         clearRangeSelectionState()
@@ -892,10 +909,10 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         // structural draft for navigation/collapse purposes, but dismissing it
         // later does not shrink again because the task-count change already
         // happened at conversion time.
-        setDraftPosition(itemIndex, text: newText, isStructuralRunway: true)
+        setDraftPosition(itemIndex, text: newText, isStructuralDraft: true)
         selectedRowID = .taskDraft
         clearRangeSelectionState()
-        refreshRows(placeCaretAtEnd: false, heightResizeMode: .fitTaskStructuralContent)
+        refreshRows(placeCaretAtEnd: false, heightResizeMode: .fitActiveTaskRows(animated: false))
     }
 
     private func targetVisibleRowCount(for tab: Tab? = nil) -> Int {
@@ -909,7 +926,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
             // empty draft row. Entering a draft should not grow the panel on
             // its own; the panel grows when that draft is promoted into a real
             // task by typing or submission.
-            return max(5, min(store.items.count + 3, TodoStore.maxItems))
+            return TaskListStructurePolicy.targetVisibleTaskRowCount(activeTaskCount: store.items.count)
         case .archive:
             return max(5, min(store.archivedItems.count + 3, TodoStore.maxItems))
         }
@@ -1004,11 +1021,12 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         selectionRevealRowID: TodoRowID? = nil,
         placeCaretAtEnd: Bool = true,
         scrollBehavior: TodoListView.ScrollBehavior = .ensureVisible,
-        heightResizeMode: WindowHeightResizeMode = .respectUserFloor
+        heightResizeMode: TaskListHeightResizeMode = .respectUserFloor
     ) {
         let resolvedPreferences = preferences ?? store.preferences
         let previousRowCount = rowModels.count
-        let usesStructuralTaskResize = resize && heightResizeMode == .fitTaskStructuralContent
+        let usesTaskHeightFit = resize && heightResizeMode.usesStructuralFit
+        let deferTaskHeightFitUntilAfterEditorAttachment = usesTaskHeightFit && selectedRowID == .taskDraft
         // Preserve explicit empty draft placement across ordinary redraws.
         // Keyboard navigation intentionally creates valid drafts above/between
         // tasks, and generic refresh must not snap those back to the default
@@ -1026,13 +1044,14 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
             selectionRevealRowID: selectionRevealRowID
         )
 
-        if resize && !usesStructuralTaskResize {
-            // Task draft growth/collapse is intentionally immediate. Rapid
-            // Return / Shift-Tab / Up-arrow structural edits should never be
-            // able to outrun an in-flight NSWindow frame animation.
-            let effectiveAnimateResize = heightResizeMode == .respectUserFloor
-                ? animateResize && shouldAnimateWindowResize(from: previousRowCount, to: rowModels.count)
-                : false
+        if resize && !deferTaskHeightFitUntilAfterEditorAttachment {
+            // Draft insertion is the only task-height path that needs a
+            // post-editor second pass. Completion-driven shrink should resize
+            // on this normal refresh path so it stays coupled to the reflow
+            // animation instead of waiting on draft/editor attachment logic.
+            let effectiveAnimateResize = animateResize
+                && heightResizeMode.shouldAnimateWindowResize
+                && shouldAnimateWindowResize(from: previousRowCount, to: rowModels.count)
             resizeWindow(
                 animate: effectiveAnimateResize,
                 duration: resizeDuration,
@@ -1045,14 +1064,14 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         listView.layoutSubtreeIfNeeded()
         attachEditorIfNeeded(placeCaretAtEnd: placeCaretAtEnd)
 
-        if usesStructuralTaskResize {
+        if deferTaskHeightFitUntilAfterEditorAttachment {
             // In the live text-editing path, the hidden editor and selection
             // state can still be settling when Return/Down inserts a new draft.
             // Refit the window after that state is attached so structural
             // growth/shrink survives the real responder chain, not just direct
             // controller calls in tests.
             resizeWindow(
-                animate: false,
+                animate: heightResizeMode.shouldAnimateWindowResize,
                 duration: resizeDuration,
                 heightResizeMode: heightResizeMode
             )
@@ -1794,7 +1813,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
                     clearRangeSelectionState()
                     let updatedModels = buildRowModels(for: .tasks)
                     selectedRowID = taskSelectionIDAfterMutation(in: updatedModels, taskIndex: selectionIndex)
-                    refreshRows(heightResizeMode: .fitTaskStructuralContent)
+                    refreshRows(heightResizeMode: .fitActiveTaskRows(animated: false))
                 }
 
             case .archive:
@@ -1813,7 +1832,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
                 store.deleteItem(id: item.id)
                 let updatedModels = buildRowModels(for: .tasks)
                 selectedRowID = taskSelectionIDAfterMutation(in: updatedModels, taskIndex: selectionIndex)
-                refreshRows(heightResizeMode: .fitTaskStructuralContent)
+                refreshRows(heightResizeMode: .fitActiveTaskRows(animated: false))
             }
 
         case .archive:
@@ -1880,6 +1899,13 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
               let row = listView.rowView(for: taskRowID) else { return }
         let removalDuration = motion.collapse * 0.75
 
+        traceCompletionResize(
+            "animateCompletion:start item=\(itemID) selectionIndex=\(selectionIndex) " +
+            "items=\(store.items.count) archived=\(store.archivedItems.count) " +
+            "selected=\(String(describing: selectedRowID)) visibleRows=\(visibleRowCount) " +
+            "window=\(String(describing: view.window?.frame))"
+        )
+
         isAnimating = true
         detachEditor(makeListFirstResponder: false)
         row.setEditing(false)
@@ -1887,18 +1913,34 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         row.playCompletionAnimation(motion: motion) { [weak self] in
             guard let self else { return }
             self.listView.animateRemoval(of: taskRowID, duration: removalDuration) {
+                self.traceCompletionResize(
+                    "animateCompletion:beforeArchive item=\(itemID) items=\(self.store.items.count) visibleRows=\(self.visibleRowCount)"
+                )
                 self.store.archive(id: itemID)
                 let updatedModels = self.buildRowModels(for: .tasks)
                 self.selectedRowID = self.taskSelectionIDAfterMutation(in: updatedModels, taskIndex: selectionIndex)
+                self.traceCompletionResize(
+                    "animateCompletion:afterArchive item=\(itemID) items=\(self.store.items.count) archived=\(self.store.archivedItems.count) " +
+                    "selected=\(String(describing: self.selectedRowID)) targetVisibleRows=\(self.targetVisibleRowCount(for: .tasks))"
+                )
                 self.isAnimating = false
                 self.scheduleDeferredEditorActivation(for: self.selectedRowID, delay: self.motion.collapse * 0.75)
                 self.refreshRows(
+                    resize: false,
                     resizeDuration: self.completionReflowDuration,
                     animatedLayout: true,
                     animatedLayoutDuration: self.completionReflowDuration,
                     selectionRevealRowID: self.selectedRowID,
                     placeCaretAtEnd: false,
-                    heightResizeMode: .fitTaskStructuralContent
+                    heightResizeMode: .fitActiveTaskRows(animated: true)
+                )
+                self.resizeWindow(
+                    animate: true,
+                    duration: self.completionReflowDuration,
+                    heightResizeMode: .fitActiveTaskRows(animated: true)
+                )
+                self.traceCompletionResize(
+                    "animateCompletion:afterResizeCall window=\(String(describing: self.view.window?.frame))"
                 )
                 self.registerUndoSnapshotIfChanged(undoSnapshot, actionName: "Complete")
             }
@@ -1918,19 +1960,36 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         let rows = rowIDs.compactMap { listView.rowView(for: $0) }
         let completeArchiveAndRefresh = { [weak self] in
             guard let self else { return }
+            self.traceCompletionResize(
+                "animateBatchCompletion:beforeArchive items=\(self.store.items.count) batch=\(itemIDs.count) " +
+                "selectionIndex=\(selectionIndex) visibleRows=\(self.visibleRowCount)"
+            )
             itemIDs.forEach { self.store.archive(id: $0) }
             self.clearRangeSelectionState()
             let updatedModels = self.buildRowModels(for: .tasks)
             self.selectedRowID = self.taskSelectionIDAfterMutation(in: updatedModels, taskIndex: selectionIndex)
+            self.traceCompletionResize(
+                "animateBatchCompletion:afterArchive items=\(self.store.items.count) archived=\(self.store.archivedItems.count) " +
+                "selected=\(String(describing: self.selectedRowID)) targetVisibleRows=\(self.targetVisibleRowCount(for: .tasks))"
+            )
             self.isAnimating = false
             self.scheduleDeferredEditorActivation(for: self.selectedRowID, delay: self.motion.collapse * 0.75)
             self.refreshRows(
+                resize: false,
                 resizeDuration: self.completionReflowDuration,
                 animatedLayout: true,
                 animatedLayoutDuration: self.completionReflowDuration,
                 selectionRevealRowID: self.selectedRowID,
                 placeCaretAtEnd: false,
-                heightResizeMode: .fitTaskStructuralContent
+                heightResizeMode: .fitActiveTaskRows(animated: true)
+            )
+            self.resizeWindow(
+                animate: true,
+                duration: self.completionReflowDuration,
+                heightResizeMode: .fitActiveTaskRows(animated: true)
+            )
+            self.traceCompletionResize(
+                "animateBatchCompletion:afterResizeCall window=\(String(describing: self.view.window?.frame))"
             )
             self.registerUndoSnapshotIfChanged(undoSnapshot, actionName: "Complete")
         }
@@ -1984,7 +2043,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
             self.clearRangeSelectionState()
             if self.taskDraft.isEmpty {
                 self.taskDraft.insertionIndex = self.defaultDraftInsertionIndex
-                self.taskDraft.isStructuralRunway = false
+                self.taskDraft.isStructuralDraft = false
             }
             let updatedModels = self.buildRowModels(for: .archive)
             self.selectedRowID = self.buildSelectionID(in: updatedModels, selectableIndex: archiveSelectionIndex)
@@ -2079,7 +2138,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
                 activateDraft(
                     at: 0,
                     scrollBehavior: keyboardSelectionScrollBehavior,
-                    heightResizeMode: .fitTaskStructuralContent
+                    heightResizeMode: .fitActiveTaskRows(animated: false)
                 )
                 return true
             }
@@ -2093,7 +2152,12 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
             return false
         }
 
-        if currentTab == .tasks, selectedRowID == .taskDraft, draftIsAtDefaultPosition, !taskDraft.isStructuralRunway {
+        if currentTab == .tasks,
+           selectedRowID == .taskDraft,
+           TaskListStructurePolicy.isTerminalBottomDraft(
+            taskDraft,
+            defaultInsertionIndex: defaultDraftInsertionIndex
+           ) {
             if let targetRowID = navigationRows.last {
                 activateRow(targetRowID, placeCaretAtEnd: true, scrollBehavior: keyboardSelectionScrollBehavior)
                 return true
@@ -2138,7 +2202,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
             activateDraft(
                 at: defaultDraftInsertionIndex,
                 scrollBehavior: keyboardSelectionScrollBehavior,
-                heightResizeMode: .fitTaskStructuralContent
+                heightResizeMode: .fitActiveTaskRows(animated: false)
             )
             return true
         }
@@ -2174,7 +2238,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
                       canShowDraftRow else { return }
                 // Return on a task inserts the draft directly below that task,
                 // not at the default bottom position.
-                activateDraft(at: itemIndex + 1, heightResizeMode: .fitTaskStructuralContent)
+                activateDraft(at: itemIndex + 1, heightResizeMode: .fitActiveTaskRows(animated: false))
 
             case .taskDraft:
                 if handleTerminalBottomDraftBoundary() {
@@ -2183,7 +2247,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
                 if let insertedItem = promoteDraftToItem(selectInsertedItem: true),
                    let insertedIndex = store.items.firstIndex(where: { $0.id == insertedItem.id }),
                    canShowDraftRow {
-                    activateDraft(at: insertedIndex + 1, heightResizeMode: .fitTaskStructuralContent)
+                    activateDraft(at: insertedIndex + 1, heightResizeMode: .fitActiveTaskRows(animated: false))
                 } else if draftShouldCollapseStructurally {
                     _ = collapseSelectedDraftForNavigation(step: 1)
                 }
@@ -2197,7 +2261,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
     private func resizeWindow(
         animate: Bool = true,
         duration: TimeInterval? = nil,
-        heightResizeMode: WindowHeightResizeMode = .respectUserFloor
+        heightResizeMode: TaskListHeightResizeMode = .respectUserFloor
     ) {
         guard let window = view.window else { return }
         guard !isInNativeFullScreen else { return }
@@ -2227,20 +2291,141 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         )
 
         let newFrame = NSRect(origin: clampedOrigin, size: targetSize)
+        if case .fitActiveTaskRows(let animated) = heightResizeMode {
+            traceCompletionResize(
+                "resizeWindow mode=fitActiveTaskRows(animated:\(animated)) animate=\(animate) duration=\(String(describing: duration)) " +
+                "items=\(store.items.count) visibleRows=\(visibleRowCount) oldFrame=\(oldFrame) newFrame=\(newFrame)"
+            )
+        }
         guard abs(newFrame.height - oldFrame.height) > 0.5 || abs(newFrame.width - oldFrame.width) > 0.5 || newFrame.origin != oldFrame.origin else {
+            if case .fitActiveTaskRows = heightResizeMode {
+                traceCompletionResize("resizeWindow earlyReturn=noFrameChange")
+            }
             return
         }
 
         guard animate else {
+            windowResizeAnimationTimer?.invalidate()
+            windowResizeAnimationTimer = nil
             window.setFrame(newFrame, display: true, animate: false)
+            if case .fitActiveTaskRows = heightResizeMode {
+                traceCompletionResize("resizeWindow appliedImmediately frame=\(window.frame)")
+            }
             return
         }
 
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = duration ?? motion.collapse
-            context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-            window.animator().setFrame(newFrame, display: true)
+        animateWindowFrame(
+            window,
+            to: newFrame,
+            duration: duration ?? motion.collapse,
+            trace: {
+                if case .fitActiveTaskRows = heightResizeMode {
+                    self.traceCompletionResize($0)
+                }
+            }
+        )
+    }
+
+    private func animateWindowFrame(
+        _ window: NSWindow,
+        to targetFrame: NSRect,
+        duration: TimeInterval,
+        trace: ((String) -> Void)? = nil
+    ) {
+        windowResizeAnimationTimer?.invalidate()
+        windowResizeAnimationTimer = nil
+        windowResizeAnimationGeneration += 1
+        let animationGeneration = windowResizeAnimationGeneration
+        windowResizeAnimationStartTime = CACurrentMediaTime()
+        windowResizeAnimationStartFrame = window.frame
+        windowResizeAnimationTargetFrame = targetFrame
+        trace?("resizeWindow animationStarted from=\(windowResizeAnimationStartFrame) to=\(targetFrame) duration=\(duration)")
+
+        let timer = Timer(timeInterval: 1.0 / 120.0, repeats: true) { [weak self, weak window] timer in
+            guard let self, let window else {
+                timer.invalidate()
+                return
+            }
+
+            let elapsed = CACurrentMediaTime() - self.windowResizeAnimationStartTime
+            let rawProgress = max(0.0, min(elapsed / duration, 1.0))
+            let easedProgress = self.easeInOutBezierProgress(rawProgress)
+            let nextFrame = self.interpolatedFrame(
+                from: self.windowResizeAnimationStartFrame,
+                to: self.windowResizeAnimationTargetFrame,
+                progress: easedProgress
+            )
+            window.setFrame(nextFrame, display: true, animate: false)
+
+            if rawProgress >= 1.0 {
+                timer.invalidate()
+                self.windowResizeAnimationTimer = nil
+                window.setFrame(self.windowResizeAnimationTargetFrame, display: true, animate: false)
+                trace?("resizeWindow animationCompleted frame=\(window.frame)")
+            }
         }
+
+        windowResizeAnimationTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
+        RunLoop.main.add(timer, forMode: .eventTracking)
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + duration + 0.05) { [weak self, weak window] in
+            guard let self, let window else { return }
+            guard self.windowResizeAnimationGeneration == animationGeneration else { return }
+            guard !self.framesApproximatelyEqual(window.frame, targetFrame) else { return }
+
+            self.windowResizeAnimationTimer?.invalidate()
+            self.windowResizeAnimationTimer = nil
+            window.setFrame(targetFrame, display: true, animate: false)
+            trace?("resizeWindow fallbackApplied frame=\(window.frame)")
+        }
+    }
+
+    private func framesApproximatelyEqual(_ lhs: NSRect, _ rhs: NSRect, tolerance: CGFloat = 0.5) -> Bool {
+        abs(lhs.origin.x - rhs.origin.x) <= tolerance &&
+        abs(lhs.origin.y - rhs.origin.y) <= tolerance &&
+        abs(lhs.width - rhs.width) <= tolerance &&
+        abs(lhs.height - rhs.height) <= tolerance
+    }
+
+    private func interpolatedFrame(from start: NSRect, to end: NSRect, progress: Double) -> NSRect {
+        let t = CGFloat(progress)
+        return NSRect(
+            x: start.origin.x + (end.origin.x - start.origin.x) * t,
+            y: start.origin.y + (end.origin.y - start.origin.y) * t,
+            width: start.size.width + (end.size.width - start.size.width) * t,
+            height: start.size.height + (end.size.height - start.size.height) * t
+        )
+    }
+
+    private func easeInOutBezierProgress(_ x: Double) -> Double {
+        cubicBezierY(forX: x, x1: 0.42, y1: 0.0, x2: 0.58, y2: 1.0)
+    }
+
+    private func cubicBezierY(forX x: Double, x1: Double, y1: Double, x2: Double, y2: Double) -> Double {
+        func sampleCurve(_ t: Double, _ a1: Double, _ a2: Double) -> Double {
+            let invT = 1.0 - t
+            return (3.0 * invT * invT * t * a1) + (3.0 * invT * t * t * a2) + (t * t * t)
+        }
+
+        var low = 0.0
+        var high = 1.0
+        var t = x
+
+        for _ in 0..<12 {
+            let estimate = sampleCurve(t, x1, x2)
+            if abs(estimate - x) < 0.0005 {
+                break
+            }
+            if estimate < x {
+                low = t
+            } else {
+                high = t
+            }
+            t = (low + high) * 0.5
+        }
+
+        return sampleCurve(t, y1, y2)
     }
 
     public func controlTextDidChange(_ obj: Notification) {
@@ -2335,6 +2520,7 @@ extension TodoViewController: TodoListViewDelegate {
     }
 
     func listView(_ listView: TodoListView, didActivateCheckboxFor rowID: TodoRowID) {
+        traceCompletionResize("didActivateCheckboxFor rowID=\(rowID) tab=\(currentTab) items=\(store.items.count) selected=\(String(describing: selectedRowID))")
         switch rowModels.first(where: { $0.id == rowID })?.kind {
         case .taskItem(let item):
             clearRangeSelectionState()
@@ -2486,6 +2672,12 @@ extension TodoViewController {
     }
 
     @MainActor
+    func testingCompleteSelectedViaCheckbox() {
+        guard let selectedRowID else { return }
+        listView(self.listView, didActivateCheckboxFor: selectedRowID)
+    }
+
+    @MainActor
     func testingShowTasksTab() {
         showTasksTab()
     }
@@ -2500,13 +2692,13 @@ extension TodoViewController {
         fullWidth: CGFloat,
         fullHeight: CGFloat,
         minSize: NSSize,
-        fitTaskStructuralContent: Bool = false
+        fitActiveTaskRows: Bool = false
     ) -> NSSize {
         resolvedTargetWindowSize(
             fullWidth: fullWidth,
             fullHeight: fullHeight,
             minSize: minSize,
-            heightResizeMode: fitTaskStructuralContent ? .fitTaskStructuralContent : .respectUserFloor
+            heightResizeMode: fitActiveTaskRows ? .fitActiveTaskRows(animated: false) : .respectUserFloor
         )
     }
 

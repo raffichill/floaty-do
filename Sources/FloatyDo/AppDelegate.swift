@@ -115,7 +115,9 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
 
         installGlobalHotkeyHandlerIfNeeded()
-        registerGlobalHotkey(store.preferences.globalHotkey)
+        if case .failure = registerGlobalHotkey(store.preferences.globalHotkey) {
+            _ = registerGlobalHotkey(.defaultToggle)
+        }
         observePreferences()
 
         // App-level shortcuts: cmd+1/cmd+2 switch main tabs unless settings is
@@ -393,7 +395,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         preferencesObserver = store.$preferences
             .removeDuplicates()
             .sink { [weak self] preferences in
-                self?.registerGlobalHotkey(preferences.globalHotkey)
+                _ = self?.registerGlobalHotkey(preferences.globalHotkey)
             }
     }
 
@@ -410,11 +412,23 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         )
     }
 
-    private func registerGlobalHotkey(_ hotkey: GlobalHotkey) {
+    func validateGlobalHotkey(_ hotkey: GlobalHotkey) -> Result<Void, GlobalHotkeyRegistrationError> {
         let normalized = hotkey.normalized
-        guard registeredGlobalHotkey != normalized else { return }
-        var newRef: EventHotKeyRef?
+        if registeredGlobalHotkey == normalized {
+            return .success(())
+        }
+        return probeGlobalHotkeyRegistration(normalized, hotKeyID: temporaryGlobalHotkeyID())
+    }
+
+    @discardableResult
+    private func registerGlobalHotkey(_ hotkey: GlobalHotkey) -> Result<Void, GlobalHotkeyRegistrationError> {
+        let normalized = hotkey.normalized
+        guard registeredGlobalHotkey != normalized else { return .success(()) }
         let hotKeyID = EventHotKeyID(signature: globalHotkeySignature, id: 1)
+        let result = probeGlobalHotkeyRegistration(normalized, hotKeyID: hotKeyID)
+        guard case .success = result else { return result }
+
+        var newRef: EventHotKeyRef?
         let status = RegisterEventHotKey(
             UInt32(normalized.keyCode),
             normalized.carbonModifiers,
@@ -424,12 +438,15 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             &newRef
         )
 
-        guard status == noErr, let newRef else { return }
+        guard status == noErr, let newRef else {
+            return .failure(.reservedOrUnavailable)
+        }
         if let existing = globalHotKeyRef {
             UnregisterEventHotKey(existing)
         }
         globalHotKeyRef = newRef
         registeredGlobalHotkey = normalized
+        return .success(())
     }
 
     private func unregisterGlobalHotkey() {
@@ -438,6 +455,30 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             globalHotKeyRef = nil
         }
         registeredGlobalHotkey = nil
+    }
+
+    private func probeGlobalHotkeyRegistration(
+        _ hotkey: GlobalHotkey,
+        hotKeyID: EventHotKeyID
+    ) -> Result<Void, GlobalHotkeyRegistrationError> {
+        var probeRef: EventHotKeyRef?
+        let status = RegisterEventHotKey(
+            UInt32(hotkey.keyCode),
+            hotkey.carbonModifiers,
+            hotKeyID,
+            GetApplicationEventTarget(),
+            0,
+            &probeRef
+        )
+        guard status == noErr, let probeRef else {
+            return .failure(.reservedOrUnavailable)
+        }
+        UnregisterEventHotKey(probeRef)
+        return .success(())
+    }
+
+    private func temporaryGlobalHotkeyID() -> EventHotKeyID {
+        EventHotKeyID(signature: globalHotkeySignature, id: 2)
     }
 
     private func syncLiveApplicationIcon() {
