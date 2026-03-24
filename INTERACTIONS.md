@@ -40,8 +40,9 @@ When touching these paths, update the matching tests in `/Users/raffichilingarya
 - Typing, selection changes, and row refreshes must not snap width or height back down while the user is working.
 - Structural growth actions that create more visible content may still grow the panel beyond that floor when needed to reveal the new rows.
 - Navigation alone must not trigger that growth.
-- While the active row is the task draft, the panel should preserve roughly three available rows below it until the 10-row cap is reached.
-- Return-created task drafts and the matching collapse back out of that empty draft should fit the task-list height explicitly, including the symmetric shrink when the fresh empty draft is dismissed with `Up Arrow` or `Shift-Tab`.
+- Task-list height should correspond to `active task rows + 3`, capped at 10 visible rows. The temporary empty draft row does not count toward that height.
+- Entering an empty draft with `Return`, `Down Arrow`, or other keyboard navigation must not grow the panel on its own. The panel grows when that draft becomes a real task.
+- If an existing task is edited down to an empty draft, the panel may shrink immediately because the active task count has decreased.
 - That structural task grow/shrink should happen immediately, not through a longer animated window resize that can lag behind rapid keyboard entry.
 - Dragging a resize handle below the minimum width or height should rubber-band the whole panel in the drag direction while the content stays at minimum size.
 - Releasing a rubber-banded resize should settle the panel into its true minimum-sized final frame with a short ease-out.

@@ -205,7 +205,7 @@ final class TodoViewControllerInteractionTests: XCTestCase {
         XCTAssertEqual(structuralTarget.height, 240, accuracy: 0.5)
     }
 
-    func testActivatingDraftAddsOneMoreVisibleRowOfRunway() {
+    func testActivatingDraftDoesNotAddVisibleRunwayUntilItBecomesATask() {
         let store = seededStore(active: ["A", "B"])
         let controller = TodoViewController(store: store)
         controller.testingLoadView()
@@ -218,6 +218,9 @@ final class TodoViewControllerInteractionTests: XCTestCase {
         let snapshot = controller.testingSnapshot()
         XCTAssertEqual(snapshot.selected, .taskDraft)
         XCTAssertEqual(snapshot.draftInsertionIndex, 2)
+        XCTAssertEqual(controller.testingVisibleRowCount(), 5)
+
+        controller.testingTypeIntoCurrentEditor("C")
         XCTAssertEqual(controller.testingVisibleRowCount(), 6)
     }
 
@@ -232,14 +235,14 @@ final class TodoViewControllerInteractionTests: XCTestCase {
         XCTAssertEqual(controller.testingVisibleRowCount(), TodoStore.maxItems)
     }
 
-    func testCollapsingFreshDraftRemovesExtraRunwayRow() {
+    func testCollapsingFreshDraftWithoutTypingLeavesVisibleRowCountUnchanged() {
         let store = seededStore(active: ["A", "B"])
         let controller = TodoViewController(store: store)
         controller.testingLoadView()
         controller.testingSelectTask(at: 1)
 
         controller.submitRow()
-        XCTAssertEqual(controller.testingVisibleRowCount(), 6)
+        XCTAssertEqual(controller.testingVisibleRowCount(), 5)
 
         XCTAssertTrue(controller.moveUp())
 
@@ -248,7 +251,7 @@ final class TodoViewControllerInteractionTests: XCTestCase {
         XCTAssertEqual(controller.testingVisibleRowCount(), 5)
     }
 
-    func testSubmitRowGrowsRealWindowFrameForStructuralDraftRunway() {
+    func testSubmitRowDoesNotGrowRealWindowFrameUntilDraftBecomesTask() {
         let store = seededStore(active: ["A", "B", "C"])
         let controller = TodoViewController(store: store)
         controller.testingLoadView()
@@ -258,13 +261,17 @@ final class TodoViewControllerInteractionTests: XCTestCase {
 
         let initialHeight = window.frame.height
         controller.submitRow()
-        RunLoop.main.run(until: Date().addingTimeInterval(0.5))
+
+        XCTAssertEqual(controller.testingVisibleRowCount(), 6)
+        XCTAssertEqual(window.frame.height, initialHeight, accuracy: 0.5)
+
+        controller.testingTypeIntoCurrentEditor("D")
 
         XCTAssertEqual(controller.testingVisibleRowCount(), 7)
         XCTAssertGreaterThan(window.frame.height, initialHeight + 20)
     }
 
-    func testMoveDownIntoBottomDraftGrowsRealWindowFrameForStructuralDraftRunway() {
+    func testMoveDownIntoBottomDraftDoesNotGrowRealWindowFrameUntilTyping() {
         let store = seededStore(active: ["A", "B", "C"])
         let controller = TodoViewController(store: store)
         controller.testingLoadView()
@@ -277,10 +284,13 @@ final class TodoViewControllerInteractionTests: XCTestCase {
 
         let snapshot = controller.testingSnapshot()
         XCTAssertEqual(snapshot.selected, .taskDraft)
+        XCTAssertEqual(window.frame.height, initialHeight, accuracy: 0.5)
+
+        controller.testingTypeIntoCurrentEditor("D")
         XCTAssertGreaterThan(window.frame.height, initialHeight + 20)
     }
 
-    func testRepeatedReturnDrivenRowCreationKeepsGrowingRealWindowFrame() {
+    func testRepeatedReturnDrivenRowCreationOnlyGrowsAfterTypingIntoDraft() {
         let store = seededStore(active: ["A", "B", "C"])
         let controller = TodoViewController(store: store)
         controller.testingLoadView()
@@ -294,19 +304,27 @@ final class TodoViewControllerInteractionTests: XCTestCase {
         let afterFirstReturn = window.frame.height
 
         controller.testingTypeIntoCurrentEditor("asd")
+        let afterFirstType = window.frame.height
+
         controller.submitRow()
         let afterSecondReturn = window.frame.height
-
         controller.testingTypeIntoCurrentEditor("asd")
+        let afterSecondType = window.frame.height
+
         controller.submitRow()
         let afterThirdReturn = window.frame.height
+        controller.testingTypeIntoCurrentEditor("asd")
+        let afterThirdType = window.frame.height
 
-        XCTAssertGreaterThan(afterFirstReturn, initialHeight + 20)
-        XCTAssertGreaterThan(afterSecondReturn, afterFirstReturn + 20)
-        XCTAssertGreaterThan(afterThirdReturn, afterSecondReturn + 20)
+        XCTAssertEqual(afterFirstReturn, initialHeight, accuracy: 0.5)
+        XCTAssertGreaterThan(afterFirstType, afterFirstReturn + 20)
+        XCTAssertEqual(afterSecondReturn, afterFirstType, accuracy: 0.5)
+        XCTAssertGreaterThan(afterSecondType, afterSecondReturn + 20)
+        XCTAssertEqual(afterThirdReturn, afterSecondType, accuracy: 0.5)
+        XCTAssertGreaterThan(afterThirdType, afterThirdReturn + 20)
     }
 
-    func testCollapsingFreshDraftShrinksRealWindowFrameImmediately() {
+    func testCollapsingFreshDraftWithoutTypingDoesNotChangeRealWindowFrame() {
         let store = seededStore(active: ["A", "B", "C"])
         let controller = TodoViewController(store: store)
         controller.testingLoadView()
@@ -315,12 +333,12 @@ final class TodoViewControllerInteractionTests: XCTestCase {
         controller.testingSelectTask(at: 2)
 
         controller.submitRow()
-        let grownHeight = window.frame.height
+        let draftHeight = window.frame.height
 
         XCTAssertTrue(controller.moveUp())
 
         let collapsedHeight = window.frame.height
-        XCTAssertLessThan(collapsedHeight, grownHeight - 20)
+        XCTAssertEqual(collapsedHeight, draftHeight, accuracy: 0.5)
     }
 
     func testCollapsingDraftCreatedByDeletingTaskTextShrinksRealWindowFrame() {
@@ -336,12 +354,12 @@ final class TodoViewControllerInteractionTests: XCTestCase {
         let convertedHeight = window.frame.height
 
         XCTAssertEqual(controller.testingSnapshot().selected, .taskDraft)
-        XCTAssertEqual(convertedHeight, initialHeight, accuracy: 0.5)
+        XCTAssertLessThan(convertedHeight, initialHeight - 20)
 
         XCTAssertTrue(controller.moveUp())
 
         let collapsedHeight = window.frame.height
-        XCTAssertLessThan(collapsedHeight, convertedHeight - 20)
+        XCTAssertEqual(collapsedHeight, convertedHeight, accuracy: 0.5)
     }
 
     func testDeleteSelectedTaskShrinksRealWindowFrame() {

@@ -839,7 +839,10 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
             selectedRowID = .taskItem(insertedItem.id)
         }
         clearRangeSelectionState()
-        refreshRows(placeCaretAtEnd: false)
+        // Turning a draft into a real task is structural task-list growth and
+        // should re-fit immediately, independent of the ordinary no-shrink
+        // editing floor.
+        refreshRows(placeCaretAtEnd: false, heightResizeMode: .fitTaskStructuralContent)
         return insertedItem
     }
 
@@ -867,9 +870,11 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
     private func convertItemToDraft(_ item: TodoItem, newText: String) {
         guard let itemIndex = store.items.firstIndex(where: { $0.id == item.id }) else { return }
         store.deleteItem(id: item.id)
-        // Editing a task down to empty semantically converts that row into a
-        // structural draft. Backing out with Up Arrow / Shift-Tab should shrink
-        // the panel the same way as a Return-created runway draft.
+        // Editing a task down to empty reduces the active task count, so the
+        // panel should re-fit immediately. The resulting empty draft remains a
+        // structural draft for navigation/collapse purposes, but dismissing it
+        // later does not shrink again because the task-count change already
+        // happened at conversion time.
         setDraftPosition(itemIndex, text: newText, isStructuralRunway: true)
         selectedRowID = .taskDraft
         clearRangeSelectionState()
@@ -883,11 +888,11 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
             // transitions are where AppKit's full-size-content resize path was
             // producing the first-row/titlebar overlap bug.
             //
-            // When the active row is the draft, the panel should still leave
-            // three available rows below it so sequential Return-driven row
-            // creation keeps expanding the panel until we hit the 10-row cap.
-            let activeDraftRunway = selectedRowID == .taskDraft ? 1 : 0
-            return max(5, min(store.items.count + 3 + activeDraftRunway, TodoStore.maxItems))
+            // Task-list height is based on real task rows, not the temporary
+            // empty draft row. Entering a draft should not grow the panel on
+            // its own; the panel grows when that draft is promoted into a real
+            // task by typing or submission.
+            return max(5, min(store.items.count + 3, TodoStore.maxItems))
         case .archive:
             return max(5, min(store.archivedItems.count + 3, TodoStore.maxItems))
         }
