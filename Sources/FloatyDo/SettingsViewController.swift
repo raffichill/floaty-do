@@ -1198,7 +1198,11 @@ final class SettingsViewController: NSViewController {
     @objc private func blurToggled(_ sender: NSButton) {
         guard !isUpdatingControls else { return }
         commitPreferenceChange { updated in
-            updated.blurEnabled = sender.state == .on
+            let blurEnabled = sender.state == .on
+            updated.blurEnabled = blurEnabled
+            if !blurEnabled {
+                updated.windowOpacity = 1.0
+            }
         }
     }
 
