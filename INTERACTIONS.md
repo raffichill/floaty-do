@@ -40,6 +40,7 @@ When touching these paths, update the matching interaction tests in `/Users/raff
 - Manual user window resizing becomes the new floor for live task editing.
 - Typing, selection changes, and row refreshes must not snap width or height back down while the user is working.
 - Input, deletion, and completion flows may change height, but they must preserve the current window width.
+- While the archive tab is visible, keyboard navigation, restore, and permanent delete must not resize the window at all.
 - Structural growth actions that create more visible content may still grow the panel beyond that floor when needed to reveal the new rows.
 - Navigation alone must not trigger that growth.
 - Task-list height should correspond to `active task rows + 3`, capped at 10 visible rows. The temporary empty draft row does not count toward that height.
@@ -49,5 +50,6 @@ When touching these paths, update the matching interaction tests in `/Users/raff
 - Completion-driven shrink should animate on the same timing and easing as the rows reflowing upward into place.
 - Dragging a resize handle below the minimum width or height should rubber-band the whole panel in the drag direction while the content stays at minimum size.
 - Releasing a rubber-banded resize should settle the panel into its true minimum-sized final frame with a short ease-out.
+- On the archive tab, only manual drag resizing or `cmd+0` may change the window dimensions.
 - `cmd+0` is the only keyboard shortcut that should reset the main panel width.
 - `cmd+0` resets the main panel to its default size and then snaps it to the nearest screen corner.

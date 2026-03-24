@@ -4,6 +4,59 @@ import XCTest
 
 @MainActor
 final class TodoOverflowAndArchiveTests: TodoInteractionTestCase {
+    func testArchiveKeyboardNavigationDoesNotResizeWindowFrame() {
+        let store = seededStore(
+            active: ["A", "B"],
+            archived: ["Archived 1", "Archived 2", "Archived 3", "Archived 4"]
+        )
+        let controller = TodoViewController(store: store)
+        controller.testingLoadView()
+        let window = controller.testingAttachWindow(frame: NSRect(x: 0, y: 0, width: 350, height: 260))
+        controller.testingSelectArchive(at: 0)
+
+        let initialSize = window.frame.size
+        XCTAssertTrue(controller.moveDown())
+        XCTAssertTrue(controller.moveDown())
+
+        XCTAssertEqual(window.frame.width, initialSize.width, accuracy: 0.5)
+        XCTAssertEqual(window.frame.height, initialSize.height, accuracy: 0.5)
+    }
+
+    func testArchivePermanentDeleteDoesNotResizeWindowFrame() {
+        let store = seededStore(
+            active: ["A", "B"],
+            archived: ["Archived 1", "Archived 2", "Archived 3"]
+        )
+        let controller = TodoViewController(store: store)
+        controller.testingLoadView()
+        let window = controller.testingAttachWindow(frame: NSRect(x: 0, y: 0, width: 350, height: 260))
+        controller.testingSelectArchive(at: 1)
+
+        let initialSize = window.frame.size
+        controller.testingDeleteSelected()
+
+        XCTAssertEqual(window.frame.width, initialSize.width, accuracy: 0.5)
+        XCTAssertEqual(window.frame.height, initialSize.height, accuracy: 0.5)
+    }
+
+    func testArchiveKeyboardRestoreDoesNotResizeWindowFrame() {
+        let store = seededStore(
+            active: ["A", "B"],
+            archived: ["Archived 1", "Archived 2", "Archived 3"]
+        )
+        let controller = TodoViewController(store: store)
+        controller.testingLoadView()
+        let window = controller.testingAttachWindow(frame: NSRect(x: 0, y: 0, width: 350, height: 260))
+        controller.testingSelectArchive(at: 1)
+
+        let initialSize = window.frame.size
+        controller.testingCompleteSelected()
+        RunLoop.main.run(until: Date().addingTimeInterval(1.1))
+
+        XCTAssertEqual(window.frame.width, initialSize.width, accuracy: 0.5)
+        XCTAssertEqual(window.frame.height, initialSize.height, accuracy: 0.5)
+    }
+
     func testArchiveRestoreIsDisabledWhenTaskListIsFull() {
         let store = seededStore(
             active: ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J"],

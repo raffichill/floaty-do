@@ -1032,7 +1032,11 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
     ) {
         let resolvedPreferences = preferences ?? store.preferences
         let previousRowCount = rowModels.count
-        let usesTaskHeightFit = resize && heightResizeMode.usesStructuralFit
+        // The archive tab is a fixed browsing surface: keyboard restore/delete
+        // and navigation may update rows, but only manual drag resize or cmd+0
+        // should change the window dimensions while archive is visible.
+        let allowsAutomaticWindowResize = resize && currentTab == .tasks
+        let usesTaskHeightFit = allowsAutomaticWindowResize && heightResizeMode.usesStructuralFit
         let deferTaskHeightFitUntilAfterEditorAttachment = usesTaskHeightFit && selectedRowID == .taskDraft
         // Preserve explicit empty draft placement across ordinary redraws.
         // Keyboard navigation intentionally creates valid drafts above/between
@@ -1041,10 +1045,11 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         rowModels = buildRowModels()
         ensureSelectedRowExists()
         let effectiveAnimateResize = animateResize
+            && allowsAutomaticWindowResize
             && heightResizeMode.shouldAnimateWindowResize
             && shouldAnimateWindowResize(from: previousRowCount, to: rowModels.count)
 
-        let shouldPrestartAnimatedResize = resize
+        let shouldPrestartAnimatedResize = allowsAutomaticWindowResize
             && !deferTaskHeightFitUntilAfterEditorAttachment
             && effectiveAnimateResize
             && animatedLayout
@@ -1072,7 +1077,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
             selectionRevealRowID: selectionRevealRowID
         )
 
-        if resize && !deferTaskHeightFitUntilAfterEditorAttachment && !shouldPrestartAnimatedResize {
+        if allowsAutomaticWindowResize && !deferTaskHeightFitUntilAfterEditorAttachment && !shouldPrestartAnimatedResize {
             // Draft insertion is the only task-height path that needs a
             // post-editor second pass. Completion-driven shrink should resize
             // on this normal refresh path so it stays coupled to the reflow
@@ -1109,7 +1114,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
     }
 
     private func shouldAnimateWindowResize(from previousRowCount: Int, to newRowCount: Int) -> Bool {
-        guard currentTab == .tasks else { return true }
+        guard currentTab == .tasks else { return false }
         return max(previousRowCount, newRowCount) > 5
     }
 
