@@ -1,6 +1,49 @@
 import AppKit
 
+struct PanelResetPlacement {
+    static func nearestCornerOrigin(
+        currentOrigin: NSPoint,
+        windowSize: NSSize,
+        visibleFrame: NSRect,
+        padding: CGFloat
+    ) -> NSPoint {
+        let corners = [
+            NSPoint(
+                x: visibleFrame.minX + padding,
+                y: visibleFrame.minY + padding
+            ),
+            NSPoint(
+                x: visibleFrame.minX + padding,
+                y: visibleFrame.maxY - windowSize.height - padding
+            ),
+            NSPoint(
+                x: visibleFrame.maxX - windowSize.width - padding,
+                y: visibleFrame.minY + padding
+            ),
+            NSPoint(
+                x: visibleFrame.maxX - windowSize.width - padding,
+                y: visibleFrame.maxY - windowSize.height - padding
+            ),
+        ]
+
+        return corners.min {
+            squaredDistance(from: currentOrigin, to: $0) < squaredDistance(from: currentOrigin, to: $1)
+        } ?? currentOrigin
+    }
+
+    private static func squaredDistance(from lhs: NSPoint, to rhs: NSPoint) -> CGFloat {
+        let dx = lhs.x - rhs.x
+        let dy = lhs.y - rhs.y
+        return (dx * dx) + (dy * dy)
+    }
+}
+
 public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
+    private struct LiveResizeSession {
+        let session: LiveResizeRubberBanding.Session
+        var pendingSettleFrame: NSRect?
+    }
+
     private enum DefaultsKeys {
         static let didShowAboutOnFirstLaunch = "FloatyDo.didShowAboutOnFirstLaunch"
         static let items = "floatydo.items"
@@ -20,6 +63,9 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private let store = TodoStore()
     private var todoVC: TodoViewController!
     private var appEventMonitor: Any?
+    private var liveResizeSession: LiveResizeSession?
+    private var liveResizeTrackingTimer: Timer?
+    private var isApplyingRubberBandFrame = false
 
     public func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
@@ -51,8 +97,10 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
         // App-level shortcuts: cmd+1/cmd+2 switch main tabs unless settings is
         // visible, in which case cmd+1/cmd+2/cmd+3 switch settings tabs.
-        // cmd+3 opens settings on About, cmd+, opens settings on Theme, cmd+Q
-        // quits, cmd+W hides panel, cmd+0 resets the main window size,
+        // cmd+3 opens settings on Theme unless settings is already visible,
+        // cmd+, opens settings on Theme, cmd+Q quits, cmd+W hides panel,
+        // cmd+0 resets the main window size and snaps it to the nearest
+        // screen corner,
         // cmd+z/cmd+shift+z undo/redo, and ctrl+option+arrow snaps the panel
         // to screen edges/corners.
         appEventMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
@@ -131,11 +179,15 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 return nil
             }
             if characters == "3" {
-                self.todoVC.openSettingsWindow(initialTab: .about)
+                if self.todoVC.isSettingsWindowVisible {
+                    self.todoVC.openSettingsWindow(initialTab: .about)
+                } else {
+                    self.todoVC.openSettingsWindow(initialTab: .appearance)
+                }
                 return nil
             }
             if characters == "0" {
-                self.todoVC.resetWindowSize()
+                self.resetPanelWindowSizeAndSnap()
                 return nil
             }
             return event
@@ -204,9 +256,69 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         return todoVC.undoManager
     }
 
+    public func windowWillStartLiveResize(_ notification: Notification) {
+        guard notification.object as AnyObject? === panel else { return }
+        let mouseLocation = NSEvent.mouseLocation
+        let edges = LiveResizeRubberBanding.dragEdges(for: mouseLocation, in: panel.frame)
+        let session = LiveResizeRubberBanding.Session(
+            initialFrame: panel.frame,
+            initialMouseLocation: mouseLocation,
+            edges: edges,
+            minSize: panel.minSize
+        )
+        liveResizeSession = LiveResizeSession(session: session, pendingSettleFrame: nil)
+        startLiveResizeTracking()
+    }
+
+    public func windowWillResize(_ sender: NSWindow, to frameSize: NSSize) -> NSSize {
+        guard sender === panel, let liveResizeSession else { return frameSize }
+        let result = LiveResizeRubberBanding.result(
+            for: liveResizeSession.session,
+            currentMouseLocation: NSEvent.mouseLocation
+        )
+        self.liveResizeSession?.pendingSettleFrame = result.isRubberBanding ? result.settleFrame : nil
+        return result.settleFrame.size
+    }
+
+    public func windowDidResize(_ notification: Notification) {
+        guard notification.object as AnyObject? === panel else { return }
+        guard panel.inLiveResize, let liveResizeSession, !isApplyingRubberBandFrame else { return }
+
+        let result = LiveResizeRubberBanding.result(
+            for: liveResizeSession.session,
+            currentMouseLocation: NSEvent.mouseLocation
+        )
+        self.liveResizeSession?.pendingSettleFrame = result.isRubberBanding ? result.settleFrame : nil
+
+        let targetFrame = result.isRubberBanding ? result.displayFrame : result.settleFrame
+        guard !framesApproximatelyEqual(panel.frame, targetFrame) else { return }
+
+        isApplyingRubberBandFrame = true
+        panel.setFrame(targetFrame, display: true, animate: false)
+        isApplyingRubberBandFrame = false
+    }
+
     public func windowDidEndLiveResize(_ notification: Notification) {
         guard notification.object as AnyObject? === panel else { return }
-        todoVC.recordUserResizedWindowSize(panel.frame.size)
+        stopLiveResizeTracking()
+        let pendingSettleFrame = liveResizeSession?.pendingSettleFrame
+        liveResizeSession = nil
+
+        guard let targetFrame = pendingSettleFrame, !framesApproximatelyEqual(panel.frame, targetFrame) else {
+            todoVC.recordUserResizedWindowSize(panel.frame.size)
+            return
+        }
+
+        NSAnimationContext.runAnimationGroup(
+            { context in
+                context.duration = LiveResizeRubberBanding.releaseDuration
+                context.timingFunction = CAMediaTimingFunction(controlPoints: 0.22, 1.0, 0.36, 1.0)
+                panel.animator().setFrame(targetFrame, display: true)
+            },
+            completionHandler: { [weak self] in
+                self?.todoVC.recordUserResizedWindowSize(targetFrame.size)
+            }
+        )
     }
 
     @objc private func statusItemClicked() {
@@ -322,5 +434,68 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             NSApp.activate(ignoringOtherApps: true)
         }
         panel.toggleFullScreen(nil)
+    }
+
+    private func framesApproximatelyEqual(_ lhs: NSRect, _ rhs: NSRect, tolerance: CGFloat = 0.5) -> Bool {
+        abs(lhs.origin.x - rhs.origin.x) <= tolerance &&
+        abs(lhs.origin.y - rhs.origin.y) <= tolerance &&
+        abs(lhs.width - rhs.width) <= tolerance &&
+        abs(lhs.height - rhs.height) <= tolerance
+    }
+
+    private func resetPanelWindowSizeAndSnap() {
+        todoVC.resetWindowSize()
+
+        guard !panel.styleMask.contains(.fullScreen) else { return }
+        guard let screen = panel.screen ?? NSScreen.main ?? NSScreen.screens.first else { return }
+
+        let visibleFrame = screen.visibleFrame
+        let padding = CGFloat(store.preferences.snapPadding)
+        let nearestCorner = PanelResetPlacement.nearestCornerOrigin(
+            currentOrigin: panel.frame.origin,
+            windowSize: panel.frame.size,
+            visibleFrame: visibleFrame,
+            padding: padding
+        )
+
+        guard panel.frame.origin != nearestCorner else { return }
+        panel.setFrameOrigin(nearestCorner)
+    }
+
+    private func startLiveResizeTracking() {
+        stopLiveResizeTracking()
+
+        let timer = Timer(timeInterval: 1.0 / 120.0, repeats: true) { [weak self] _ in
+            self?.updateLiveResizeDisplay(currentMouseLocation: NSEvent.mouseLocation)
+        }
+        liveResizeTrackingTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
+        RunLoop.main.add(timer, forMode: .eventTracking)
+    }
+
+    private func stopLiveResizeTracking() {
+        liveResizeTrackingTimer?.invalidate()
+        liveResizeTrackingTimer = nil
+    }
+
+    private func updateLiveResizeDisplay(currentMouseLocation: NSPoint) {
+        guard let liveResizeSession, !isApplyingRubberBandFrame else { return }
+
+        let result = LiveResizeRubberBanding.result(
+            for: liveResizeSession.session,
+            currentMouseLocation: currentMouseLocation
+        )
+        self.liveResizeSession?.pendingSettleFrame = result.isRubberBanding ? result.settleFrame : nil
+
+        // Only take over the frame while banding, or while settling back from a
+        // previously banded state during the same drag. Standard above-minimum
+        // resizing should remain AppKit-driven.
+        let targetFrame = result.isRubberBanding ? result.displayFrame : result.settleFrame
+        let shouldDriveFrame = result.isRubberBanding || !framesApproximatelyEqual(panel.frame, result.settleFrame)
+        guard shouldDriveFrame, !framesApproximatelyEqual(panel.frame, targetFrame) else { return }
+
+        isApplyingRubberBandFrame = true
+        panel.setFrame(targetFrame, display: true, animate: false)
+        isApplyingRubberBandFrame = false
     }
 }

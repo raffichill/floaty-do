@@ -558,7 +558,7 @@ final class SettingsViewController: NSViewController {
             ("Delete selected", ["command", "delete"]),
             ("Show todo / Theme", ["command", "1"]),
             ("Show archive / Shortcuts", ["command", "2"]),
-            ("Open settings / About", ["command", "3"]),
+            ("Open theme / About", ["command", "3"]),
             ("Navigate", ["up/down"]),
             ("Select multiple", ["shift", "up/down"]),
             ("Jump to top or bottom", ["command", "up/down"]),
