@@ -1,6 +1,6 @@
 import AppKit
 
-final class SettingsViewController: NSViewController {
+final class SettingsViewController: NSViewController, NSPopoverDelegate {
     private enum Metrics {
         static let outerPadding = NSEdgeInsets(top: 20, left: 34, bottom: 56, right: 34)
         static let titleTopInset: CGFloat = 10
@@ -37,7 +37,8 @@ final class SettingsViewController: NSViewController {
         static let transparencyItemSpacing: CGFloat = 12
         static let shortcutsColumnWidth: CGFloat = 220
         static let shortcutsColumnGap: CGFloat = 16
-        static let shortcutsRowSpacing: CGFloat = 14
+        static let shortcutsRowSpacing: CGFloat = 10
+        static let shortcutsSectionGap: CGFloat = 25
         static let aboutBlockWidth: CGFloat = 400
         static let opacityStops: [Double] = [0.67, 0.78, 0.89, 1.0]
     }
@@ -195,7 +196,7 @@ final class SettingsViewController: NSViewController {
     private var displayedTab: SettingsTab?
     private var transitionGeneration = 0
     private var hoveredAboutLink: String?
-    private let titleLabel = NSTextField(labelWithString: "Settings")
+    private let titleLabel = NSTextField(labelWithString: "FloatyDo")
     private let tabStack = NSStackView()
     private let headerView = NSView()
     private let divider = NSView()
@@ -204,6 +205,7 @@ final class SettingsViewController: NSViewController {
     private var primaryLabels: [NSTextField] = []
     private var secondaryLabels: [NSTextField] = []
     private var shortcutDescriptionLabels: [NSTextField] = []
+    private var shortcutConjunctionLabels: [NSTextField] = []
     private var keycapLabels: [NSTextField] = []
     private var keycapBackgroundViews: [NSView] = []
 
@@ -217,6 +219,7 @@ final class SettingsViewController: NSViewController {
     private let blurToggle = NSSwitch()
     private let transparencyLabel = NSTextField(labelWithString: "Opacity")
     private let transparencySlider = NSSlider()
+    private let hotkeyRecorder = HotkeyRecorderButton()
     private let fontPopup = NSPopUpButton()
     private let aboutTextView = HoverAwareTextView(frame: .zero)
     private let resetFontButton = NSButton(title: "Reset", target: nil, action: nil)
@@ -229,6 +232,7 @@ final class SettingsViewController: NSViewController {
 
     private var currentAppliedIconTheme: BuiltInTheme
     private var isApplyingPrimaryIconChange = false
+    private var hotkeyCapturePopover: NSPopover?
 
     private var themeableButtons: [NSButton] {
         [
@@ -331,6 +335,15 @@ final class SettingsViewController: NSViewController {
         reportPreferredWindowHeight(animated: false)
     }
 
+    override func viewWillDisappear() {
+        super.viewWillDisappear()
+        dismissHotkeyCapturePopover()
+    }
+
+    var isHotkeyCaptureActive: Bool {
+        hotkeyCapturePopover?.isShown == true
+    }
+
     func showAppearanceTab(animated: Bool = false) {
         loadViewIfNeeded()
         selectTab(.appearance, animated: animated)
@@ -373,6 +386,7 @@ final class SettingsViewController: NSViewController {
     }
 
     private func configureControls() {
+        configureHotkeyRecorder()
         configureThemeButtons()
         configureBlurToggle()
         configureTransparencySlider()
@@ -438,6 +452,9 @@ final class SettingsViewController: NSViewController {
     private func selectTab(_ tab: SettingsTab, animated explicitAnimated: Bool? = nil) {
         let outgoingTab = displayedTab ?? tab
         selectedTab = tab
+        if hotkeyCapturePopover?.isShown == true {
+            dismissHotkeyCapturePopover()
+        }
         if tab != .about, hoveredAboutLink != nil {
             hoveredAboutLink = nil
             updateAboutTextView()
@@ -549,26 +566,41 @@ final class SettingsViewController: NSViewController {
         let stack = NSStackView()
         stack.orientation = .vertical
         stack.alignment = .centerX
-        stack.spacing = Metrics.shortcutsRowSpacing
+        stack.spacing = 0
         stack.translatesAutoresizingMaskIntoConstraints = false
 
-        [
-            ("New row below", ["return"]),
-            ("Complete selected", ["command", "return"]),
-            ("Delete selected", ["command", "delete"]),
-            ("Show todo / Theme", ["command", "1"]),
-            ("Show archive / Shortcuts", ["command", "2"]),
-            ("Open theme / About", ["command", "3"]),
-            ("Navigate", ["up/down"]),
-            ("Select multiple", ["shift", "up/down"]),
-            ("Jump to top or bottom", ["command", "up/down"]),
-            ("Select to top or bottom", ["command", "shift", "up/down"]),
-            ("Open theme", ["command", ","]),
-            ("Reset window size", ["command", "0"]),
-            ("Snap window", ["control", "option", "arrow"]),
-            ("Fullscreen", ["control", "command", "F"]),
-        ].forEach { label, shortcut in
-            stack.addArrangedSubview(makeShortcutRow(label: label, shortcut: shortcut))
+        let sections: [NSView] = [
+            makeShortcutsSection(rows: [
+                makeShortcutRecorderRow(label: "Global Hotkey")
+            ]),
+            makeShortcutsSection(rows: [
+                makeShortcutRow(label: "Complete selected", shortcut: ["command", "return"]),
+                makeShortcutRow(label: "Delete selected", shortcut: ["command", "delete"]),
+                makeShortcutRow(label: "New row below", shortcut: ["return"]),
+            ]),
+            makeShortcutsSection(rows: [
+                makeShortcutRow(label: "Navigate", shortcut: ["up/down"]),
+                makeShortcutRow(label: "Select multiple", shortcut: ["shift", "up/down"]),
+                makeShortcutRow(label: "Jump to top or bottom", shortcut: ["command", "up/down"]),
+                makeShortcutRow(label: "Select to top or bottom", shortcut: ["command", "shift", "up/down"]),
+            ]),
+            makeShortcutsSection(rows: [
+                makeShortcutRow(label: "Show todo list", shortcut: ["command", "1"]),
+                makeShortcutRow(label: "Show archive", shortcut: ["command", "2"]),
+                makeShortcutRow(label: "Show settings", shortcuts: [["command", "3"], ["command", ","]]),
+            ]),
+            makeShortcutsSection(rows: [
+                makeShortcutRow(label: "Reset window size", shortcut: ["command", "0"]),
+                makeShortcutRow(label: "Snap window", shortcut: ["control", "option", "arrow"]),
+                makeShortcutRow(label: "Fullscreen", shortcut: ["control", "command", "F"]),
+            ]),
+        ]
+
+        for (index, section) in sections.enumerated() {
+            stack.addArrangedSubview(section)
+            if index < sections.count - 1 {
+                stack.setCustomSpacing(Metrics.shortcutsSectionGap, after: section)
+            }
         }
 
         let container = NSView()
@@ -586,6 +618,60 @@ final class SettingsViewController: NSViewController {
         ])
 
         return container
+    }
+
+    private func makeShortcutsSection(rows: [NSView]) -> NSView {
+        let stack = NSStackView(views: rows)
+        stack.orientation = .vertical
+        stack.alignment = .centerX
+        stack.spacing = Metrics.shortcutsRowSpacing
+        return stack
+    }
+
+    private func makeShortcutRecorderRow(label: String) -> NSView {
+        let descriptionLabel = NSTextField(labelWithString: label)
+        descriptionLabel.font = .systemFont(ofSize: 12)
+        descriptionLabel.alignment = .right
+        descriptionLabel.translatesAutoresizingMaskIntoConstraints = false
+        descriptionLabel.widthAnchor.constraint(equalToConstant: Metrics.shortcutsColumnWidth)
+            .isActive = true
+        secondaryLabels.append(descriptionLabel)
+        shortcutDescriptionLabels.append(descriptionLabel)
+
+        let recorderContainer = NSView()
+        recorderContainer.translatesAutoresizingMaskIntoConstraints = false
+        recorderContainer.widthAnchor.constraint(equalToConstant: Metrics.shortcutsColumnWidth)
+            .isActive = true
+        recorderContainer.addSubview(hotkeyRecorder)
+
+        let recorderWidth = measuredShortcutGroupWidth(["command", "return"]) * 2
+
+        NSLayoutConstraint.activate([
+            hotkeyRecorder.leadingAnchor.constraint(equalTo: recorderContainer.leadingAnchor),
+            hotkeyRecorder.widthAnchor.constraint(equalToConstant: recorderWidth),
+            hotkeyRecorder.centerYAnchor.constraint(equalTo: recorderContainer.centerYAnchor),
+            hotkeyRecorder.topAnchor.constraint(greaterThanOrEqualTo: recorderContainer.topAnchor),
+            hotkeyRecorder.bottomAnchor.constraint(lessThanOrEqualTo: recorderContainer.bottomAnchor),
+        ])
+
+        let row = NSStackView(views: [descriptionLabel, recorderContainer])
+        row.orientation = .horizontal
+        row.alignment = .centerY
+        row.spacing = Metrics.shortcutsColumnGap
+        return row
+    }
+
+    private func measuredShortcutGroupWidth(_ shortcut: [String]) -> CGFloat {
+        let keycapWidths = shortcut.map { measuredKeycapWidth(for: $0) }
+        let spacing = CGFloat(max(0, shortcut.count - 1)) * 2
+        return keycapWidths.reduce(0, +) + spacing
+    }
+
+    private func measuredKeycapWidth(for text: String) -> CGFloat {
+        let displayText = keycapDisplayText(for: text)
+        let font = NSFont.systemFont(ofSize: 11, weight: .regular)
+        let labelWidth = ceil((displayText as NSString).size(withAttributes: [.font: font]).width)
+        return labelWidth + 18
     }
 
     private func makeAboutPage() -> NSView {
@@ -675,6 +761,11 @@ final class SettingsViewController: NSViewController {
         applyIconButton.target = self
         applyIconButton.action = #selector(applyIconAndRelaunch(_:))
         configureResetButton(applyIconButton)
+    }
+
+    private func configureHotkeyRecorder() {
+        hotkeyRecorder.target = self
+        hotkeyRecorder.action = #selector(toggleHotkeyCapturePopover(_:))
     }
 
     private func configureTransparencySlider() {
@@ -1072,6 +1163,61 @@ final class SettingsViewController: NSViewController {
         return row
     }
 
+    private func makeShortcutRow(label: String, shortcuts: [[String]]) -> NSView {
+        let descriptionLabel = NSTextField(labelWithString: label)
+        descriptionLabel.font = .systemFont(ofSize: 12)
+        descriptionLabel.alignment = .right
+        descriptionLabel.translatesAutoresizingMaskIntoConstraints = false
+        descriptionLabel.widthAnchor.constraint(equalToConstant: Metrics.shortcutsColumnWidth)
+            .isActive = true
+        secondaryLabels.append(descriptionLabel)
+        shortcutDescriptionLabels.append(descriptionLabel)
+
+        let keysRow = NSStackView()
+        keysRow.orientation = .horizontal
+        keysRow.alignment = .centerY
+        keysRow.spacing = 6
+        keysRow.translatesAutoresizingMaskIntoConstraints = false
+
+        for (index, shortcut) in shortcuts.enumerated() {
+            keysRow.addArrangedSubview(makeShortcutKeycapGroup(shortcut))
+            if index < shortcuts.count - 1 {
+                let orLabel = NSTextField(labelWithString: "or")
+                orLabel.font = .systemFont(ofSize: 11, weight: .regular)
+                shortcutConjunctionLabels.append(orLabel)
+                secondaryLabels.append(orLabel)
+                keysRow.addArrangedSubview(orLabel)
+            }
+        }
+
+        let keysContainer = NSView()
+        keysContainer.translatesAutoresizingMaskIntoConstraints = false
+        keysContainer.widthAnchor.constraint(equalToConstant: Metrics.shortcutsColumnWidth)
+            .isActive = true
+        keysContainer.addSubview(keysRow)
+
+        NSLayoutConstraint.activate([
+            keysRow.leadingAnchor.constraint(equalTo: keysContainer.leadingAnchor),
+            keysRow.centerYAnchor.constraint(equalTo: keysContainer.centerYAnchor),
+            keysRow.topAnchor.constraint(greaterThanOrEqualTo: keysContainer.topAnchor),
+            keysRow.bottomAnchor.constraint(lessThanOrEqualTo: keysContainer.bottomAnchor),
+        ])
+
+        let row = NSStackView(views: [descriptionLabel, keysContainer])
+        row.orientation = .horizontal
+        row.alignment = .centerY
+        row.spacing = Metrics.shortcutsColumnGap
+        return row
+    }
+
+    private func makeShortcutKeycapGroup(_ shortcut: [String]) -> NSView {
+        let stack = NSStackView(views: shortcut.map(makeKeycap))
+        stack.orientation = .horizontal
+        stack.alignment = .centerY
+        stack.spacing = 2
+        return stack
+    }
+
     private func makeKeycap(_ text: String) -> NSView {
         let label = NSTextField(labelWithString: keycapDisplayText(for: text))
         label.font = .systemFont(ofSize: 11, weight: .regular)
@@ -1134,6 +1280,7 @@ final class SettingsViewController: NSViewController {
         blurToggle.state = preferences.blurEnabled ? .on : .off
         transparencySlider.doubleValue = Double(nearestOpacityStopIndex(for: preferences.clampedWindowOpacity))
         transparencySlider.isEnabled = opacityControlsEnabled
+        hotkeyRecorder.hotkey = preferences.globalHotkey
 
         if let index = FontStylePreset.allCases.firstIndex(of: preferences.fontStyle) {
             fontPopup.selectItem(at: index)
@@ -1204,6 +1351,47 @@ final class SettingsViewController: NSViewController {
                 updated.windowOpacity = 1.0
             }
         }
+    }
+
+    @objc private func toggleHotkeyCapturePopover(_ sender: NSButton) {
+        if hotkeyCapturePopover?.isShown == true {
+            dismissHotkeyCapturePopover()
+            return
+        }
+
+        let contentController = HotkeyCapturePopoverViewController()
+        contentController.backgroundColor = preferences.panelBackgroundColor.withAlphaComponent(0.98)
+        contentController.borderColor = preferences.subtleStrokeColor
+        contentController.primaryTextColor = preferences.primaryTextColor
+        contentController.secondaryTextColor = preferences.secondaryTextColor
+        contentController.keycapFillColor = preferences.activeFillColor
+        contentController.onCapture = { [weak self] hotkey in
+            self?.dismissHotkeyCapturePopover()
+            self?.commitPreferenceChange { updated in
+                updated.globalHotkey = hotkey
+            }
+        }
+        contentController.onCancel = { [weak self] in
+            self?.dismissHotkeyCapturePopover()
+        }
+
+        let popover = NSPopover()
+        popover.animates = true
+        popover.behavior = .transient
+        popover.contentViewController = contentController
+        popover.delegate = self
+        hotkeyCapturePopover = popover
+        popover.show(relativeTo: sender.bounds, of: sender, preferredEdge: .maxY)
+        contentController.beginRecording(currentHotkey: preferences.globalHotkey)
+    }
+
+    private func dismissHotkeyCapturePopover() {
+        hotkeyCapturePopover?.performClose(nil)
+        hotkeyCapturePopover = nil
+    }
+
+    func popoverDidClose(_ notification: Notification) {
+        hotkeyCapturePopover = nil
     }
 
     @objc private func fontChanged(_ sender: NSPopUpButton) {
@@ -1351,10 +1539,14 @@ final class SettingsViewController: NSViewController {
             min(1.0, preferences.secondaryTextColor.alphaComponent + 0.10)
         )
         shortcutDescriptionLabels.forEach { $0.textColor = boostedShortcutLabelColor }
+        shortcutConjunctionLabels.forEach { $0.textColor = boostedShortcutLabelColor }
         keycapLabels.forEach { $0.textColor = preferences.secondaryTextColor }
         keycapBackgroundViews.forEach {
             $0.layer?.backgroundColor = preferences.activeFillColor.cgColor
         }
+        hotkeyRecorder.textColor = preferences.primaryTextColor
+        hotkeyRecorder.borderColor = preferences.subtleStrokeColor
+        hotkeyRecorder.hoverBorderColor = preferences.secondaryTextColor.withAlphaComponent(0.42)
         themeableButtons.forEach { applyThemeStyle(to: $0) }
         applyThemeStyle(to: fontPopup)
         updateAboutTextView()

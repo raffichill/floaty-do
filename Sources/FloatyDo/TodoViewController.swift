@@ -631,6 +631,10 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         settingsWindowController?.window?.isVisible == true
     }
 
+    var isSettingsHotkeyCaptureActive: Bool {
+        settingsWindowController?.isHotkeyCaptureActive == true
+    }
+
     @discardableResult
     private func dismissSettingsWindowIfVisible() -> Bool {
         guard let window = settingsWindowController?.window, window.isVisible else {

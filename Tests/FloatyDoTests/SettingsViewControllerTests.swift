@@ -1,4 +1,5 @@
 import AppKit
+import Carbon.HIToolbox
 import XCTest
 @testable import FloatyDoLib
 
@@ -50,5 +51,17 @@ final class SettingsViewControllerTests: XCTestCase {
         controller.loadViewIfNeeded()
 
         XCTAssertNotNil(controller.view)
+    }
+
+    func testGlobalHotkeyDisplayStringIncludesStoredAnsiCharacterKeys() {
+        let hotkey = GlobalHotkey(
+            keyCode: UInt16(kVK_ANSI_K),
+            command: false,
+            option: true,
+            control: false,
+            shift: false
+        )
+
+        XCTAssertEqual(hotkey.displayString, "⌥ K")
     }
 }
