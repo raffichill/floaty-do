@@ -290,6 +290,24 @@ final class TodoViewControllerInteractionTests: XCTestCase {
         XCTAssertGreaterThan(window.frame.height, initialHeight + 20)
     }
 
+    func testMoveDownFromDefaultBottomDraftStaysOnDraftAndProvidesBoundaryFeedback() {
+        let store = seededStore(active: ["A", "B", "C"])
+        let controller = TodoViewController(store: store)
+        controller.testingLoadView()
+        controller.testingSelectTask(at: 2)
+
+        XCTAssertTrue(controller.moveDown())
+        let beforeSnapshot = controller.testingSnapshot()
+
+        XCTAssertTrue(controller.moveDown())
+
+        let afterSnapshot = controller.testingSnapshot()
+        XCTAssertEqual(afterSnapshot.selected, .taskDraft)
+        XCTAssertEqual(afterSnapshot.draftInsertionIndex, store.items.count)
+        XCTAssertEqual(afterSnapshot, beforeSnapshot)
+        XCTAssertEqual(controller.testingLastBoundaryShakeRowID(), .taskDraft)
+    }
+
     func testRepeatedReturnDrivenRowCreationOnlyGrowsAfterTypingIntoDraft() {
         let store = seededStore(active: ["A", "B", "C"])
         let controller = TodoViewController(store: store)

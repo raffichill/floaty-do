@@ -71,6 +71,9 @@ final class TodoListView: NSView {
     private var pressedRowID: TodoRowID?
     private var selectionRevealRowID: TodoRowID?
     private var interactionState: InteractionState = .idle
+    #if DEBUG
+    private(set) var lastBoundaryShakeRowID: TodoRowID?
+    #endif
 
     override var isFlipped: Bool { true }
     override var acceptsFirstResponder: Bool { true }
@@ -194,6 +197,14 @@ final class TodoListView: NSView {
 
     func rowView(for rowID: TodoRowID) -> TodoRowView? {
         rowViews[rowID]
+    }
+
+    func indicateBoundaryShake(for rowID: TodoRowID) {
+        guard let rowView = rowViews[rowID] else { return }
+        #if DEBUG
+        lastBoundaryShakeRowID = rowID
+        #endif
+        rowView.playBoundaryShake()
     }
 
     func scrollRowToVisible(_ rowID: TodoRowID?, behavior: ScrollBehavior = .ensureVisible) {
@@ -985,6 +996,20 @@ final class TodoRowView: NSView {
 
     func clearEditingPresentation() {
         editingTextView.restoreDisplayState(text: model.text, showsStrikethrough: model.showsStrikethrough)
+    }
+
+    func playBoundaryShake() {
+        guard let layer else { return }
+
+        layer.removeAnimation(forKey: "boundaryShake")
+
+        let shake = CAKeyframeAnimation(keyPath: "transform.translation.x")
+        shake.values = [0.0, -5.0, 4.0, -2.5, 1.5, 0.0]
+        shake.keyTimes = [0.0, 0.18, 0.42, 0.68, 0.86, 1.0]
+        shake.duration = 0.24
+        shake.isAdditive = true
+        shake.timingFunction = CAMediaTimingFunction(name: .easeOut)
+        layer.add(shake, forKey: "boundaryShake")
     }
 
     func hitZone(at point: NSPoint) -> TodoListView.HitZone {

@@ -814,6 +814,24 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         return true
     }
 
+    private func handleTerminalBottomDraftBoundary(step: Int) -> Bool {
+        guard currentTab == .tasks,
+              step > 0,
+              selectedRowID == .taskDraft,
+              taskDraft.isEmpty,
+              taskDraft.insertionIndex == defaultDraftInsertionIndex else {
+            return false
+        }
+
+        // The default bottom draft is the terminal input state for the task
+        // list. Down-arrow / Tab should not collapse it upward or move
+        // selection away; they should simply indicate that the user is already
+        // at the end and should type into this row.
+        listView.indicateBoundaryShake(for: .taskDraft)
+        syncVisibleEditorState()
+        return true
+    }
+
     private func normalizeDraftBeforeStructuralAction() {
         guard currentTab == .tasks else { return }
 
@@ -2106,6 +2124,9 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         if collapsedRangeSelection {
             clearRangeSelectionState()
         }
+        if handleTerminalBottomDraftBoundary(step: 1) {
+            return true
+        }
         if currentTab == .tasks, collapseSelectedDraftForNavigation(step: 1) {
             return true
         }
@@ -2568,6 +2589,11 @@ extension TodoViewController {
         case .filler:
             return .filler
         }
+    }
+
+    @MainActor
+    func testingLastBoundaryShakeRowID() -> TodoRowID? {
+        listView.lastBoundaryShakeRowID
     }
 }
 #endif
