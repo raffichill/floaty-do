@@ -24,6 +24,11 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         static let headerAreaOutlineColor = NSColor.systemPink.withAlphaComponent(0.9)
     }
 
+    private enum WindowWidthResizeMode {
+        case preserveCurrentFrame
+        case resetToDefaultPanelWidth
+    }
+
     private static let completionResizeTraceURL = URL(fileURLWithPath: "/tmp/floatydo-completion-resize.log")
 
     private let store: TodoStore
@@ -714,7 +719,8 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         userPreferredWindowWidth = nil
         userPreferredWindowHeight = nil
         refreshRows(resize: false, animateResize: false, placeCaretAtEnd: false)
-        resizeWindow(animate: false)
+        // cmd+0 is the only keyboard path that should reapply the default panel width.
+        resizeWindow(animate: false, widthResizeMode: .resetToDefaultPanelWidth)
     }
 
     func recordUserResizedWindowSize(_ size: NSSize) {
@@ -764,9 +770,10 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         minSize: NSSize,
         heightResizeMode: TaskListHeightResizeMode = .respectUserFloor
     ) -> NSSize {
-        // A manual resize becomes the no-shrink floor for ordinary editing, but
-        // structural growth is still allowed to expand the panel beyond that
-        // floor when new rows are created or restored.
+        // A manual resize becomes the no-shrink floor for ordinary editing.
+        // Width is only reapplied during explicit reset flows like cmd+0;
+        // ordinary input/delete/complete paths preserve the live window width
+        // in resizeWindow().
         let resolvedHeight: CGFloat
         switch heightResizeMode {
         case .respectUserFloor:
@@ -2279,7 +2286,8 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
     private func resizeWindow(
         animate: Bool = true,
         duration: TimeInterval? = nil,
-        heightResizeMode: TaskListHeightResizeMode = .respectUserFloor
+        heightResizeMode: TaskListHeightResizeMode = .respectUserFloor,
+        widthResizeMode: WindowWidthResizeMode = .preserveCurrentFrame
     ) {
         guard let window = view.window else { return }
         guard !isInNativeFullScreen else { return }
@@ -2295,6 +2303,13 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
             heightResizeMode: heightResizeMode
         )
         let oldFrame = window.frame
+        let targetWidth: CGFloat
+        switch widthResizeMode {
+        case .preserveCurrentFrame:
+            targetWidth = oldFrame.width
+        case .resetToDefaultPanelWidth:
+            targetWidth = targetSize.width
+        }
         let padding = CGFloat(store.preferences.snapPadding)
         let visibleFrame = window.screen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? oldFrame
 
@@ -2304,14 +2319,17 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         )
 
         let clampedOrigin = NSPoint(
-            x: min(max(unclampedOrigin.x, visibleFrame.minX + padding), visibleFrame.maxX - targetSize.width - padding),
+            x: min(max(unclampedOrigin.x, visibleFrame.minX + padding), visibleFrame.maxX - targetWidth - padding),
             y: min(max(unclampedOrigin.y, visibleFrame.minY + padding), visibleFrame.maxY - targetSize.height - padding)
         )
 
-        let newFrame = NSRect(origin: clampedOrigin, size: targetSize)
+        let newFrame = NSRect(
+            origin: clampedOrigin,
+            size: NSSize(width: targetWidth, height: targetSize.height)
+        )
         if case .fitActiveTaskRows(let animated) = heightResizeMode {
             traceCompletionResize(
-                "resizeWindow mode=fitActiveTaskRows(animated:\(animated)) animate=\(animate) duration=\(String(describing: duration)) " +
+                "resizeWindow mode=fitActiveTaskRows(animated:\(animated)) widthMode=\(widthResizeMode) animate=\(animate) duration=\(String(describing: duration)) " +
                 "items=\(store.items.count) visibleRows=\(visibleRowCount) oldFrame=\(oldFrame) newFrame=\(newFrame)"
             )
         }
