@@ -208,7 +208,7 @@ final class HotkeyRecorderButton: PressScaleButton {
 
         container.wantsLayer = true
         container.translatesAutoresizingMaskIntoConstraints = false
-        container.layer?.cornerRadius = 8
+        container.layer?.cornerRadius = 4
         container.layer?.borderWidth = 1
 
         titleField.alignment = .center

@@ -644,7 +644,7 @@ final class SettingsViewController: NSViewController, NSPopoverDelegate {
             .isActive = true
         recorderContainer.addSubview(hotkeyRecorder)
 
-        let recorderWidth = measuredShortcutGroupWidth(["command", "return"]) * 2
+        let recorderWidth = measuredShortcutGroupWidth(["command", "return"]) * 1.6
 
         NSLayoutConstraint.activate([
             hotkeyRecorder.leadingAnchor.constraint(equalTo: recorderContainer.leadingAnchor),
