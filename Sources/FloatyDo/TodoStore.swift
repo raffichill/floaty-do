@@ -23,7 +23,10 @@ public final class TodoStore: ObservableObject {
     private static let key = "floatydo.items"
     private static let archiveKey = "floatydo.archived"
     private static let preferencesKey = "floatydo.preferences"
+    private static let completedTodoCountKey = "floatydo.completedTodoCount"
+    private static let hasRequestedRatingPromptKey = "floatydo.hasRequestedRatingPrompt"
     private static let minimumSnapPadding = 32.0
+    private static let ratingPromptCompletionThreshold = 10
     public static let maxItems = 10
     private static let textSaveDebounceInterval: TimeInterval = 0.18
 
@@ -33,6 +36,10 @@ public final class TodoStore: ObservableObject {
 
     @Published public private(set) var preferences: AppPreferences = .default
 
+    private(set) var completedTodoCount = 0
+    private var hasRequestedRatingPrompt = false
+    private var pendingRatingPromptRequest = false
+
     private var pendingItemSaveWorkItem: DispatchWorkItem?
     private var pendingArchiveSaveWorkItem: DispatchWorkItem?
     private var pendingPreferencesSaveWorkItem: DispatchWorkItem?
@@ -41,6 +48,7 @@ public final class TodoStore: ObservableObject {
         load()
         loadArchive()
         loadPreferences()
+        loadRatingPromptState()
         migrateCompletedItems()
         pruneWhitespaceOnlyItems()
     }
@@ -79,6 +87,7 @@ public final class TodoStore: ObservableObject {
         var archived = items.remove(at: idx)
         archived.isDone = true
         archivedItems.insert(archived, at: 0)
+        recordCompletionForRatingPromptIfNeeded()
         cancelScheduledSave(for: .items)
         persistItemsImmediately()
         persistArchiveImmediately()
@@ -171,6 +180,14 @@ public final class TodoStore: ObservableObject {
         savePreferences()
     }
 
+    func consumePendingRatingPromptRequest() -> Bool {
+        guard pendingRatingPromptRequest, !hasRequestedRatingPrompt else { return false }
+        pendingRatingPromptRequest = false
+        hasRequestedRatingPrompt = true
+        UserDefaults.standard.set(true, forKey: Self.hasRequestedRatingPromptKey)
+        return true
+    }
+
     // Move any already-completed items into the archive on first launch
     private func migrateCompletedItems() {
         let completed = items.filter { $0.isDone }
@@ -191,6 +208,14 @@ public final class TodoStore: ObservableObject {
         }
         if archivedItems.count != originalArchivedCount {
             persistArchiveImmediately()
+        }
+    }
+
+    private func recordCompletionForRatingPromptIfNeeded() {
+        completedTodoCount += 1
+        UserDefaults.standard.set(completedTodoCount, forKey: Self.completedTodoCountKey)
+        if !hasRequestedRatingPrompt, completedTodoCount >= Self.ratingPromptCompletionThreshold {
+            pendingRatingPromptRequest = true
         }
     }
 
@@ -318,5 +343,12 @@ public final class TodoStore: ObservableObject {
               let decoded = try? JSONDecoder().decode(AppPreferences.self, from: data)
         else { return }
         preferences = clampedPreferences(from: decoded)
+    }
+
+    private func loadRatingPromptState() {
+        completedTodoCount = UserDefaults.standard.integer(forKey: Self.completedTodoCountKey)
+        hasRequestedRatingPrompt = UserDefaults.standard.bool(forKey: Self.hasRequestedRatingPromptKey)
+        pendingRatingPromptRequest = !hasRequestedRatingPrompt
+            && completedTodoCount >= Self.ratingPromptCompletionThreshold
     }
 }

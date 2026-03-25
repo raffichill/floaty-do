@@ -28,6 +28,13 @@ When touching these paths, update the matching interaction tests in `/Users/raff
 - Archive restore stays on the archive tab. It must not switch tabs as part of the animation flow.
 - Archive restore is unavailable when the active task list is already at max capacity.
 
+## Clipboard Contract
+
+- `cmd+c` with highlighted row text copies only the highlighted text and must not show the row-level copy toast.
+- `cmd+c` on selected rows without highlighted text copies the selected row text and shows the row-level copy toast.
+- `cmd+v` into a task row should paste inline for single-line text.
+- `cmd+v` with multiline plain text and no highlighted text should create new task rows starting at the selected task insertion point, capped by the 10-item limit.
+
 ## Overflow Keyboard Scrolling Contract
 
 - In an overflowing archive list, keyboard navigation should keep about `1.0` row of context visible above and below the selected row whenever possible.

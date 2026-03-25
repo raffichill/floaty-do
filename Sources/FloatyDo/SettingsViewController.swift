@@ -1731,6 +1731,10 @@ final class SettingsViewController: NSViewController {
         appendLink("your own", link: "floatydo://theme")
         appendBody(".")
         appendParagraphBreak()
+        appendBody(
+            "The active list is intentionally capped at 10 items so the panel stays focused on what is actually next."
+        )
+        appendParagraphBreak()
         appendBody("I recommend taking some time to get familiar with the ")
         appendLink("keyboard shortcuts", link: "floatydo://shortcuts")
         appendBody(" as it makes the FloatyDo experience significantly better.")

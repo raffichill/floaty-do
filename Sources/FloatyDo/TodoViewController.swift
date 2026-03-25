@@ -1,6 +1,9 @@
 import AppKit
 import Combine
 import QuartzCore
+#if canImport(StoreKit)
+import StoreKit
+#endif
 
 public enum Tab: Equatable { case tasks, archive }
 
@@ -16,6 +19,43 @@ private struct TodoUndoSnapshot: Equatable {
 }
 
 public final class TodoViewController: NSViewController, NSTextFieldDelegate {
+    private final class CopyToastView: NSView {
+        private let label = NSTextField(labelWithString: "")
+
+        override init(frame frameRect: NSRect) {
+            super.init(frame: frameRect)
+            wantsLayer = true
+            layer?.cornerRadius = 10
+            layer?.masksToBounds = true
+
+            label.translatesAutoresizingMaskIntoConstraints = false
+            label.alignment = .center
+            addSubview(label)
+
+            NSLayoutConstraint.activate([
+                label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
+                label.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
+                label.topAnchor.constraint(equalTo: topAnchor, constant: 8),
+                label.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -8),
+            ])
+        }
+
+        @available(*, unavailable)
+        required init?(coder: NSCoder) {
+            fatalError("init(coder:) has not been implemented")
+        }
+
+        func update(message: String, preferences: AppPreferences) {
+            label.stringValue = message
+            label.font = .systemFont(ofSize: 12, weight: .medium)
+            label.textColor = preferences.usesLightText ? .black : .white
+            layer?.backgroundColor = (preferences.usesLightText
+                ? NSColor.white.withAlphaComponent(0.92)
+                : NSColor.black.withAlphaComponent(0.78)
+            ).cgColor
+        }
+    }
+
     private enum DebugMetrics {
         static let showsHeaderButtonHitTargets = false
         static let showsHeaderAreaOutline = false
@@ -35,6 +75,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
     private let listScrollView = NSScrollView()
     private let listView = TodoListView()
     private let sharedEditor = KeyboardOnlyTextField()
+    private let copyToastView = CopyToastView(frame: .zero)
 
     private var selectedRowID: TodoRowID?
     private var selectionAnchorRowID: TodoRowID?
@@ -71,6 +112,13 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
     private var windowResizeAnimationStartFrame: NSRect = .zero
     private var windowResizeAnimationTargetFrame: NSRect = .zero
     private var windowResizeAnimationGeneration = 0
+    private var copyToastHideWorkItem: DispatchWorkItem?
+    private var lastCopyToastMessage = "Copied"
+    private var reviewRequestHandler: () -> Void = {
+        #if canImport(StoreKit)
+        SKStoreReviewController.requestReview()
+        #endif
+    }
 
     public init(store: TodoStore) {
         self.store = store
@@ -212,9 +260,13 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         listScrollView.documentView = listView
         sharedEditor.frame = NSRect(x: -1000, y: -1000, width: 1, height: 1)
         sharedEditor.alphaValue = 0.001
+        copyToastView.translatesAutoresizingMaskIntoConstraints = false
+        copyToastView.alphaValue = 0
+        copyToastView.isHidden = true
 
         container.addSubview(listScrollView)
         container.addSubview(sharedEditor)
+        container.addSubview(copyToastView)
 
         let initialHeaderHeight = defaultHeaderHeight
         let listTopConstraint = listScrollView.topAnchor.constraint(
@@ -259,6 +311,8 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
             listScrollView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             listScrollView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
             listScrollView.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            copyToastView.centerXAnchor.constraint(equalTo: container.centerXAnchor),
+            copyToastView.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -14),
         ]
 
         if let headerButtonDebugOverlay {
@@ -298,6 +352,16 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
             if hasCommand && !hasShift && !hasOption && !hasControl {
                 if event.charactersIgnoringModifiers?.lowercased() == "a" {
                     self.handleCommandSelectAll()
+                    return nil
+                }
+
+                if event.charactersIgnoringModifiers?.lowercased() == "c",
+                   self.handleCommandCopy() {
+                    return nil
+                }
+
+                if event.charactersIgnoringModifiers?.lowercased() == "v",
+                   self.handleCommandPaste() {
                     return nil
                 }
 
@@ -477,6 +541,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         sharedEditor.wantsLayer = true
         sharedEditor.delegate = self
         sharedEditor.autoresizingMask = [.width, .height]
+        copyToastView.update(message: lastCopyToastMessage, preferences: store.preferences)
     }
 
     private func preferencesDidChange(_ preferences: AppPreferences) {
@@ -487,6 +552,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         if !isApplyingSettingsPreferenceChange {
             settingsWindowController?.updatePreferences(preferences)
         }
+        copyToastView.update(message: lastCopyToastMessage, preferences: preferences)
         if let panel = view.window as? FloatingPanel {
             panel.applyTheme(preferences: preferences)
         }
@@ -688,13 +754,18 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         controller.onWindowVisibilityChange = { [weak self] _ in
             self?.updateTabAppearance()
         }
-        controller.onResignKeyWhileVisible = { [weak self] in
-            _ = self?.dismissSettingsWindowIfVisible()
-        }
         controller.updatePreferences(store.preferences)
         settingsWindowController = controller
         updateTabAppearance()
         controller.present(attachedTo: view.window, initialTab: initialTab)
+    }
+
+    @objc func copy(_ sender: Any?) {
+        _ = handleCommandCopy()
+    }
+
+    @objc func paste(_ sender: Any?) {
+        _ = handleCommandPaste()
     }
 
     private func restoreFocusAfterSettingsDismissal() {
@@ -1776,6 +1847,188 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         }
     }
 
+    private func handleCommandCopy() -> Bool {
+        guard eventBelongsToPanelEditorContext() else { return false }
+
+        if let editor = activeTextEditor(),
+           editorRowID == currentEditingRowID,
+           editor.selectedRange().length > 0 {
+            editor.copy(nil)
+            syncVisibleEditorState()
+            return true
+        }
+
+        let copiedTexts = selectedTextsForClipboardCopy()
+        guard !copiedTexts.isEmpty else { return false }
+
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(copiedTexts.joined(separator: "\n"), forType: .string)
+
+        let message = copiedTexts.count == 1 ? "Copied row" : "Copied \(copiedTexts.count) rows"
+        showCopyToast(message: message)
+        return true
+    }
+
+    private func handleCommandPaste() -> Bool {
+        guard currentTab == .tasks, eventBelongsToPanelEditorContext() else { return false }
+        guard let pastedText = NSPasteboard.general.string(forType: .string) else { return false }
+        return handlePaste(text: pastedText)
+    }
+
+    // Clipboard behavior is explicit product surface: highlighted text copies
+    // and pastes like a normal editor, while row-level clipboard actions work
+    // directly from list selection without forcing text highlighting first.
+    @discardableResult
+    private func handlePaste(text: String) -> Bool {
+        guard currentTab == .tasks else { return false }
+
+        if isRangeSelectionActive {
+            clearRangeSelection(placeCaretAtEnd: true)
+        }
+
+        let rowLines = clipboardRowTexts(from: text)
+        let selectedTextLength = activeTextEditor()?.selectedRange().length ?? 0
+        if rowLines.count > 1, selectedTextLength == 0 {
+            return pasteRows(rowLines)
+        }
+
+        guard let rowID = currentEditingRowID ?? selectedRowID else { return false }
+        attachEditorIfNeeded(placeCaretAtEnd: true)
+        applyInlinePaste(text, to: rowID)
+        return true
+    }
+
+    private func pasteRows(_ lines: [String]) -> Bool {
+        guard !lines.isEmpty else { return false }
+        guard let selectedModel else { return false }
+
+        performUndoableAction("Paste Rows") {
+            self.normalizeDraftBeforeStructuralAction()
+
+            let insertedItems: [TodoItem]
+            switch selectedModel.kind {
+            case .taskItem(let item):
+                guard let itemIndex = self.store.items.firstIndex(where: { $0.id == item.id }) else { return }
+                insertedItems = self.insertRows(lines, at: itemIndex + 1)
+                if !insertedItems.isEmpty, self.taskDraft.isEmpty {
+                    self.resetDraftToDefault()
+                }
+            case .taskDraft:
+                insertedItems = self.insertRows(lines, at: self.taskDraft.insertionIndex)
+                if !insertedItems.isEmpty {
+                    self.resetDraftToDefault()
+                }
+            case .archiveItem, .filler:
+                return
+            }
+
+            guard let lastInsertedItem = insertedItems.last else { return }
+            self.clearRangeSelectionState()
+            self.selectedRowID = .taskItem(lastInsertedItem.id)
+            self.refreshRows(
+                placeCaretAtEnd: true,
+                heightResizeMode: .fitActiveTaskRows(animated: false)
+            )
+        }
+
+        return true
+    }
+
+    private func insertRows(_ lines: [String], at insertionIndex: Int) -> [TodoItem] {
+        var insertedItems: [TodoItem] = []
+        var nextInsertionIndex = insertionIndex
+        for line in lines {
+            guard store.items.count < TodoStore.maxItems else { break }
+            if let item = store.insert(line, at: nextInsertionIndex) {
+                insertedItems.append(item)
+                nextInsertionIndex += 1
+            }
+        }
+        return insertedItems
+    }
+
+    private func applyInlinePaste(_ text: String, to rowID: TodoRowID) {
+        if editorRowID != rowID {
+            sharedEditor.stringValue = textForRow(rowID)
+            editorRowID = rowID
+        }
+
+        let sanitizedText = text
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+            .replacingOccurrences(of: "\n", with: " ")
+        let currentText = sharedEditor.stringValue as NSString
+        let selectedRange = activeTextEditor()?.selectedRange()
+            ?? NSRange(location: currentText.length, length: 0)
+        let replacementRange = NSIntersectionRange(
+            selectedRange,
+            NSRange(location: 0, length: currentText.length)
+        )
+        let updatedText = currentText.replacingCharacters(in: replacementRange, with: sanitizedText)
+        let caretLocation = replacementRange.location + (sanitizedText as NSString).length
+
+        sharedEditor.stringValue = updatedText
+        if let editor = activeTextEditor() {
+            editor.string = updatedText
+            editor.setSelectedRange(NSRange(location: caretLocation, length: 0))
+        }
+        controlTextDidChange(Notification(name: NSControl.textDidChangeNotification, object: sharedEditor))
+    }
+
+    private func selectedTextsForClipboardCopy() -> [String] {
+        let targetRowIDs = selectedBatchRowIDs()
+        if !targetRowIDs.isEmpty {
+            return targetRowIDs.compactMap(textForCopyingRow)
+        }
+        guard let selectedRowID else { return [] }
+        return textForCopyingRow(selectedRowID).map { [$0] } ?? []
+    }
+
+    private func textForCopyingRow(_ rowID: TodoRowID) -> String? {
+        guard let model = rowModels.first(where: { $0.id == rowID }) else { return nil }
+        let text = model.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return text.isEmpty ? nil : text
+    }
+
+    private func clipboardRowTexts(from text: String) -> [String] {
+        text
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+            .components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+    }
+
+    private func showCopyToast(message: String) {
+        copyToastHideWorkItem?.cancel()
+        lastCopyToastMessage = message
+        copyToastView.update(message: message, preferences: store.preferences)
+        copyToastView.isHidden = false
+
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.14
+            copyToastView.animator().alphaValue = 1
+        }
+
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            NSAnimationContext.runAnimationGroup({ context in
+                context.duration = 0.18
+                self.copyToastView.animator().alphaValue = 0
+            }, completionHandler: {
+                self.copyToastView.isHidden = true
+            })
+        }
+        copyToastHideWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.1, execute: workItem)
+    }
+
+    private func requestRatingIfNeeded() {
+        guard store.consumePendingRatingPromptRequest() else { return }
+        reviewRequestHandler()
+    }
+
     private func eventBelongsToPanelEditorContext() -> Bool {
         guard let window = view.window else { return false }
         guard window.isKeyWindow else { return false }
@@ -1969,6 +2222,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
                     duration: self.completionReflowDuration,
                     heightResizeMode: .fitActiveTaskRows(animated: true)
                 )
+                self.requestRatingIfNeeded()
                 self.traceCompletionResize(
                     "animateCompletion:afterResizeCall window=\(String(describing: self.view.window?.frame))"
                 )
@@ -2018,6 +2272,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
                 duration: self.completionReflowDuration,
                 heightResizeMode: .fitActiveTaskRows(animated: true)
             )
+            self.requestRatingIfNeeded()
             self.traceCompletionResize(
                 "animateBatchCompletion:afterResizeCall window=\(String(describing: self.view.window?.frame))"
             )
@@ -2789,6 +3044,41 @@ extension TodoViewController {
     func testingTypeIntoCurrentEditor(_ text: String) {
         sharedEditor.stringValue = text
         controlTextDidChange(Notification(name: NSControl.textDidChangeNotification, object: sharedEditor))
+    }
+
+    @MainActor
+    func testingSetCurrentEditorSelection(_ range: NSRange) {
+        attachEditorIfNeeded(placeCaretAtEnd: false)
+        if let editor = activeTextEditor() {
+            editor.setSelectedRange(range)
+            syncVisibleEditorState()
+        }
+    }
+
+    @MainActor
+    func testingCopySelection() {
+        let copiedTexts = selectedTextsForClipboardCopy()
+        guard !copiedTexts.isEmpty else { return }
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(copiedTexts.joined(separator: "\n"), forType: .string)
+        let message = copiedTexts.count == 1 ? "Copied row" : "Copied \(copiedTexts.count) rows"
+        showCopyToast(message: message)
+    }
+
+    @MainActor
+    func testingPasteText(_ text: String) {
+        _ = handlePaste(text: text)
+    }
+
+    @MainActor
+    func testingCopyToastMessage() -> String? {
+        lastCopyToastMessage
+    }
+
+    @MainActor
+    func testingSetReviewRequestHandler(_ handler: @escaping () -> Void) {
+        reviewRequestHandler = handler
     }
 
     @MainActor

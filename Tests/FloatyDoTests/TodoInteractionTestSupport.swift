@@ -9,6 +9,8 @@ class TodoInteractionTestCase: XCTestCase {
         UserDefaults.standard.removeObject(forKey: "floatydo.items")
         UserDefaults.standard.removeObject(forKey: "floatydo.archived")
         UserDefaults.standard.removeObject(forKey: "floatydo.preferences")
+        UserDefaults.standard.removeObject(forKey: "floatydo.completedTodoCount")
+        UserDefaults.standard.removeObject(forKey: "floatydo.hasRequestedRatingPrompt")
     }
 
     func seededStore(active items: [String], archived: [String] = []) -> TodoStore {
