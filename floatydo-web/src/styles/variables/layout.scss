@@ -1,0 +1,39 @@
+// Layout metrics — exact values from AppPreferences.swift LayoutMetrics
+:root {
+  // Panel dimensions
+  --panel-width: 400px;
+  --panel-min-width: 320px;
+  --panel-max-width: 520px;
+  --panel-corner-radius: 10px;
+
+  // Row dimensions
+  --row-height: 36px;
+  --row-horizontal-inset: 12px;
+  --row-vertical-inset: 2px;
+  --row-background-inset: 8px;
+  --row-corner-radius: 10px;
+  --text-inset: 8px;
+
+  // Checkbox
+  --circle-size: 18px;
+  --circle-hit-size: 24px;
+
+  // Drag handle
+  --drag-handle-size: 16px;
+
+  // Titlebar
+  --titlebar-height: 36px;
+  --titlebar-trailing-inset: 10px;
+  --traffic-light-top-inset: 14px;
+  --traffic-light-spacing: 6px;
+
+  // Content
+  --content-top-padding: 4px;
+  --content-bottom-padding: 16.5px;
+
+  // Divider
+  --divider-height: 0.5px;
+
+  // Typography
+  --font-size: 14px;
+}

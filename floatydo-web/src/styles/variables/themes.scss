@@ -1,0 +1,92 @@
+// FloatyDo theme definitions — exact values from macOS app ThemeSupport.swift
+// Each theme: background, selection, selectionOpacity, content, contentOpacity
+
+:root {
+  // Default theme (theme1 — dark navy)
+  --floaty-bg: #14141F;
+  --floaty-selection: #D7DCEF;
+  --floaty-selection-opacity: 0.14;
+  --floaty-content: #FFFFFF;
+  --floaty-content-opacity: 0.94;
+
+  // Derived colors (from ColorPalette in AppPreferences.swift)
+  --floaty-text-primary: rgba(255, 255, 255, 0.94);
+  --floaty-text-secondary: rgba(255, 255, 255, 0.677);
+  --floaty-selection-overlay: rgba(215, 220, 239, 0.14);
+  --floaty-strikethrough: rgba(255, 255, 255, 0.564);
+  --floaty-stroke-subtle: rgba(255, 255, 255, 0.12);
+  --floaty-caret: rgba(255, 255, 255, 0.94);
+  --floaty-circle-border: rgba(255, 255, 255, 0.22);
+  --floaty-filler-circle: rgba(255, 255, 255, 0.08);
+
+  // Traffic lights
+  --traffic-close: #FF5F57;
+  --traffic-minimize: #FEBC2E;
+  --traffic-maximize: #28C840;
+  --traffic-inactive: rgba(255, 255, 255, 0.12);
+}
+
+// Theme data attributes for future theme switching
+[data-theme="theme1"] {
+  --floaty-bg: #14141F;
+  --floaty-selection: #D7DCEF;
+  --floaty-selection-opacity: 0.14;
+  --floaty-content: #FFFFFF;
+  --floaty-content-opacity: 0.94;
+}
+
+[data-theme="theme2"] {
+  --floaty-bg: #1B2130;
+  --floaty-selection: #D2DBF0;
+  --floaty-selection-opacity: 0.13;
+  --floaty-content: #F7FAFF;
+  --floaty-content-opacity: 0.92;
+}
+
+[data-theme="theme3"] {
+  --floaty-bg: #1F2724;
+  --floaty-selection: #DDE8DE;
+  --floaty-selection-opacity: 0.12;
+  --floaty-content: #F8FBF8;
+  --floaty-content-opacity: 0.92;
+}
+
+[data-theme="theme4"] {
+  --floaty-bg: #2A1E28;
+  --floaty-selection: #E7D9E5;
+  --floaty-selection-opacity: 0.14;
+  --floaty-content: #FFF9FF;
+  --floaty-content-opacity: 0.94;
+}
+
+[data-theme="theme5"] {
+  --floaty-bg: #E6E0D6;
+  --floaty-selection: #17181C;
+  --floaty-selection-opacity: 0.11;
+  --floaty-content: #111112;
+  --floaty-content-opacity: 0.82;
+}
+
+[data-theme="nasaOrange"] {
+  --floaty-bg: #DCEFFC;
+  --floaty-selection: #1B3242;
+  --floaty-selection-opacity: 0.11;
+  --floaty-content: #182D3A;
+  --floaty-content-opacity: 0.86;
+}
+
+[data-theme="barbie"] {
+  --floaty-bg: #F2D1E1;
+  --floaty-selection: #2D1B23;
+  --floaty-selection-opacity: 0.11;
+  --floaty-content: #2A1820;
+  --floaty-content-opacity: 0.86;
+}
+
+[data-theme="matcha"] {
+  --floaty-bg: #B6C59A;
+  --floaty-selection: #171B14;
+  --floaty-selection-opacity: 0.10;
+  --floaty-content: #141713;
+  --floaty-content-opacity: 0.84;
+}

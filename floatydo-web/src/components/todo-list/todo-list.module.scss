@@ -1,0 +1,14 @@
+.list {
+  display: flex;
+  flex-direction: column;
+}
+
+.emptyState {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: calc(var(--row-height) * 3);
+  color: var(--floaty-text-secondary);
+  opacity: 0.5;
+  font-size: 13px;
+}
