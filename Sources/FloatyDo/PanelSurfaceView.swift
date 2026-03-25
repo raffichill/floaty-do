@@ -3,14 +3,17 @@ import AppKit
 final class PanelSurfaceView: NSView {
     private enum SurfaceMode: Equatable {
         case solid
-        case translucent
+        case compositedTranslucent
+        case liveTranslucent
     }
 
     private let contentContainer = NSView()
     private let solidSurface = NSView()
+    private let compositedTranslucentSurface = NSView()
     private let translucentSurface = NSVisualEffectView()
     private let translucentTintOverlay = NSView()
     private var activeSurface: NSView?
+    private var activeSurfaceMode: SurfaceMode?
     private var modernTranslucentSurface: NSView?
     private var appliedPreferences: AppPreferences = .default
     private weak var observedWindow: NSWindow?
@@ -30,6 +33,9 @@ final class PanelSurfaceView: NSView {
 
         solidSurface.translatesAutoresizingMaskIntoConstraints = false
         solidSurface.wantsLayer = true
+
+        compositedTranslucentSurface.translatesAutoresizingMaskIntoConstraints = false
+        compositedTranslucentSurface.wantsLayer = true
 
         translucentSurface.translatesAutoresizingMaskIntoConstraints = false
         translucentSurface.state = .followsWindowActiveState
@@ -79,12 +85,21 @@ final class PanelSurfaceView: NSView {
 
     func apply(preferences: AppPreferences) {
         appliedPreferences = preferences
-        switch resolvedSurfaceMode(for: preferences) {
+        let surfaceMode = resolvedSurfaceMode(for: preferences)
+        switch surfaceMode {
         case .solid:
             attachContentContainerToRoot()
             installSurface(solidSurface)
             solidSurface.layer?.backgroundColor = preferences.panelBackgroundColor.cgColor
-        case .translucent:
+            solidSurface.layer?.borderWidth = 0
+            solidSurface.layer?.borderColor = nil
+        case .compositedTranslucent:
+            attachContentContainerToRoot()
+            compositedTranslucentSurface.layer?.backgroundColor = preferences.compositedTranslucentSurfaceFillColor.cgColor
+            compositedTranslucentSurface.layer?.borderWidth = 1
+            compositedTranslucentSurface.layer?.borderColor = preferences.compositedTranslucentSurfaceStrokeColor.cgColor
+            installSurface(compositedTranslucentSurface)
+        case .liveTranslucent:
             if #available(macOS 26.0, *) {
                 let translucentHost = resolvedModernTranslucentSurface()
                 configureModernTranslucentSurface(
@@ -102,11 +117,25 @@ final class PanelSurfaceView: NSView {
                 installSurface(translucentSurface)
             }
         }
+        activeSurfaceMode = surfaceMode
         refreshTranslucentBackdrop()
     }
 
     private func resolvedSurfaceMode(for preferences: AppPreferences) -> SurfaceMode {
-        preferences.usesTranslucentSurface ? .translucent : .solid
+        guard preferences.usesTranslucentSurface else { return .solid }
+        if NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency {
+            return .solid
+        }
+        if prefersCompositedTranslucentSurface {
+            return .compositedTranslucent
+        }
+        return .liveTranslucent
+    }
+
+    // macOS 26 can retain stale behind-window samples for floating translucent
+    // panels on the physical display, so prefer regular alpha compositing there.
+    private var prefersCompositedTranslucentSurface: Bool {
+        ProcessInfo.processInfo.operatingSystemVersion.majorVersion == 26
     }
 
     private func installSurface(_ surface: NSView) {
@@ -184,7 +213,25 @@ final class PanelSurfaceView: NSView {
     }
 
     func refreshTranslucentBackdrop() {
-        guard appliedPreferences.usesTranslucentSurface else { return }
+        let surfaceMode = resolvedSurfaceMode(for: appliedPreferences)
+        guard surfaceMode == activeSurfaceMode else {
+            apply(preferences: appliedPreferences)
+            return
+        }
+
+        switch surfaceMode {
+        case .solid:
+            return
+        case .compositedTranslucent:
+            compositedTranslucentSurface.layer?.backgroundColor =
+                appliedPreferences.compositedTranslucentSurfaceFillColor.cgColor
+            compositedTranslucentSurface.layer?.borderColor =
+                appliedPreferences.compositedTranslucentSurfaceStrokeColor.cgColor
+            window?.invalidateShadow()
+            return
+        case .liveTranslucent:
+            break
+        }
 
         if #available(macOS 26.0, *),
            let translucentHost = modernTranslucentSurface {

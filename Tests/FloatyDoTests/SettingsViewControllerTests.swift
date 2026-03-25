@@ -64,4 +64,29 @@ final class SettingsViewControllerTests: XCTestCase {
 
         XCTAssertEqual(hotkey.displayString, "⌥ K")
     }
+
+    func testCompositedTranslucentSurfaceOpacityTracksConfiguredOpacityStops() {
+        let stops = [0.67, 0.78, 0.89, 1.0].map { opacity in
+            AppPreferences(
+                rowHeight: 36,
+                panelWidth: 400,
+                hoverHighlightsEnabled: true,
+                animationPreset: .balanced,
+                snapPadding: 32,
+                theme: .theme1,
+                fontStyle: .system,
+                fontSize: LayoutMetrics.defaultFontSize,
+                cornerRadius: 10,
+                blurEnabled: true,
+                windowOpacity: opacity,
+                globalHotkey: .defaultToggle
+            ).compositedTranslucentSurfaceOpacity
+        }
+
+        XCTAssertTrue(stops[0] < stops[1])
+        XCTAssertTrue(stops[1] < stops[2])
+        XCTAssertTrue(stops[2] < stops[3])
+        XCTAssertGreaterThan(stops[0], 0.70)
+        XCTAssertLessThan(stops[3], 1.0)
+    }
 }

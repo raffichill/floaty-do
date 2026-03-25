@@ -315,6 +315,22 @@ extension AppPreferences {
         return 0.90 + (0.10 * eased)
     }
 
+    var compositedTranslucentSurfaceOpacity: Double {
+        let normalized = (clampedWindowOpacity - LayoutMetrics.minWindowOpacity) / (1.0 - LayoutMetrics.minWindowOpacity)
+        let eased = pow(min(max(normalized, 0), 1), 0.92)
+        return 0.58 + (0.34 * eased)
+    }
+
+    var compositedTranslucentSurfaceFillColor: NSColor {
+        panelBackgroundColor.withAlphaComponent(compositedTranslucentSurfaceOpacity)
+    }
+
+    var compositedTranslucentSurfaceStrokeColor: NSColor {
+        let normalized = (clampedWindowOpacity - LayoutMetrics.minWindowOpacity) / (1.0 - LayoutMetrics.minWindowOpacity)
+        let opacity = 0.10 + (0.08 * min(max(normalized, 0), 1))
+        return contentBaseColor.withAlphaComponent(opacity)
+    }
+
     var backdropBlurRadius: Double {
         let normalized = (clampedWindowOpacity - LayoutMetrics.minWindowOpacity) / (1.0 - LayoutMetrics.minWindowOpacity)
         let eased = min(max(normalized, 0), 1)
