@@ -1226,7 +1226,7 @@ final class SettingsViewController: NSViewController {
         for (key, page) in pages {
             let isVisible = key == tab
             page.container.alphaValue = isVisible ? 1 : 0
-            page.container.isHidden = false
+            page.container.isHidden = !isVisible
             page.container.allowsHitTesting = isVisible
         }
         displayedTab = tab
@@ -1237,7 +1237,7 @@ final class SettingsViewController: NSViewController {
     ) {
         for (key, page) in pages {
             page.container.layer?.removeAllAnimations()
-            page.container.isHidden = false
+            page.container.isHidden = key != outgoingTab && key != incomingTab
             page.container.allowsHitTesting = false
             switch key {
             case outgoingTab:
