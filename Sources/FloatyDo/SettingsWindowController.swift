@@ -111,6 +111,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     enum InitialTab {
         case appearance
         case shortcuts
+        case icon
         case about
     }
 
@@ -195,6 +196,8 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
                 settingsViewController.showAppearanceTab(animated: false)
             case .shortcuts:
                 settingsViewController.showShortcutsTab(animated: false)
+            case .icon:
+                settingsViewController.showIconTab(animated: false)
             case .about:
                 settingsViewController.showAboutTab(animated: false)
             }

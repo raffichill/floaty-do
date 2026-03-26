@@ -16,6 +16,57 @@ final class SettingsViewControllerTests: XCTestCase {
         XCTAssertFalse(labels.contains("App Icon"))
     }
 
+    func testSettingsTabsIncludeIconBetweenShortcutsAndAbout() {
+        let controller = SettingsViewController(preferences: .default)
+        controller.loadViewIfNeeded()
+
+        XCTAssertEqual(controller.testingTabTitles(), ["Theme", "Shortcuts", "Icon", "About"])
+    }
+
+    func testIconPageListsAvailableIconAssets() {
+        let controller = SettingsViewController(preferences: .default)
+        controller.loadViewIfNeeded()
+
+        XCTAssertEqual(
+            controller.testingIconOptionTitles(),
+            ["Theme 1", "Theme 2", "Theme 3", "Theme 4", "Theme 5"]
+        )
+    }
+
+    func testIconFooterShowsCurrentStateOrRelaunchPrompt() {
+        let controller = SettingsViewController(preferences: .default)
+        controller.loadViewIfNeeded()
+
+        let currentTheme = PrimaryAppIconRelaunchController.shared.currentTheme()
+        XCTAssertEqual(
+            controller.testingIconFooterMessage(),
+            "Using \(controller.testingIconDisplayName(for: currentTheme))"
+        )
+        XCTAssertFalse(controller.testingIconFooterShowsRelaunchButton())
+
+        let alternateTheme = BuiltInTheme.catalog
+            .map(\.theme)
+            .first { $0.supportsPrimaryAppIcon && $0 != currentTheme }
+        XCTAssertNotNil(alternateTheme)
+
+        controller.testingSelectIconTheme(alternateTheme ?? currentTheme)
+
+        XCTAssertEqual(controller.testingIconFooterMessage(), "FloatyDo to apply the selected icon.")
+        XCTAssertTrue(controller.testingIconFooterShowsRelaunchButton())
+    }
+
+    func testShortcutsPageIncludesSettingsTabShortcuts() {
+        let controller = SettingsViewController(preferences: .default)
+        controller.loadViewIfNeeded()
+
+        let labels = allLabels(in: controller.view).map(\.stringValue)
+
+        XCTAssertTrue(labels.contains("Theme tab"))
+        XCTAssertTrue(labels.contains("Shortcuts tab"))
+        XCTAssertTrue(labels.contains("Icon tab"))
+        XCTAssertTrue(labels.contains("About tab"))
+    }
+
     func testPreferencesTemporarilyDisableTranslucentSurface() {
         XCTAssertFalse(AppPreferences.default.usesTranslucentSurface)
         XCTAssertFalse(
