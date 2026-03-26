@@ -58,8 +58,8 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
 
             stackView.orientation = .horizontal
             stackView.alignment = .centerY
-            stackView.spacing = 8
-            stackView.edgeInsets = NSEdgeInsets(top: 8, left: 14, bottom: 8, right: 14)
+            stackView.spacing = 6
+            stackView.edgeInsets = NSEdgeInsets(top: 10, left: 14, bottom: 10, right: 14)
             stackView.translatesAutoresizingMaskIntoConstraints = false
             stackView.addArrangedSubview(symbolView)
             stackView.addArrangedSubview(label)
@@ -81,8 +81,8 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
                 stackView.topAnchor.constraint(equalTo: topAnchor),
                 stackView.bottomAnchor.constraint(equalTo: bottomAnchor),
 
-                symbolView.widthAnchor.constraint(equalToConstant: 14),
-                symbolView.heightAnchor.constraint(equalToConstant: 14),
+                symbolView.widthAnchor.constraint(equalToConstant: 11.2),
+                symbolView.heightAnchor.constraint(equalToConstant: 11.2),
             ])
         }
 
@@ -112,7 +112,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
             let textColor = preferences.primaryTextColor.withAlphaComponent(0.94)
             label.textColor = textColor
 
-            let symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 12, weight: .semibold)
+            let symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 9.6, weight: .semibold)
             symbolView.image = NSImage(
                 systemSymbolName: "rectangle.portrait.on.rectangle.portrait",
                 accessibilityDescription: "Copied"
