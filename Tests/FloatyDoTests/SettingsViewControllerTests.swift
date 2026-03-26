@@ -5,6 +5,37 @@ import XCTest
 
 @MainActor
 final class SettingsViewControllerTests: XCTestCase {
+    func testAppearancePageHidesTransparencyControls() {
+        let controller = SettingsViewController(preferences: .default)
+        controller.loadViewIfNeeded()
+
+        let labels = allLabels(in: controller.view).map(\.stringValue)
+
+        XCTAssertFalse(labels.contains("Transparent"))
+        XCTAssertFalse(labels.contains("Opacity"))
+        XCTAssertFalse(labels.contains("App Icon"))
+    }
+
+    func testPreferencesTemporarilyDisableTranslucentSurface() {
+        XCTAssertFalse(AppPreferences.default.usesTranslucentSurface)
+        XCTAssertFalse(
+            AppPreferences(
+                rowHeight: 36,
+                panelWidth: 400,
+                hoverHighlightsEnabled: true,
+                animationPreset: .balanced,
+                snapPadding: 32,
+                theme: .theme1,
+                fontStyle: .system,
+                fontSize: LayoutMetrics.defaultFontSize,
+                cornerRadius: 10,
+                blurEnabled: true,
+                windowOpacity: 0.67,
+                globalHotkey: .defaultToggle
+            ).usesTranslucentSurface
+        )
+    }
+
     func testBuiltInThemeCatalogIsSingleSourceOfTruthForOrderAndIconSupport() {
         XCTAssertEqual(
             BuiltInTheme.allCases,
@@ -88,5 +119,13 @@ final class SettingsViewControllerTests: XCTestCase {
         XCTAssertTrue(stops[2] < stops[3])
         XCTAssertGreaterThan(stops[0], 0.70)
         XCTAssertLessThan(stops[3], 1.0)
+    }
+
+    private func allLabels(in view: NSView) -> [NSTextField] {
+        let childLabels = view.subviews.flatMap(allLabels(in:))
+        if let label = view as? NSTextField {
+            return [label] + childLabels
+        }
+        return childLabels
     }
 }

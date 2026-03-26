@@ -28,6 +28,6 @@ final class TodoClipboardInteractionTests: TodoInteractionTestCase {
         controller.testingCopySelection()
 
         XCTAssertEqual(NSPasteboard.general.string(forType: .string), "Beta")
-        XCTAssertEqual(controller.testingCopyToastMessage(), "Copied row")
+        XCTAssertEqual(controller.testingCopyToastMessage(), "Copied")
     }
 }

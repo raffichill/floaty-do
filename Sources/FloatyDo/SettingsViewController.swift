@@ -14,6 +14,7 @@ final class SettingsViewController: NSViewController {
         static let labelWidth: CGFloat = 104
         static let rowHeight: CGFloat = 58
         static let rowSpacing: CGFloat = 2
+        static let appearanceSectionSpacing: CGFloat = rowSpacing + 12
         static let actionSpacing: CGFloat = 12
         static let actionButtonWidth: CGFloat = 88
         static let themeSwatchButtonCount: CGFloat = CGFloat(BuiltInTheme.allCases.count)
@@ -501,30 +502,33 @@ final class SettingsViewController: NSViewController {
     }
 
     private func makeAppearancePage() -> NSView {
+        let backgroundLabelRow = makeAppearanceLabelRow(title: "Background")
+        let fontLabelRow = makeAppearanceLabelRow(title: "Font")
+        let backgroundControl = wrapAppearanceControl(makeThemeControl())
+        let fontControl = wrapAppearanceControl(makeFontControl())
+
         let labelsStack = NSStackView(views: [
-            makeAppearanceLabelRow(title: "Background"),
-            makeAppearanceLabelRow(title: "Transparent"),
-            makeAppearanceLabelRow(title: "Font"),
+            backgroundLabelRow,
+            fontLabelRow,
             makeAppearanceLabelRow(title: "Font Size"),
             makeAppearanceLabelRow(title: "Radius"),
-            makeAppearanceLabelRow(title: "App Icon"),
         ])
         labelsStack.orientation = .vertical
         labelsStack.alignment = .trailing
         labelsStack.spacing = Metrics.rowSpacing
+        labelsStack.setCustomSpacing(Metrics.appearanceSectionSpacing, after: backgroundLabelRow)
         labelsStack.translatesAutoresizingMaskIntoConstraints = false
 
         let controlsStack = NSStackView(views: [
-            wrapAppearanceControl(makeThemeControl()),
-            wrapAppearanceControl(makeTransparencyAndBlurControl()),
-            wrapAppearanceControl(makeFontControl()),
+            backgroundControl,
+            fontControl,
             wrapAppearanceControl(makeFontSizeControl()),
             wrapAppearanceControl(makeBorderRadiusControl()),
-            wrapAppearanceControl(makeAppIconControl()),
         ])
         controlsStack.orientation = .vertical
         controlsStack.alignment = .centerX
         controlsStack.spacing = Metrics.rowSpacing
+        controlsStack.setCustomSpacing(Metrics.appearanceSectionSpacing, after: backgroundControl)
         controlsStack.translatesAutoresizingMaskIntoConstraints = false
 
         let content = NSView()
@@ -1732,7 +1736,7 @@ final class SettingsViewController: NSViewController {
         appendBody(".")
         appendParagraphBreak()
         appendBody(
-            "The active list is intentionally capped at 10 items so the panel stays focused on what is actually next."
+            "Your list is capped at 10 items to help you avoid planning creep."
         )
         appendParagraphBreak()
         appendBody("I recommend taking some time to get familiar with the ")

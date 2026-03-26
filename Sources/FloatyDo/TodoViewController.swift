@@ -20,23 +20,69 @@ private struct TodoUndoSnapshot: Equatable {
 
 public final class TodoViewController: NSViewController, NSTextFieldDelegate {
     private final class CopyToastView: NSView {
+        private let backgroundEffectView = NSVisualEffectView()
+        private let tintOverlayView = NSView()
+        private let symbolView = NSImageView()
         private let label = NSTextField(labelWithString: "")
+        private let stackView = NSStackView()
 
         override init(frame frameRect: NSRect) {
             super.init(frame: frameRect)
             wantsLayer = true
-            layer?.cornerRadius = 10
-            layer?.masksToBounds = true
+            layer?.masksToBounds = false
+            layer?.shadowColor = NSColor.black.withAlphaComponent(0.18).cgColor
+            layer?.shadowOpacity = 1
+            layer?.shadowRadius = 18
+            layer?.shadowOffset = CGSize(width: 0, height: -8)
+
+            backgroundEffectView.translatesAutoresizingMaskIntoConstraints = false
+            backgroundEffectView.material = .hudWindow
+            backgroundEffectView.blendingMode = .withinWindow
+            backgroundEffectView.state = .active
+            backgroundEffectView.wantsLayer = true
+            addSubview(backgroundEffectView)
+
+            tintOverlayView.translatesAutoresizingMaskIntoConstraints = false
+            tintOverlayView.wantsLayer = true
+            addSubview(tintOverlayView)
+
+            symbolView.translatesAutoresizingMaskIntoConstraints = false
+            symbolView.imageScaling = .scaleProportionallyDown
+            symbolView.setContentHuggingPriority(.required, for: .horizontal)
+            symbolView.setContentCompressionResistancePriority(.required, for: .horizontal)
 
             label.translatesAutoresizingMaskIntoConstraints = false
             label.alignment = .center
-            addSubview(label)
+            label.maximumNumberOfLines = 1
+            label.lineBreakMode = .byClipping
+
+            stackView.orientation = .horizontal
+            stackView.alignment = .centerY
+            stackView.spacing = 8
+            stackView.edgeInsets = NSEdgeInsets(top: 8, left: 14, bottom: 8, right: 14)
+            stackView.translatesAutoresizingMaskIntoConstraints = false
+            stackView.addArrangedSubview(symbolView)
+            stackView.addArrangedSubview(label)
+            addSubview(stackView)
 
             NSLayoutConstraint.activate([
-                label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
-                label.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
-                label.topAnchor.constraint(equalTo: topAnchor, constant: 8),
-                label.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -8),
+                backgroundEffectView.leadingAnchor.constraint(equalTo: leadingAnchor),
+                backgroundEffectView.trailingAnchor.constraint(equalTo: trailingAnchor),
+                backgroundEffectView.topAnchor.constraint(equalTo: topAnchor),
+                backgroundEffectView.bottomAnchor.constraint(equalTo: bottomAnchor),
+
+                tintOverlayView.leadingAnchor.constraint(equalTo: leadingAnchor),
+                tintOverlayView.trailingAnchor.constraint(equalTo: trailingAnchor),
+                tintOverlayView.topAnchor.constraint(equalTo: topAnchor),
+                tintOverlayView.bottomAnchor.constraint(equalTo: bottomAnchor),
+
+                stackView.leadingAnchor.constraint(equalTo: leadingAnchor),
+                stackView.trailingAnchor.constraint(equalTo: trailingAnchor),
+                stackView.topAnchor.constraint(equalTo: topAnchor),
+                stackView.bottomAnchor.constraint(equalTo: bottomAnchor),
+
+                symbolView.widthAnchor.constraint(equalToConstant: 14),
+                symbolView.heightAnchor.constraint(equalToConstant: 14),
             ])
         }
 
@@ -45,14 +91,39 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
             fatalError("init(coder:) has not been implemented")
         }
 
-        func update(message: String, preferences: AppPreferences) {
-            label.stringValue = message
-            label.font = .systemFont(ofSize: 12, weight: .medium)
-            label.textColor = preferences.usesLightText ? .black : .white
-            layer?.backgroundColor = (preferences.usesLightText
-                ? NSColor.white.withAlphaComponent(0.92)
-                : NSColor.black.withAlphaComponent(0.78)
-            ).cgColor
+        override func layout() {
+            super.layout()
+
+            let radius = bounds.height / 2
+            layer?.cornerRadius = radius
+            layer?.cornerCurve = .continuous
+            backgroundEffectView.layer?.cornerRadius = radius
+            backgroundEffectView.layer?.cornerCurve = .continuous
+            backgroundEffectView.layer?.masksToBounds = true
+            tintOverlayView.layer?.cornerRadius = radius
+            tintOverlayView.layer?.cornerCurve = .continuous
+            tintOverlayView.layer?.masksToBounds = true
+        }
+
+        func update(preferences: AppPreferences) {
+            label.stringValue = "Copied"
+            label.font = .systemFont(ofSize: 12, weight: .semibold)
+
+            let textColor = preferences.primaryTextColor.withAlphaComponent(0.94)
+            label.textColor = textColor
+
+            let symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 12, weight: .semibold)
+            symbolView.image = NSImage(
+                systemSymbolName: "rectangle.portrait.on.rectangle.portrait",
+                accessibilityDescription: "Copied"
+            )?.withSymbolConfiguration(symbolConfiguration)
+            symbolView.contentTintColor = textColor
+
+            tintOverlayView.layer?.backgroundColor = preferences.panelBackgroundColor
+                .withAlphaComponent(0.74)
+                .cgColor
+            layer?.borderWidth = 1
+            layer?.borderColor = preferences.primaryTextColor.withAlphaComponent(0.10).cgColor
         }
     }
 
@@ -113,6 +184,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
     private var windowResizeAnimationTargetFrame: NSRect = .zero
     private var windowResizeAnimationGeneration = 0
     private var copyToastHideWorkItem: DispatchWorkItem?
+    private let copyToastMessage = "Copied"
     private var lastCopyToastMessage = "Copied"
     private var reviewRequestHandler: () -> Void = {
         #if canImport(StoreKit)
@@ -541,7 +613,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         sharedEditor.wantsLayer = true
         sharedEditor.delegate = self
         sharedEditor.autoresizingMask = [.width, .height]
-        copyToastView.update(message: lastCopyToastMessage, preferences: store.preferences)
+        copyToastView.update(preferences: store.preferences)
     }
 
     private func preferencesDidChange(_ preferences: AppPreferences) {
@@ -552,7 +624,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         if !isApplyingSettingsPreferenceChange {
             settingsWindowController?.updatePreferences(preferences)
         }
-        copyToastView.update(message: lastCopyToastMessage, preferences: preferences)
+        copyToastView.update(preferences: preferences)
         if let panel = view.window as? FloatingPanel {
             panel.applyTheme(preferences: preferences)
         }
@@ -1865,8 +1937,7 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
         pasteboard.clearContents()
         pasteboard.setString(copiedTexts.joined(separator: "\n"), forType: .string)
 
-        let message = copiedTexts.count == 1 ? "Copied row" : "Copied \(copiedTexts.count) rows"
-        showCopyToast(message: message)
+        showCopyToast()
         return true
     }
 
@@ -2000,23 +2071,50 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
             .filter { !$0.isEmpty }
     }
 
-    private func showCopyToast(message: String) {
+    private func showCopyToast() {
         copyToastHideWorkItem?.cancel()
-        lastCopyToastMessage = message
-        copyToastView.update(message: message, preferences: store.preferences)
+        lastCopyToastMessage = copyToastMessage
+        copyToastView.update(preferences: store.preferences)
         copyToastView.isHidden = false
+        copyToastView.layer?.removeAllAnimations()
+        copyToastView.alphaValue = 0
+
+        if let layer = copyToastView.layer {
+            let finalPositionY = layer.position.y
+            let rise = CASpringAnimation(keyPath: "position.y")
+            rise.fromValue = finalPositionY - 38
+            rise.toValue = finalPositionY
+            rise.mass = 0.9
+            rise.stiffness = 260
+            rise.damping = 20
+            rise.initialVelocity = 0
+            rise.duration = min(rise.settlingDuration, 0.55)
+            rise.fillMode = .backwards
+            layer.add(rise, forKey: "copyToastRise")
+        }
 
         NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.14
+            context.duration = 0.18
+            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
             copyToastView.animator().alphaValue = 1
         }
 
         let workItem = DispatchWorkItem { [weak self] in
             guard let self else { return }
+            if let layer = self.copyToastView.layer {
+                let drop = CABasicAnimation(keyPath: "position.y")
+                drop.fromValue = layer.presentation()?.position.y ?? layer.position.y
+                drop.toValue = (layer.presentation()?.position.y ?? layer.position.y) - 10
+                drop.duration = 0.18
+                drop.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+                layer.add(drop, forKey: "copyToastDrop")
+            }
             NSAnimationContext.runAnimationGroup({ context in
                 context.duration = 0.18
+                context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
                 self.copyToastView.animator().alphaValue = 0
             }, completionHandler: {
+                self.copyToastView.layer?.removeAllAnimations()
                 self.copyToastView.isHidden = true
             })
         }
@@ -3062,8 +3160,7 @@ extension TodoViewController {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.setString(copiedTexts.joined(separator: "\n"), forType: .string)
-        let message = copiedTexts.count == 1 ? "Copied row" : "Copied \(copiedTexts.count) rows"
-        showCopyToast(message: message)
+        showCopyToast()
     }
 
     @MainActor

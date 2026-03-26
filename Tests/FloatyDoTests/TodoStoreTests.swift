@@ -628,7 +628,7 @@ final class TodoStoreTests: XCTestCase {
         XCTAssertEqual(store.preferences.fontStyle, .system)
         XCTAssertEqual(store.preferences.fontSize, 14.0)
         XCTAssertEqual(store.preferences.cornerRadius, 10.0)
-        XCTAssertTrue(store.preferences.blurEnabled)
+        XCTAssertFalse(store.preferences.blurEnabled)
         XCTAssertEqual(store.preferences.windowOpacity, 1.0)
         XCTAssertEqual(store.preferences.globalHotkey, .defaultToggle)
     }

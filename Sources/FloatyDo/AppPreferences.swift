@@ -125,7 +125,7 @@ public struct AppPreferences: Codable, Equatable {
         fontStyle: .system,
         fontSize: LayoutMetrics.defaultFontSize,
         cornerRadius: 10,
-        blurEnabled: true,
+        blurEnabled: false,
         windowOpacity: 1.0,
         globalHotkey: .defaultToggle
     )
@@ -296,7 +296,11 @@ extension AppPreferences {
     }
 
     var usesTranslucentSurface: Bool {
-        blurEnabled
+        // Product decision: keep the surface solid until the blur path is both
+        // correct and performant on current macOS releases. We keep the stored
+        // preference and blur/opacity code intact so the feature can be revived
+        // later without rebuilding the model layer.
+        false
     }
 
     var contentBaseColor: NSColor {
