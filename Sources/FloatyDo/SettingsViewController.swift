@@ -45,6 +45,7 @@ final class SettingsViewController: NSViewController {
         static let iconDividerLeadingInset: CGFloat = 54
         static let iconFooterTopInset: CGFloat = outerPadding.bottom
         static let iconFooterInlineSpacing: CGFloat = 3
+        static let pageContentBottomInset: CGFloat = 16
         static let aboutBlockWidth: CGFloat = 400
         static let opacityStops: [Double] = [0.67, 0.78, 0.89, 1.0]
     }
@@ -587,7 +588,10 @@ final class SettingsViewController: NSViewController {
                 greaterThanOrEqualTo: container.leadingAnchor, constant: 24),
             content.trailingAnchor.constraint(
                 lessThanOrEqualTo: container.trailingAnchor, constant: -24),
-            content.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            content.bottomAnchor.constraint(
+                equalTo: container.bottomAnchor,
+                constant: -Metrics.pageContentBottomInset
+            ),
         ])
 
         return container
@@ -651,7 +655,10 @@ final class SettingsViewController: NSViewController {
                 greaterThanOrEqualTo: container.leadingAnchor, constant: 24),
             stack.trailingAnchor.constraint(
                 lessThanOrEqualTo: container.trailingAnchor, constant: -24),
-            stack.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            stack.bottomAnchor.constraint(
+                equalTo: container.bottomAnchor,
+                constant: -Metrics.pageContentBottomInset
+            ),
         ])
 
         return container
@@ -846,7 +853,10 @@ final class SettingsViewController: NSViewController {
                 greaterThanOrEqualTo: container.leadingAnchor, constant: 24),
             aboutTextView.trailingAnchor.constraint(
                 lessThanOrEqualTo: container.trailingAnchor, constant: -24),
-            aboutTextView.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            aboutTextView.bottomAnchor.constraint(
+                equalTo: container.bottomAnchor,
+                constant: -Metrics.pageContentBottomInset
+            ),
         ])
 
         return container
