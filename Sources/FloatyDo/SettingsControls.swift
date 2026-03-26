@@ -493,6 +493,152 @@ final class InlineFooterTokenButton: PressScaleButton {
     }
 }
 
+final class ShimmerStatusLabel: NSView {
+    private enum Metrics {
+        static let baseOpacity: CGFloat = 0.6
+        static let animationDuration: CFTimeInterval = 1.15
+        static let shimmerLocations: [NSNumber] = [0, 0.34, 0.5, 0.66, 1]
+    }
+
+    private let baseLabel = NSTextField(labelWithString: "")
+    private let shimmerContainer = NSView()
+    private let shimmerLabel = NSTextField(labelWithString: "")
+    private let shimmerMask = CAGradientLayer()
+
+    var stringValue: String = "" {
+        didSet {
+            baseLabel.stringValue = stringValue
+            shimmerLabel.stringValue = stringValue
+            invalidateIntrinsicContentSize()
+        }
+    }
+
+    var textColor: NSColor = .labelColor {
+        didSet { updateAppearance() }
+    }
+
+    var font: NSFont? {
+        didSet {
+            baseLabel.font = font
+            shimmerLabel.font = font
+            invalidateIntrinsicContentSize()
+        }
+    }
+
+    var alignment: NSTextAlignment = .left {
+        didSet {
+            baseLabel.alignment = alignment
+            shimmerLabel.alignment = alignment
+        }
+    }
+
+    var lineBreakMode: NSLineBreakMode = .byTruncatingTail {
+        didSet {
+            baseLabel.lineBreakMode = lineBreakMode
+            shimmerLabel.lineBreakMode = lineBreakMode
+        }
+    }
+
+    var shimmerEnabled = false {
+        didSet { updateShimmerState() }
+    }
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        translatesAutoresizingMaskIntoConstraints = false
+        setContentHuggingPriority(.required, for: .horizontal)
+        setContentCompressionResistancePriority(.required, for: .horizontal)
+
+        [baseLabel, shimmerLabel].forEach {
+            $0.translatesAutoresizingMaskIntoConstraints = false
+            $0.usesSingleLineMode = true
+            $0.lineBreakMode = .byTruncatingTail
+            $0.alignment = .left
+        }
+
+        shimmerContainer.wantsLayer = true
+        shimmerContainer.translatesAutoresizingMaskIntoConstraints = false
+        shimmerContainer.layer?.masksToBounds = true
+        shimmerMask.startPoint = CGPoint(x: 0, y: 0.5)
+        shimmerMask.endPoint = CGPoint(x: 1, y: 0.5)
+        shimmerMask.colors = [
+            NSColor.white.withAlphaComponent(0).cgColor,
+            NSColor.white.withAlphaComponent(0.12).cgColor,
+            NSColor.white.withAlphaComponent(1).cgColor,
+            NSColor.white.withAlphaComponent(0.12).cgColor,
+            NSColor.white.withAlphaComponent(0).cgColor,
+        ]
+        shimmerMask.locations = Metrics.shimmerLocations
+
+        addSubview(baseLabel)
+        addSubview(shimmerContainer)
+        shimmerContainer.addSubview(shimmerLabel)
+
+        NSLayoutConstraint.activate([
+            baseLabel.leadingAnchor.constraint(equalTo: leadingAnchor),
+            baseLabel.trailingAnchor.constraint(equalTo: trailingAnchor),
+            baseLabel.topAnchor.constraint(equalTo: topAnchor),
+            baseLabel.bottomAnchor.constraint(equalTo: bottomAnchor),
+
+            shimmerContainer.leadingAnchor.constraint(equalTo: leadingAnchor),
+            shimmerContainer.trailingAnchor.constraint(equalTo: trailingAnchor),
+            shimmerContainer.topAnchor.constraint(equalTo: topAnchor),
+            shimmerContainer.bottomAnchor.constraint(equalTo: bottomAnchor),
+
+            shimmerLabel.leadingAnchor.constraint(equalTo: shimmerContainer.leadingAnchor),
+            shimmerLabel.trailingAnchor.constraint(equalTo: shimmerContainer.trailingAnchor),
+            shimmerLabel.topAnchor.constraint(equalTo: shimmerContainer.topAnchor),
+            shimmerLabel.bottomAnchor.constraint(equalTo: shimmerContainer.bottomAnchor),
+        ])
+
+        updateAppearance()
+        updateShimmerState()
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override var intrinsicContentSize: NSSize {
+        baseLabel.intrinsicContentSize
+    }
+
+    override func layout() {
+        super.layout()
+        shimmerMask.frame = CGRect(x: -bounds.width, y: 0, width: bounds.width * 3, height: bounds.height)
+        shimmerContainer.layer?.mask = shimmerMask
+        if shimmerEnabled {
+            startShimmerIfNeeded()
+        }
+    }
+
+    private func updateAppearance() {
+        baseLabel.textColor = textColor.withAlphaComponent(Metrics.baseOpacity)
+        shimmerLabel.textColor = textColor
+    }
+
+    private func updateShimmerState() {
+        shimmerContainer.isHidden = !shimmerEnabled
+        if shimmerEnabled {
+            startShimmerIfNeeded()
+        } else {
+            shimmerMask.removeAnimation(forKey: "shimmerSlide")
+        }
+    }
+
+    private func startShimmerIfNeeded() {
+        guard shimmerMask.animation(forKey: "shimmerSlide") == nil, bounds.width > 0 else { return }
+        let animation = CABasicAnimation(keyPath: "transform.translation.x")
+        animation.fromValue = -bounds.width
+        animation.toValue = bounds.width
+        animation.duration = Metrics.animationDuration
+        animation.repeatCount = .infinity
+        animation.timingFunction = CAMediaTimingFunction(controlPoints: 0.32, 0, 0.68, 1)
+        shimmerMask.add(animation, forKey: "shimmerSlide")
+    }
+}
+
 final class HotkeyRecorderButton: PressScaleButton {
     private let container = NSView()
     private let titleField = NSTextField(labelWithString: "")

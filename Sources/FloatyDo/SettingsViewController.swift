@@ -190,7 +190,7 @@ final class SettingsViewController: NSViewController {
             switch self {
             case .appearance: return "paintpalette"
             case .shortcuts: return "command"
-            case .icon: return "checkmark.app.fill"
+            case .icon: return "checkmark.app"
             case .about: return "info.circle"
             }
         }
@@ -224,7 +224,7 @@ final class SettingsViewController: NSViewController {
     private var iconOptionButtons: [BuiltInTheme: IconOptionButton] = [:]
     private var iconDividers: [NSView] = []
 
-    private let iconStatusLabel = NSTextField(labelWithString: "")
+    private let iconStatusLabel = ShimmerStatusLabel()
     private let applyIconButton = InlineFooterTokenButton(text: "Relaunch")
     private let currentIconThemeBadge = InlineFooterTokenButton(text: "")
     private var themeButtons: [ThemePresetButton] = []
@@ -884,7 +884,6 @@ final class SettingsViewController: NSViewController {
         iconStatusLabel.alignment = .left
         iconStatusLabel.lineBreakMode = .byTruncatingTail
         iconStatusLabel.translatesAutoresizingMaskIntoConstraints = false
-        secondaryLabels.append(iconStatusLabel)
 
         applyIconButton.target = self
         applyIconButton.action = #selector(applyIconAndRelaunch(_:))
@@ -1675,6 +1674,7 @@ final class SettingsViewController: NSViewController {
 
         guard controller.canApplyIconChanges() else {
             iconStatusLabel.stringValue = "Local build only."
+            iconStatusLabel.shimmerEnabled = false
             applyIconButton.isHidden = true
             applyIconButton.isEnabled = false
             return
@@ -1682,6 +1682,7 @@ final class SettingsViewController: NSViewController {
 
         guard selectedIconTheme.supportsPrimaryAppIcon else {
             iconStatusLabel.stringValue = "No matching icon yet."
+            iconStatusLabel.shimmerEnabled = false
             applyIconButton.isHidden = true
             applyIconButton.isEnabled = false
             return
@@ -1690,6 +1691,7 @@ final class SettingsViewController: NSViewController {
         let themeMatchesIcon = selectedIconTheme == currentAppliedIconTheme
         if isApplyingPrimaryIconChange {
             iconStatusLabel.stringValue = "Building, then relaunching…"
+            iconStatusLabel.shimmerEnabled = true
             applyIconButton.isHidden = true
             applyIconButton.isEnabled = false
             return
@@ -1697,6 +1699,7 @@ final class SettingsViewController: NSViewController {
 
         if themeMatchesIcon {
             iconStatusLabel.stringValue = "Using"
+            iconStatusLabel.shimmerEnabled = false
             currentIconThemeBadge.tokenText = iconDisplayName(for: selectedIconTheme)
             currentIconThemeBadge.isHidden = false
             applyIconButton.isHidden = true
@@ -1705,6 +1708,7 @@ final class SettingsViewController: NSViewController {
         }
 
         iconStatusLabel.stringValue = "FloatyDo to apply the selected icon."
+        iconStatusLabel.shimmerEnabled = false
         applyIconButton.tokenText = "Relaunch"
         applyIconButton.isHidden = false
         applyIconButton.isEnabled = true
@@ -1750,6 +1754,7 @@ final class SettingsViewController: NSViewController {
         shortcutDescriptionLabels.forEach { $0.textColor = boostedShortcutLabelColor }
         shortcutConjunctionLabels.forEach { $0.textColor = boostedShortcutLabelColor }
         keycapLabels.forEach { $0.textColor = preferences.secondaryTextColor }
+        iconStatusLabel.textColor = preferences.secondaryTextColor
         keycapBackgroundViews.forEach {
             $0.layer?.backgroundColor = preferences.activeFillColor.cgColor
         }
