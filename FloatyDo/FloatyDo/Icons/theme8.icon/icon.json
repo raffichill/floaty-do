@@ -6,8 +6,9 @@
     {
       "layers" : [
         {
-          "image-name" : "theme 8.png",
-          "name" : "theme 8"
+          "glass" : false,
+          "image-name" : "theme8.png",
+          "name" : "theme8"
         }
       ],
       "shadow" : {
