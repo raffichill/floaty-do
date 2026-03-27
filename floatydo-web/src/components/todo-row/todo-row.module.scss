@@ -6,20 +6,12 @@
   gap: var(--text-inset);
   position: relative;
   cursor: default;
+  user-select: none;
+  -webkit-user-select: none;
 
-  &[data-selected="true"] {
-    .rowBackground {
-      opacity: 1;
-    }
-  }
-
-  &[data-completing="true"] {
-    .text,
-    .input {
-      opacity: 0.5;
-      text-decoration: line-through;
-      text-decoration-color: var(--floaty-strikethrough);
-    }
+  // Never show I-beam anywhere
+  &, * {
+    cursor: default !important;
   }
 
   &[data-kind="filler"] {
@@ -27,81 +19,69 @@
   }
 }
 
+// Selection/hover background pill
 .rowBackground {
   position: absolute;
   inset: var(--row-vertical-inset) var(--row-background-inset);
-  background: var(--floaty-selection-overlay);
+  background: var(--floaty-highlight);
   border-radius: var(--row-corner-radius);
   opacity: 0;
-  transition: opacity var(--duration-hover-fade) ease;
   pointer-events: none;
 }
 
-.row:hover .rowBackground {
-  opacity: 0.5;
+// Hover: subtle highlight
+.row:not([data-kind="filler"]):not([data-completing="true"]):hover .rowBackground {
+  opacity: 0.6;
 }
 
-.row[data-selected="true"] .rowBackground {
-  opacity: 1;
-}
-
+// Checkbox circle — 18px visual, 24px hit area via padding
 .circle {
   width: var(--circle-size);
   height: var(--circle-size);
   min-width: var(--circle-size);
   border-radius: 50%;
-  border: 1.5px solid var(--floaty-circle-border);
+  border: 1px solid var(--floaty-circle-border);
   display: flex;
   align-items: center;
   justify-content: center;
-  cursor: pointer;
-  transition:
-    border-color var(--duration-hover-fade) ease,
-    background var(--duration-hover-fade) ease,
-    transform 120ms var(--ease-snappy);
   position: relative;
   z-index: 1;
-
-  &:hover {
-    border-color: var(--floaty-text-secondary);
-    transform: scale(1.08);
-  }
-
-  &:active {
-    transform: scale(0.92);
-  }
-
-  &[data-done="true"] {
-    border-color: var(--floaty-text-secondary);
-    background: var(--floaty-selection-overlay);
-
-    .checkmark {
-      opacity: 1;
-    }
-  }
+  flex-shrink: 0;
 }
 
+// Filler row circle
 .fillerCircle {
   width: var(--circle-size);
   height: var(--circle-size);
   min-width: var(--circle-size);
   border-radius: 50%;
-  border: 1.5px solid var(--floaty-filler-circle);
+  border: 1px solid var(--floaty-filler-circle);
+  flex-shrink: 0;
+}
+
+// Draft circle — subtle
+.draftCircle {
+  composes: circle;
+  border-color: var(--floaty-filler-circle);
 }
 
 .checkmark {
   width: 10px;
   height: 10px;
   opacity: 0;
-  transition: opacity var(--duration-completion-sweep) var(--ease-smooth);
 
   path {
     stroke: var(--floaty-text-primary);
-    stroke-width: 2;
+    stroke-width: 1.8;
     stroke-linecap: round;
     stroke-linejoin: round;
     fill: none;
   }
+}
+
+.checkmarkVisible {
+  composes: checkmark;
+  opacity: 1;
 }
 
 .text {
@@ -115,14 +95,43 @@
   z-index: 1;
 }
 
+// Strikethrough overlay — positioned over text area
+.strikethroughLine {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: var(--floaty-strikethrough);
+  transform-origin: left center;
+  pointer-events: none;
+  z-index: 2;
+}
+
+// Input — NO border, fills remaining space
 .input {
   flex: 1;
   min-width: 0;
+  width: 100%;
   line-height: var(--row-height);
   height: var(--row-height);
   position: relative;
   z-index: 1;
   caret-color: var(--floaty-caret);
+  border: none !important;
+  outline: none !important;
+  box-shadow: none !important;
+  background: transparent !important;
+  padding: 0 !important;
+  margin: 0 !important;
+}
+
+// Wrapper only used during completion for strikethrough positioning
+.completingText {
+  flex: 1;
+  min-width: 0;
+  position: relative;
+  z-index: 1;
 }
 
 .archiveText {

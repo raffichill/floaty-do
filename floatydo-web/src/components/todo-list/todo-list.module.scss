@@ -1,6 +1,7 @@
 .list {
   display: flex;
   flex-direction: column;
+  position: relative;
 }
 
 .emptyState {
@@ -11,4 +12,10 @@
   color: var(--floaty-text-secondary);
   opacity: 0.5;
   font-size: 13px;
+}
+
+// Drag placeholder (gap where the dragged item came from)
+.dragPlaceholder {
+  height: var(--row-height);
+  opacity: 0;
 }

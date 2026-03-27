@@ -5,29 +5,29 @@
   background: var(--floaty-bg);
   border-radius: var(--panel-corner-radius);
   box-shadow:
-    0 0 0 0.5px rgba(255, 255, 255, 0.08),
-    0 8px 40px rgba(0, 0, 0, 0.45),
-    0 2px 12px rgba(0, 0, 0, 0.25);
+    0 0 0 0.5px rgba(255, 255, 255, 0.06),
+    0 1px 3px rgba(0, 0, 0, 0.2),
+    0 8px 32px rgba(0, 0, 0, 0.4);
   overflow: hidden;
   position: relative;
   user-select: none;
 }
 
+// macOS: traffic lights center at targetCenterX = rowHorizontalInset + circleHitSize/2 = 24pt
+// First dot (12px wide) left edge = 24 - 6 = 18px
 .titlebar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: var(--traffic-light-top-inset) var(--titlebar-trailing-inset) 0
-    var(--row-horizontal-inset);
+  padding: 0 var(--titlebar-trailing-inset) 0 18px;
   height: var(--titlebar-height);
-  -webkit-app-region: drag;
+  margin-top: 4px;
 }
 
 .trafficLights {
   display: flex;
   gap: var(--traffic-light-spacing);
   align-items: center;
-  z-index: 1;
 }
 
 .trafficLight {
@@ -35,7 +35,6 @@
   height: 12px;
   border-radius: 50%;
   cursor: default;
-  transition: opacity var(--duration-hover-fade) ease;
   position: relative;
 
   &::after {
@@ -43,7 +42,7 @@
     position: absolute;
     inset: 0;
     border-radius: 50%;
-    box-shadow: inset 0 0 0 0.5px rgba(0, 0, 0, 0.12);
+    box-shadow: inset 0 -0.5px 1px rgba(0, 0, 0, 0.15);
   }
 }
 
@@ -65,6 +64,8 @@
   gap: 2px;
 }
 
+// macOS: HeaderIconButton uses SF Symbol at 13pt medium weight
+// Button has no visible border, tints on hover
 .toolbarButton {
   width: 28px;
   height: 28px;
@@ -79,7 +80,7 @@
   cursor: default;
 
   &:hover {
-    background: var(--floaty-selection-overlay);
+    background: var(--floaty-highlight);
     color: var(--floaty-text-primary);
   }
 
@@ -91,10 +92,4 @@
 
 .content {
   padding: var(--content-top-padding) 0 var(--content-bottom-padding);
-}
-
-.divider {
-  height: var(--divider-height);
-  background: var(--floaty-stroke-subtle);
-  margin: 0 var(--row-horizontal-inset);
 }

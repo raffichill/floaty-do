@@ -10,14 +10,24 @@
   --floaty-content-opacity: 0.94;
 
   // Derived colors (from ColorPalette in AppPreferences.swift)
+  // primaryTextColor = contentColor * contentOpacity
   --floaty-text-primary: rgba(255, 255, 255, 0.94);
+  // secondaryTextColor = resolvedContentColor(multiplier: 0.72)
   --floaty-text-secondary: rgba(255, 255, 255, 0.677);
-  --floaty-selection-overlay: rgba(215, 220, 239, 0.14);
+  // selectionOverlayColor = foreground.withAlpha(0.15)
+  --floaty-selection-overlay: rgba(255, 255, 255, 0.15);
+  // highlight color = theme selection color at selection opacity
+  --floaty-highlight: rgba(215, 220, 239, 0.14);
+  // strikethroughColor = resolvedContentColor(multiplier: 0.60)
   --floaty-strikethrough: rgba(255, 255, 255, 0.564);
-  --floaty-stroke-subtle: rgba(255, 255, 255, 0.12);
-  --floaty-caret: rgba(255, 255, 255, 0.94);
+  // subtleStrokeColor = foreground.withAlpha(0.22)
+  --floaty-stroke-subtle: rgba(255, 255, 255, 0.22);
+  // caretColor = foreground.withAlpha(0.95)
+  --floaty-caret: rgba(255, 255, 255, 0.95);
+  // circle border for active rows = subtleStroke = 0.22
   --floaty-circle-border: rgba(255, 255, 255, 0.22);
-  --floaty-filler-circle: rgba(255, 255, 255, 0.08);
+  // filler circle border — much more subtle
+  --floaty-filler-circle: rgba(255, 255, 255, 0.06);
 
   // Traffic lights
   --traffic-close: #FF5F57;

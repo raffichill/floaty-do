@@ -11,29 +11,44 @@ import type { TodoItem } from "@/lib/types";
 
 const MAX_ITEMS = 10;
 
-interface TodoState {
-  items: TodoItem[];
-  archivedItems: TodoItem[];
-  draftText: string;
-  selectedId: string | null;
-  activeTab: "tasks" | "archive";
+// Draft state matching macOS TaskListStructurePolicy
+interface DraftState {
+  insertionIndex: number;
+  text: string;
+  // Structural drafts are created by keyboard (Return on task, Up from first)
+  // They collapse when navigating away if empty
+  isStructural: boolean;
 }
 
-type TodoAction =
+export interface TodoState {
+  items: TodoItem[];
+  archivedItems: TodoItem[];
+  draft: DraftState;
+  selectedId: string | null; // item id, "draft", or null
+}
+
+export type TodoAction =
   | { type: "ADD_ITEM"; text: string }
   | { type: "INSERT_ITEM"; text: string; index: number }
   | { type: "UPDATE_TEXT"; id: string; text: string }
   | { type: "ARCHIVE_ITEM"; id: string }
   | { type: "RESTORE_ITEM"; id: string }
   | { type: "DELETE_ITEM"; id: string }
-  | { type: "DELETE_ARCHIVED"; id: string }
   | { type: "REORDER_ITEM"; id: string; destinationIndex: number }
-  | { type: "SET_DRAFT_TEXT"; text: string }
+  | { type: "SET_DRAFT"; draft: Partial<DraftState> }
   | { type: "SET_SELECTED"; id: string | null }
-  | { type: "SET_TAB"; tab: "tasks" | "archive" };
+  // Keyboard-driven draft operations
+  | { type: "ACTIVATE_DRAFT"; insertionIndex: number }
+  | { type: "PROMOTE_DRAFT" }
+  | { type: "COLLAPSE_DRAFT"; direction: -1 | 1 }
+  | { type: "RESET_DRAFT" };
 
 function generateId(): string {
   return crypto.randomUUID();
+}
+
+function defaultDraft(itemCount: number): DraftState {
+  return { insertionIndex: itemCount, text: "", isStructural: false };
 }
 
 function todoReducer(state: TodoState, action: TodoAction): TodoState {
@@ -45,7 +60,8 @@ function todoReducer(state: TodoState, action: TodoAction): TodoState {
       return {
         ...state,
         items: [...state.items, newItem],
-        draftText: "",
+        draft: defaultDraft(state.items.length + 1),
+        selectedId: "draft",
       };
     }
 
@@ -56,7 +72,11 @@ function todoReducer(state: TodoState, action: TodoAction): TodoState {
       const items = [...state.items];
       const idx = Math.max(0, Math.min(action.index, items.length));
       items.splice(idx, 0, newItem);
-      return { ...state, items };
+      return {
+        ...state,
+        items,
+        draft: defaultDraft(items.length),
+      };
     }
 
     case "UPDATE_TEXT": {
@@ -71,13 +91,22 @@ function todoReducer(state: TodoState, action: TodoAction): TodoState {
     case "ARCHIVE_ITEM": {
       const item = state.items.find((i) => i.id === action.id);
       if (!item) return state;
+      const itemIndex = state.items.indexOf(item);
+      const newItems = state.items.filter((i) => i.id !== action.id);
+
+      // Select next item or draft
+      let nextSelected: string | null = "draft";
+      if (newItems.length > 0) {
+        const nextIdx = Math.min(itemIndex, newItems.length - 1);
+        nextSelected = newItems[nextIdx].id;
+      }
+
       return {
         ...state,
-        items: state.items.filter((i) => i.id !== action.id),
-        archivedItems: [
-          { ...item, isDone: true },
-          ...state.archivedItems,
-        ],
+        items: newItems,
+        archivedItems: [{ ...item, isDone: true }, ...state.archivedItems],
+        draft: defaultDraft(newItems.length),
+        selectedId: nextSelected,
       };
     }
 
@@ -92,16 +121,11 @@ function todoReducer(state: TodoState, action: TodoAction): TodoState {
     }
 
     case "DELETE_ITEM": {
+      const newItems = state.items.filter((i) => i.id !== action.id);
       return {
         ...state,
-        items: state.items.filter((i) => i.id !== action.id),
-      };
-    }
-
-    case "DELETE_ARCHIVED": {
-      return {
-        ...state,
-        archivedItems: state.archivedItems.filter((i) => i.id !== action.id),
+        items: newItems,
+        draft: defaultDraft(newItems.length),
       };
     }
 
@@ -112,19 +136,86 @@ function todoReducer(state: TodoState, action: TodoAction): TodoState {
       const [moved] = items.splice(idx, 1);
       const dest = Math.max(0, Math.min(action.destinationIndex, items.length));
       items.splice(dest, 0, moved);
-      return { ...state, items };
+      return { ...state, items, draft: defaultDraft(items.length) };
     }
 
-    case "SET_DRAFT_TEXT": {
-      return { ...state, draftText: action.text };
+    case "SET_DRAFT": {
+      return {
+        ...state,
+        draft: { ...state.draft, ...action.draft },
+      };
     }
 
     case "SET_SELECTED": {
       return { ...state, selectedId: action.id };
     }
 
-    case "SET_TAB": {
-      return { ...state, activeTab: action.tab, selectedId: null };
+    // Create structural draft at a specific insertion index
+    case "ACTIVATE_DRAFT": {
+      return {
+        ...state,
+        draft: {
+          insertionIndex: action.insertionIndex,
+          text: "",
+          isStructural: true,
+        },
+        selectedId: "draft",
+      };
+    }
+
+    // Promote non-empty draft to a real task item
+    case "PROMOTE_DRAFT": {
+      const text = state.draft.text.trim();
+      if (!text || state.items.length >= MAX_ITEMS) return state;
+      const newItem: TodoItem = { id: generateId(), text, isDone: false };
+      const items = [...state.items];
+      const idx = Math.max(
+        0,
+        Math.min(state.draft.insertionIndex, items.length)
+      );
+      items.splice(idx, 0, newItem);
+      // New draft goes right below the just-inserted item
+      return {
+        ...state,
+        items,
+        draft: {
+          insertionIndex: idx + 1,
+          text: "",
+          isStructural: true,
+        },
+        selectedId: "draft",
+      };
+    }
+
+    // Collapse empty structural draft back to default
+    case "COLLAPSE_DRAFT": {
+      if (!state.draft.isStructural || state.draft.text.trim() !== "") {
+        return state;
+      }
+      const draftIdx = state.draft.insertionIndex;
+      // Select adjacent item based on direction
+      let nextSelected: string | null = "draft";
+      if (action.direction < 0 && draftIdx > 0 && state.items.length > 0) {
+        // Collapsing upward: select item above draft position
+        const targetIdx = Math.min(draftIdx - 1, state.items.length - 1);
+        nextSelected = state.items[targetIdx].id;
+      } else if (action.direction > 0 && state.items.length > 0) {
+        // Collapsing downward: select item below draft position
+        const targetIdx = Math.min(draftIdx, state.items.length - 1);
+        nextSelected = state.items[targetIdx].id;
+      }
+      return {
+        ...state,
+        draft: defaultDraft(state.items.length),
+        selectedId: nextSelected,
+      };
+    }
+
+    case "RESET_DRAFT": {
+      return {
+        ...state,
+        draft: defaultDraft(state.items.length),
+      };
     }
 
     default:
@@ -138,25 +229,26 @@ const INITIAL_STATE: TodoState = {
     { id: "demo-2", text: "Click the circle to complete", isDone: false },
   ],
   archivedItems: [],
-  draftText: "",
-  selectedId: null,
-  activeTab: "tasks",
+  draft: { insertionIndex: 2, text: "", isStructural: false },
+  selectedId: "draft",
 };
 
 interface TodoContextValue {
   state: TodoState;
+  dispatch: React.Dispatch<TodoAction>;
   addItem: (text: string) => void;
-  insertItem: (text: string, index: number) => void;
   updateText: (id: string, text: string) => void;
   archiveItem: (id: string) => void;
   restoreItem: (id: string) => void;
-  deleteItem: (id: string) => void;
-  deleteArchived: (id: string) => void;
   reorderItem: (id: string, destinationIndex: number) => void;
   setDraftText: (text: string) => void;
   setSelected: (id: string | null) => void;
-  setTab: (tab: "tasks" | "archive") => void;
+  activateDraft: (insertionIndex: number) => void;
+  promoteDraft: () => void;
+  collapseDraft: (direction: -1 | 1) => void;
   canAddMore: boolean;
+  isDraftDefault: boolean;
+  isDraftStructuralEmpty: boolean;
 }
 
 const TodoContext = createContext<TodoContextValue | null>(null);
@@ -166,11 +258,6 @@ export function TodoProvider({ children }: { children: ReactNode }) {
 
   const addItem = useCallback(
     (text: string) => dispatch({ type: "ADD_ITEM", text }),
-    []
-  );
-  const insertItem = useCallback(
-    (text: string, index: number) =>
-      dispatch({ type: "INSERT_ITEM", text, index }),
     []
   );
   const updateText = useCallback(
@@ -185,48 +272,54 @@ export function TodoProvider({ children }: { children: ReactNode }) {
     (id: string) => dispatch({ type: "RESTORE_ITEM", id }),
     []
   );
-  const deleteItem = useCallback(
-    (id: string) => dispatch({ type: "DELETE_ITEM", id }),
-    []
-  );
-  const deleteArchived = useCallback(
-    (id: string) => dispatch({ type: "DELETE_ARCHIVED", id }),
-    []
-  );
   const reorderItem = useCallback(
     (id: string, destinationIndex: number) =>
       dispatch({ type: "REORDER_ITEM", id, destinationIndex }),
     []
   );
   const setDraftText = useCallback(
-    (text: string) => dispatch({ type: "SET_DRAFT_TEXT", text }),
+    (text: string) => dispatch({ type: "SET_DRAFT", draft: { text } }),
     []
   );
   const setSelected = useCallback(
     (id: string | null) => dispatch({ type: "SET_SELECTED", id }),
     []
   );
-  const setTab = useCallback(
-    (tab: "tasks" | "archive") => dispatch({ type: "SET_TAB", tab }),
+  const activateDraft = useCallback(
+    (insertionIndex: number) =>
+      dispatch({ type: "ACTIVATE_DRAFT", insertionIndex }),
     []
   );
+  const promoteDraft = useCallback(() => dispatch({ type: "PROMOTE_DRAFT" }), []);
+  const collapseDraft = useCallback(
+    (direction: -1 | 1) => dispatch({ type: "COLLAPSE_DRAFT", direction }),
+    []
+  );
+
+  const isDraftDefault =
+    !state.draft.isStructural &&
+    state.draft.insertionIndex === state.items.length;
+  const isDraftStructuralEmpty =
+    state.draft.isStructural && state.draft.text.trim() === "";
 
   return (
     <TodoContext.Provider
       value={{
         state,
+        dispatch,
         addItem,
-        insertItem,
         updateText,
         archiveItem,
         restoreItem,
-        deleteItem,
-        deleteArchived,
         reorderItem,
         setDraftText,
         setSelected,
-        setTab,
+        activateDraft,
+        promoteDraft,
+        collapseDraft,
         canAddMore: state.items.length < MAX_ITEMS,
+        isDraftDefault,
+        isDraftStructuralEmpty,
       }}
     >
       {children}

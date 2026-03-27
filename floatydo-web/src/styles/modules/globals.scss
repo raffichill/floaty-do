@@ -6,8 +6,10 @@ body {
 }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-family: "SF Pro Text", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
   font-size: var(--font-size);
+  font-weight: 400;
+  letter-spacing: -0.01em;
   color: var(--floaty-text-primary);
   background: transparent;
   overflow: hidden;
@@ -17,21 +19,32 @@ body {
   background: var(--floaty-selection-overlay);
 }
 
-:focus-visible {
-  outline: 2px solid var(--floaty-caret);
-  outline-offset: -2px;
+// No focus rings anywhere — macOS app uses custom caret only
+*:focus {
+  outline: none;
+}
+
+*:focus-visible {
+  outline: none;
 }
 
 input {
   font: inherit;
+  letter-spacing: inherit;
   color: inherit;
   background: none;
   border: none;
   outline: none;
+  padding: 0;
 
   &::placeholder {
     color: var(--floaty-text-secondary);
-    opacity: 0.5;
+    opacity: 0.4;
+  }
+
+  &:focus {
+    outline: none;
+    box-shadow: none;
   }
 }
 
@@ -42,4 +55,8 @@ button {
   border: none;
   cursor: pointer;
   padding: 0;
+
+  &:focus {
+    outline: none;
+  }
 }
