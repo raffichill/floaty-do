@@ -591,7 +591,7 @@ final class SettingsViewController: NSViewController {
                 lessThanOrEqualTo: container.trailingAnchor, constant: -24),
             content.bottomAnchor.constraint(
                 equalTo: container.bottomAnchor,
-                constant: -Metrics.pageContentBottomInset
+                constant: -(Metrics.pageContentBottomInset - 6)
             ),
         ])
 
