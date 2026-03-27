@@ -125,7 +125,7 @@ public struct AppPreferences: Codable, Equatable {
         fontStyle: .system,
         fontSize: LayoutMetrics.defaultFontSize,
         cornerRadius: 10,
-        blurEnabled: true,
+        blurEnabled: false,
         windowOpacity: 1.0,
         globalHotkey: .defaultToggle
     )
@@ -243,14 +243,12 @@ extension AppPreferences {
     var palette: ThemePalette {
         let style = selectedBuiltInTheme.style
         let background = style.backgroundColor.nsColor.resolvedSRGB
-        let contentColor = style.contentColor.nsColor.resolvedSRGB
+        let foreground = style.foregroundColor.nsColor.resolvedSRGB
         return ThemePalette(
             background: background,
-            selectionColor: style.selectionColor.nsColor.resolvedSRGB,
-            selectionOpacity: CGFloat(min(max(style.selectionOpacity, 0), 1)),
-            contentColor: contentColor,
-            contentOpacity: CGFloat(min(max(style.contentOpacity, 0), 1)),
-            usesLightText: contentColor.relativeLuminance > background.relativeLuminance
+            highlight: style.highlightColor.nsColor.resolvedSRGB,
+            foreground: foreground,
+            usesLightText: foreground.relativeLuminance > background.relativeLuminance
         )
     }
 
@@ -263,7 +261,7 @@ extension AppPreferences {
     }
 
     var activeFillColor: NSColor {
-        return palette.selectionColor.withAlphaComponent(palette.selectionOpacity)
+        palette.highlight
     }
 
     var primaryTextColor: NSColor {
@@ -275,7 +273,7 @@ extension AppPreferences {
     }
 
     var subtleStrokeColor: NSColor {
-        return palette.contentColor.withAlphaComponent(max(0.12, palette.contentOpacity * 0.22))
+        return palette.foreground.withAlphaComponent(0.22)
     }
 
     var strikethroughColor: NSColor {
@@ -283,12 +281,11 @@ extension AppPreferences {
     }
 
     var selectionOverlayColor: NSColor {
-        let highlightOpacity = min(max(Double(palette.selectionOpacity) + 0.08, 0.14), 0.30)
-        return palette.selectionColor.withAlphaComponent(highlightOpacity)
+        return palette.foreground.withAlphaComponent(0.15)
     }
 
     var caretColor: NSColor {
-        return palette.contentColor.withAlphaComponent(min(max(Double(palette.contentOpacity) + 0.06, 0), 1))
+        return palette.foreground.withAlphaComponent(0.95)
     }
 
     var usesLightText: Bool {
@@ -296,11 +293,15 @@ extension AppPreferences {
     }
 
     var usesTranslucentSurface: Bool {
-        blurEnabled
+        // Product decision: keep the surface solid until the blur path is both
+        // correct and performant on current macOS releases. We keep the stored
+        // preference and blur/opacity code intact so the feature can be revived
+        // later without rebuilding the model layer.
+        false
     }
 
     var contentBaseColor: NSColor {
-        palette.contentColor
+        palette.foreground
     }
 
     var translucentSurfaceOpacity: Double {
@@ -313,6 +314,22 @@ extension AppPreferences {
         let normalized = (clampedWindowOpacity - LayoutMetrics.minWindowOpacity) / (1.0 - LayoutMetrics.minWindowOpacity)
         let eased = pow(min(max(normalized, 0), 1), 0.85)
         return 0.90 + (0.10 * eased)
+    }
+
+    var compositedTranslucentSurfaceOpacity: Double {
+        let normalized = (clampedWindowOpacity - LayoutMetrics.minWindowOpacity) / (1.0 - LayoutMetrics.minWindowOpacity)
+        let eased = pow(min(max(normalized, 0), 1), 0.92)
+        return 0.58 + (0.34 * eased)
+    }
+
+    var compositedTranslucentSurfaceFillColor: NSColor {
+        panelBackgroundColor.withAlphaComponent(compositedTranslucentSurfaceOpacity)
+    }
+
+    var compositedTranslucentSurfaceStrokeColor: NSColor {
+        let normalized = (clampedWindowOpacity - LayoutMetrics.minWindowOpacity) / (1.0 - LayoutMetrics.minWindowOpacity)
+        let opacity = 0.10 + (0.08 * min(max(normalized, 0), 1))
+        return contentBaseColor.withAlphaComponent(opacity)
     }
 
     var backdropBlurRadius: Double {
@@ -338,8 +355,7 @@ extension AppPreferences {
     }
 
     func resolvedContentColor(multiplier: CGFloat = 1.0) -> NSColor {
-        let baseOpacity = palette.contentOpacity
-        let alpha = min(max(baseOpacity * multiplier, 0), 1)
+        let alpha = min(max(multiplier, 0), 1)
         return contentBaseColor.withAlphaComponent(alpha)
     }
 }

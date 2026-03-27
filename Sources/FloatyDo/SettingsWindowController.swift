@@ -111,6 +111,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     enum InitialTab {
         case appearance
         case shortcuts
+        case icon
         case about
     }
 
@@ -132,7 +133,6 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     }
 
     var onWindowVisibilityChange: ((Bool) -> Void)?
-    var onResignKeyWhileVisible: (() -> Void)?
 
     private let settingsViewController: SettingsViewController
     private let surfaceViewController: PanelSurfaceHostingViewController<SettingsViewController>
@@ -196,6 +196,8 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
                 settingsViewController.showAppearanceTab(animated: false)
             case .shortcuts:
                 settingsViewController.showShortcutsTab(animated: false)
+            case .icon:
+                settingsViewController.showIconTab(animated: false)
             case .about:
                 settingsViewController.showAboutTab(animated: false)
             }
@@ -241,7 +243,6 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
 
     func windowDidResignKey(_ notification: Notification) {
         guard let window, window.isVisible else { return }
-        onResignKeyWhileVisible?()
         onWindowVisibilityChange?(window.isVisible)
     }
 

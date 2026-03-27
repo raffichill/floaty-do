@@ -121,7 +121,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         observePreferences()
 
         // App-level shortcuts: cmd+1/cmd+2 switch main tabs unless settings is
-        // visible, in which case cmd+1/cmd+2/cmd+3 switch settings tabs.
+        // visible, in which case cmd+1/cmd+2/cmd+3/cmd+4 switch settings tabs.
         // cmd+3 opens settings on Theme unless settings is already visible,
         // cmd+, opens settings on Theme, cmd+Q quits, cmd+W hides panel,
         // cmd+0 resets the main window size and snaps it to the nearest
@@ -208,11 +208,18 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             }
             if characters == "3" {
                 if self.todoVC.isSettingsWindowVisible {
-                    self.todoVC.openSettingsWindow(initialTab: .about)
+                    self.todoVC.openSettingsWindow(initialTab: .icon)
                 } else {
                     self.todoVC.openSettingsWindow(initialTab: .appearance)
                 }
                 return nil
+            }
+            if characters == "4" {
+                if self.todoVC.isSettingsWindowVisible {
+                    self.todoVC.openSettingsWindow(initialTab: .about)
+                    return nil
+                }
+                return event
             }
             if characters == "0" {
                 self.resetPanelWindowSizeAndSnap()

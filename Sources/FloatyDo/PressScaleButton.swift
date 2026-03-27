@@ -23,6 +23,18 @@ class PressScaleButton: NSButton {
         updateCellHighlightBehavior()
     }
 
+    override func addCursorRect(_ rect: NSRect, cursor: NSCursor) {
+        super.addCursorRect(rect, cursor: .arrow)
+    }
+
+    override func resetCursorRects() {
+        addCursorRect(bounds, cursor: .arrow)
+    }
+
+    override func cursorUpdate(with event: NSEvent) {
+        NSCursor.arrow.set()
+    }
+
     private func setPressedAppearance(_ pressed: Bool, duration: CFTimeInterval) {
         wantsLayer = true
         guard let layer else { return }

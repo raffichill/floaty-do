@@ -9,6 +9,8 @@ final class TodoStoreTests: XCTestCase {
         UserDefaults.standard.removeObject(forKey: "floatydo.items")
         UserDefaults.standard.removeObject(forKey: "floatydo.archived")
         UserDefaults.standard.removeObject(forKey: "floatydo.preferences")
+        UserDefaults.standard.removeObject(forKey: "floatydo.completedTodoCount")
+        UserDefaults.standard.removeObject(forKey: "floatydo.hasRequestedRatingPrompt")
     }
 
     // MARK: - Basic add/archive/restore
@@ -208,6 +210,38 @@ final class TodoStoreTests: XCTestCase {
 
         XCTAssertEqual(store.items.map(\.text), ["Item 0", "Item 1", "Item 3", "Item 4"])
         XCTAssertEqual(store.archivedItems.map(\.text), ["Item 2"])
+    }
+
+    func testRatingPromptBecomesPendingAfterTenCompletedTodos() {
+        let store = TodoStore()
+        for index in 0..<10 {
+            store.add("Item \(index)")
+        }
+
+        for _ in 0..<9 {
+            store.archive(store.items[0])
+            XCTAssertFalse(store.consumePendingRatingPromptRequest())
+        }
+
+        store.archive(store.items[0])
+
+        XCTAssertTrue(store.consumePendingRatingPromptRequest())
+        XCTAssertFalse(store.consumePendingRatingPromptRequest())
+    }
+
+    func testRatingPromptStatePersistsAcrossStoreInstances() {
+        let store = TodoStore()
+        for index in 0..<10 {
+            store.add("Item \(index)")
+        }
+        for _ in 0..<10 {
+            store.archive(store.items[0])
+        }
+
+        let reloadedStore = TodoStore()
+
+        XCTAssertTrue(reloadedStore.consumePendingRatingPromptRequest())
+        XCTAssertFalse(reloadedStore.consumePendingRatingPromptRequest())
     }
 
     // MARK: - Restore
@@ -505,7 +539,7 @@ final class TodoStoreTests: XCTestCase {
             hoverHighlightsEnabled: false,
             animationPreset: .snappy,
             snapPadding: 32,
-            theme: .barbie,
+            theme: .theme6,
             fontStyle: .rounded,
             fontSize: 16,
             cornerRadius: 18,
@@ -594,7 +628,7 @@ final class TodoStoreTests: XCTestCase {
         XCTAssertEqual(store.preferences.fontStyle, .system)
         XCTAssertEqual(store.preferences.fontSize, 14.0)
         XCTAssertEqual(store.preferences.cornerRadius, 10.0)
-        XCTAssertTrue(store.preferences.blurEnabled)
+        XCTAssertFalse(store.preferences.blurEnabled)
         XCTAssertEqual(store.preferences.windowOpacity, 1.0)
         XCTAssertEqual(store.preferences.globalHotkey, .defaultToggle)
     }

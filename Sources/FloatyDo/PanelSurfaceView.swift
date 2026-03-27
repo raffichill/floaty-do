@@ -3,15 +3,22 @@ import AppKit
 final class PanelSurfaceView: NSView {
     private enum SurfaceMode: Equatable {
         case solid
-        case translucent
+        case compositedTranslucent
+        case liveTranslucent
     }
 
     private let contentContainer = NSView()
     private let solidSurface = NSView()
+    private let compositedTranslucentSurface = NSView()
     private let translucentSurface = NSVisualEffectView()
     private let translucentTintOverlay = NSView()
     private var activeSurface: NSView?
+    private var activeSurfaceMode: SurfaceMode?
     private var modernTranslucentSurface: NSView?
+    private var appliedPreferences: AppPreferences = .default
+    private weak var observedWindow: NSWindow?
+    private var windowObservers: [NSObjectProtocol] = []
+    private var appObservers: [NSObjectProtocol] = []
 
     var contentView: NSView {
         contentContainer
@@ -27,8 +34,11 @@ final class PanelSurfaceView: NSView {
         solidSurface.translatesAutoresizingMaskIntoConstraints = false
         solidSurface.wantsLayer = true
 
+        compositedTranslucentSurface.translatesAutoresizingMaskIntoConstraints = false
+        compositedTranslucentSurface.wantsLayer = true
+
         translucentSurface.translatesAutoresizingMaskIntoConstraints = false
-        translucentSurface.state = .active
+        translucentSurface.state = .followsWindowActiveState
         translucentSurface.blendingMode = .behindWindow
         translucentSurface.material = .underWindowBackground
         translucentSurface.isEmphasized = false
@@ -60,13 +70,36 @@ final class PanelSurfaceView: NSView {
         fatalError("init(coder:) has not been implemented")
     }
 
+    deinit {
+        let center = NotificationCenter.default
+        windowObservers.forEach(center.removeObserver)
+        appObservers.forEach(center.removeObserver)
+        NSWorkspace.shared.notificationCenter.removeObserver(self)
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        installBackdropRefreshObserversIfNeeded()
+        refreshTranslucentBackdrop()
+    }
+
     func apply(preferences: AppPreferences) {
-        switch resolvedSurfaceMode(for: preferences) {
+        appliedPreferences = preferences
+        let surfaceMode = resolvedSurfaceMode(for: preferences)
+        switch surfaceMode {
         case .solid:
             attachContentContainerToRoot()
             installSurface(solidSurface)
             solidSurface.layer?.backgroundColor = preferences.panelBackgroundColor.cgColor
-        case .translucent:
+            solidSurface.layer?.borderWidth = 0
+            solidSurface.layer?.borderColor = nil
+        case .compositedTranslucent:
+            attachContentContainerToRoot()
+            compositedTranslucentSurface.layer?.backgroundColor = preferences.compositedTranslucentSurfaceFillColor.cgColor
+            compositedTranslucentSurface.layer?.borderWidth = 1
+            compositedTranslucentSurface.layer?.borderColor = preferences.compositedTranslucentSurfaceStrokeColor.cgColor
+            installSurface(compositedTranslucentSurface)
+        case .liveTranslucent:
             if #available(macOS 26.0, *) {
                 let translucentHost = resolvedModernTranslucentSurface()
                 configureModernTranslucentSurface(
@@ -77,16 +110,32 @@ final class PanelSurfaceView: NSView {
                 installSurface(translucentHost)
             } else {
                 attachContentContainerToRoot()
+                translucentSurface.state = .followsWindowActiveState
                 translucentSurface.alphaValue = CGFloat(preferences.translucentEffectAlpha)
                 translucentSurface.material = .underWindowBackground
                 translucentTintOverlay.layer?.backgroundColor = preferences.translucentSurfaceTintColor.cgColor
                 installSurface(translucentSurface)
             }
         }
+        activeSurfaceMode = surfaceMode
+        refreshTranslucentBackdrop()
     }
 
     private func resolvedSurfaceMode(for preferences: AppPreferences) -> SurfaceMode {
-        preferences.usesTranslucentSurface ? .translucent : .solid
+        guard preferences.usesTranslucentSurface else { return .solid }
+        if NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency {
+            return .solid
+        }
+        if prefersCompositedTranslucentSurface {
+            return .compositedTranslucent
+        }
+        return .liveTranslucent
+    }
+
+    // macOS 26 can retain stale behind-window samples for floating translucent
+    // panels on the physical display, so prefer regular alpha compositing there.
+    private var prefersCompositedTranslucentSurface: Bool {
+        ProcessInfo.processInfo.operatingSystemVersion.majorVersion == 26
     }
 
     private func installSurface(_ surface: NSView) {
@@ -104,6 +153,101 @@ final class PanelSurfaceView: NSView {
             ])
             activeSurface = surface
         }
+    }
+
+    private func installBackdropRefreshObserversIfNeeded() {
+        if observedWindow !== window {
+            let center = NotificationCenter.default
+            windowObservers.forEach(center.removeObserver)
+            windowObservers.removeAll()
+            observedWindow = window
+
+            if let window {
+                let notificationNames: [NSNotification.Name] = [
+                    NSWindow.didBecomeKeyNotification,
+                    NSWindow.didResignKeyNotification,
+                    NSWindow.didExposeNotification,
+                    NSWindow.didMoveNotification,
+                    NSWindow.didResizeNotification,
+                    NSWindow.didChangeOcclusionStateNotification,
+                ]
+
+                windowObservers = notificationNames.map { name in
+                    center.addObserver(forName: name, object: window, queue: .main) { [weak self] _ in
+                        self?.refreshTranslucentBackdrop()
+                    }
+                }
+            }
+        }
+
+        guard appObservers.isEmpty else { return }
+
+        let center = NotificationCenter.default
+        appObservers = [
+            center.addObserver(
+                forName: NSApplication.didBecomeActiveNotification,
+                object: NSApp,
+                queue: .main
+            ) { [weak self] _ in
+                self?.refreshTranslucentBackdrop()
+            },
+            center.addObserver(
+                forName: NSApplication.didResignActiveNotification,
+                object: NSApp,
+                queue: .main
+            ) { [weak self] _ in
+                self?.refreshTranslucentBackdrop()
+            },
+        ]
+
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self,
+            selector: #selector(handleActiveApplicationChange),
+            name: NSWorkspace.didActivateApplicationNotification,
+            object: nil
+        )
+    }
+
+    @objc private func handleActiveApplicationChange(_ notification: Notification) {
+        refreshTranslucentBackdrop()
+    }
+
+    func refreshTranslucentBackdrop() {
+        let surfaceMode = resolvedSurfaceMode(for: appliedPreferences)
+        guard surfaceMode == activeSurfaceMode else {
+            apply(preferences: appliedPreferences)
+            return
+        }
+
+        switch surfaceMode {
+        case .solid:
+            return
+        case .compositedTranslucent:
+            compositedTranslucentSurface.layer?.backgroundColor =
+                appliedPreferences.compositedTranslucentSurfaceFillColor.cgColor
+            compositedTranslucentSurface.layer?.borderColor =
+                appliedPreferences.compositedTranslucentSurfaceStrokeColor.cgColor
+            window?.invalidateShadow()
+            return
+        case .liveTranslucent:
+            break
+        }
+
+        if #available(macOS 26.0, *),
+           let translucentHost = modernTranslucentSurface {
+            translucentHost.needsDisplay = true
+            translucentHost.displayIfNeeded()
+            window?.invalidateShadow()
+            return
+        }
+
+        let previousState = translucentSurface.state
+        translucentSurface.state = .inactive
+        translucentSurface.state = previousState
+        translucentSurface.needsDisplay = true
+        translucentTintOverlay.needsDisplay = true
+        translucentSurface.displayIfNeeded()
+        window?.invalidateShadow()
     }
 
     private func attachContentContainerToRoot() {

@@ -142,6 +142,17 @@ final class PrimaryAppIconRelaunchController {
         return scriptURL
     }
 
+    func previewImage(for theme: BuiltInTheme) -> NSImage? {
+        guard let repositoryRootURL = repositoryRootURL() else { return nil }
+        let previewURL = repositoryRootURL
+            .appendingPathComponent("FloatyDo/FloatyDo/Icons")
+            .appendingPathComponent("\(theme.rawValue).icon")
+            .appendingPathComponent("Assets")
+            .appendingPathComponent("\(theme.rawValue).png")
+        guard fileManager.fileExists(atPath: previewURL.path) else { return nil }
+        return NSImage(contentsOf: previewURL)
+    }
+
     private func normalizedPersistedPathCandidates(from path: String) -> [String] {
         var candidates = [path]
 

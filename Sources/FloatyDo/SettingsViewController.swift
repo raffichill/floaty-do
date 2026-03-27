@@ -2,7 +2,7 @@ import AppKit
 
 final class SettingsViewController: NSViewController {
     private enum Metrics {
-        static let outerPadding = NSEdgeInsets(top: 20, left: 34, bottom: 56, right: 34)
+        static let outerPadding = NSEdgeInsets(top: 20, left: 0, bottom: 32, right: 0)
         static let titleTopInset: CGFloat = 10
         static let tabTopInset: CGFloat = 36
         static let dividerTopInset: CGFloat = 104
@@ -14,6 +14,7 @@ final class SettingsViewController: NSViewController {
         static let labelWidth: CGFloat = 104
         static let rowHeight: CGFloat = 58
         static let rowSpacing: CGFloat = 2
+        static let appearanceSectionSpacing: CGFloat = rowSpacing + 12
         static let actionSpacing: CGFloat = 12
         static let actionButtonWidth: CGFloat = 88
         static let themeSwatchButtonCount: CGFloat = CGFloat(BuiltInTheme.allCases.count)
@@ -32,13 +33,20 @@ final class SettingsViewController: NSViewController {
         static let sliderGroupWidth: CGFloat = primaryControlWidth
         static let sliderWidth: CGFloat = sliderGroupWidth - valueWidth - sliderValueSpacing
         static let popupWidth: CGFloat = primaryControlWidth
-        static let iconStatusWidth: CGFloat = primaryControlWidth
         static let transparencyLabelWidth: CGFloat = 52
         static let transparencyItemSpacing: CGFloat = 12
         static let shortcutsColumnWidth: CGFloat = 220
         static let shortcutsColumnGap: CGFloat = 16
         static let shortcutsRowSpacing: CGFloat = 10
         static let shortcutsSectionGap: CGFloat = 25
+        static let iconPageHorizontalInset: CGFloat = 36
+        static let iconPageTopInset: CGFloat = 0
+        static let iconListCornerRadius: CGFloat = 8
+        static let iconListInset: CGFloat = 12
+        static let iconDividerLeadingInset: CGFloat = 54
+        static let iconFooterTopInset: CGFloat = outerPadding.bottom
+        static let iconFooterInlineSpacing: CGFloat = 3
+        static let pageContentBottomInset: CGFloat = 16
         static let aboutBlockWidth: CGFloat = 400
         static let opacityStops: [Double] = [0.67, 0.78, 0.89, 1.0]
     }
@@ -49,7 +57,7 @@ final class SettingsViewController: NSViewController {
         static let growCrossfadeDelay: TimeInterval = 0.04
     }
 
-    static let preferredWindowWidth: CGFloat = 680
+    static let preferredWindowWidth: CGFloat = 600
 
     private final class SettingsPageContainerView: NSView {
         var allowsHitTesting = false
@@ -168,12 +176,14 @@ final class SettingsViewController: NSViewController {
     private enum SettingsTab: CaseIterable, Hashable {
         case appearance
         case shortcuts
+        case icon
         case about
 
         var title: String {
             switch self {
             case .appearance: return "Theme"
             case .shortcuts: return "Shortcuts"
+            case .icon: return "Icon"
             case .about: return "About"
             }
         }
@@ -182,6 +192,7 @@ final class SettingsViewController: NSViewController {
             switch self {
             case .appearance: return "paintpalette"
             case .shortcuts: return "command"
+            case .icon: return "checkmark.app"
             case .about: return "info.circle"
             }
         }
@@ -202,6 +213,7 @@ final class SettingsViewController: NSViewController {
     private let divider = NSView()
     private let contentHostView = NSView()
     private var contentHostHeightConstraint: NSLayoutConstraint?
+    private var contentHostBottomConstraint: NSLayoutConstraint?
     private var primaryLabels: [NSTextField] = []
     private var secondaryLabels: [NSTextField] = []
     private var shortcutDescriptionLabels: [NSTextField] = []
@@ -211,11 +223,15 @@ final class SettingsViewController: NSViewController {
 
     private var tabButtons: [SettingsTab: SettingsTabButton] = [:]
     private var pages: [SettingsTab: SettingsPage] = [:]
+    private var iconOptionButtons: [BuiltInTheme: IconOptionButton] = [:]
+    private var iconDividers: [NSView] = []
 
-    private let iconStatusLabel = NSTextField(labelWithString: "")
-    private let applyIconButton = NSButton(title: "Relaunch", target: nil, action: nil)
+    private let iconStatusLabel = ShimmerStatusLabel()
+    private let applyIconButton = InlineFooterTokenButton(text: "Relaunch")
+    private let currentIconThemeBadge = InlineFooterTokenButton(text: "")
     private var themeButtons: [ThemePresetButton] = []
     private let themeSwatchContainer = NSView()
+    private let iconListContainer = NSView()
     private let blurToggle = NSSwitch()
     private let transparencyLabel = NSTextField(labelWithString: "Opacity")
     private let transparencySlider = NSSlider()
@@ -231,12 +247,12 @@ final class SettingsViewController: NSViewController {
     private let resetRadiusButton = NSButton(title: "Reset", target: nil, action: nil)
 
     private var currentAppliedIconTheme: BuiltInTheme
+    private var selectedIconTheme: BuiltInTheme
     private var isApplyingPrimaryIconChange = false
     private var hotkeyCaptureOverlay: HotkeyCaptureOverlayView?
 
     private var themeableButtons: [NSButton] {
         [
-            applyIconButton,
             resetFontButton,
             resetFontSizeButton,
             resetRadiusButton,
@@ -245,7 +261,9 @@ final class SettingsViewController: NSViewController {
 
     init(preferences: AppPreferences) {
         self.preferences = preferences
-        self.currentAppliedIconTheme = PrimaryAppIconRelaunchController.shared.currentTheme()
+        let currentAppliedIconTheme = PrimaryAppIconRelaunchController.shared.currentTheme()
+        self.currentAppliedIconTheme = currentAppliedIconTheme
+        self.selectedIconTheme = currentAppliedIconTheme
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -288,6 +306,10 @@ final class SettingsViewController: NSViewController {
             equalToConstant: 0)
         self.contentHostHeightConstraint = contentHostHeightConstraint
 
+        let contentHostBottomConstraint = contentHostView.bottomAnchor.constraint(
+            lessThanOrEqualTo: root.bottomAnchor, constant: -Metrics.outerPadding.bottom)
+        self.contentHostBottomConstraint = contentHostBottomConstraint
+
         NSLayoutConstraint.activate([
             headerView.topAnchor.constraint(equalTo: root.topAnchor),
             headerView.leadingAnchor.constraint(equalTo: root.leadingAnchor),
@@ -313,8 +335,7 @@ final class SettingsViewController: NSViewController {
                 equalTo: root.leadingAnchor, constant: Metrics.outerPadding.left),
             contentHostView.trailingAnchor.constraint(
                 equalTo: root.trailingAnchor, constant: -Metrics.outerPadding.right),
-            contentHostView.bottomAnchor.constraint(
-                lessThanOrEqualTo: root.bottomAnchor, constant: -Metrics.outerPadding.bottom),
+            contentHostBottomConstraint,
             contentHostHeightConstraint,
         ])
 
@@ -352,6 +373,11 @@ final class SettingsViewController: NSViewController {
     func showShortcutsTab(animated: Bool = false) {
         loadViewIfNeeded()
         selectTab(.shortcuts, animated: animated)
+    }
+
+    func showIconTab(animated: Bool = false) {
+        loadViewIfNeeded()
+        selectTab(.icon, animated: animated)
     }
 
     func showAboutTab(animated: Bool = false) {
@@ -400,6 +426,7 @@ final class SettingsViewController: NSViewController {
         let pageContentViews: [SettingsTab: NSView] = [
             .appearance: makeAppearancePage(),
             .shortcuts: makeShortcutsPage(),
+            .icon: makeIconPage(),
             .about: makeAboutPage(),
         ]
         var pageContainers: [SettingsTab: SettingsPageContainerView] = [:]
@@ -466,6 +493,7 @@ final class SettingsViewController: NSViewController {
         }
 
         let targetContentHeight = measuredContentHeight(for: tab)
+        let targetBottomInset = bottomInset(for: tab)
         let shouldAnimate =
             explicitAnimated
             ?? (view.window?.isVisible == true && displayedTab != nil && outgoingTab != tab)
@@ -474,12 +502,14 @@ final class SettingsViewController: NSViewController {
         let transitionID = transitionGeneration
 
         guard shouldAnimate else {
+            contentHostBottomConstraint?.constant = -targetBottomInset
             applyVisiblePage(tab)
             transitionDisplayedContentHeight(to: targetContentHeight, animated: false)
             reportPreferredWindowHeight(forContentHeight: targetContentHeight, animated: false)
             return
         }
 
+        contentHostBottomConstraint?.constant = -targetBottomInset
         preparePagesForTransition(from: outgoingTab, to: tab)
         let currentContentHeight =
             contentHostHeightConstraint?.constant ?? measuredContentHeight(for: outgoingTab)
@@ -501,30 +531,33 @@ final class SettingsViewController: NSViewController {
     }
 
     private func makeAppearancePage() -> NSView {
+        let backgroundLabelRow = makeAppearanceLabelRow(title: "Background")
+        let fontLabelRow = makeAppearanceLabelRow(title: "Font")
+        let backgroundControl = wrapAppearanceControl(makeThemeControl())
+        let fontControl = wrapAppearanceControl(makeFontControl())
+
         let labelsStack = NSStackView(views: [
-            makeAppearanceLabelRow(title: "Background"),
-            makeAppearanceLabelRow(title: "Transparent"),
-            makeAppearanceLabelRow(title: "Font"),
+            backgroundLabelRow,
+            fontLabelRow,
             makeAppearanceLabelRow(title: "Font Size"),
             makeAppearanceLabelRow(title: "Radius"),
-            makeAppearanceLabelRow(title: "App Icon"),
         ])
         labelsStack.orientation = .vertical
         labelsStack.alignment = .trailing
         labelsStack.spacing = Metrics.rowSpacing
+        labelsStack.setCustomSpacing(Metrics.appearanceSectionSpacing, after: backgroundLabelRow)
         labelsStack.translatesAutoresizingMaskIntoConstraints = false
 
         let controlsStack = NSStackView(views: [
-            wrapAppearanceControl(makeThemeControl()),
-            wrapAppearanceControl(makeTransparencyAndBlurControl()),
-            wrapAppearanceControl(makeFontControl()),
+            backgroundControl,
+            fontControl,
             wrapAppearanceControl(makeFontSizeControl()),
             wrapAppearanceControl(makeBorderRadiusControl()),
-            wrapAppearanceControl(makeAppIconControl()),
         ])
         controlsStack.orientation = .vertical
         controlsStack.alignment = .centerX
         controlsStack.spacing = Metrics.rowSpacing
+        controlsStack.setCustomSpacing(Metrics.appearanceSectionSpacing, after: backgroundControl)
         controlsStack.translatesAutoresizingMaskIntoConstraints = false
 
         let content = NSView()
@@ -556,7 +589,10 @@ final class SettingsViewController: NSViewController {
                 greaterThanOrEqualTo: container.leadingAnchor, constant: 24),
             content.trailingAnchor.constraint(
                 lessThanOrEqualTo: container.trailingAnchor, constant: -24),
-            content.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            content.bottomAnchor.constraint(
+                equalTo: container.bottomAnchor,
+                constant: -(Metrics.pageContentBottomInset - 6)
+            ),
         ])
 
         return container
@@ -590,6 +626,12 @@ final class SettingsViewController: NSViewController {
                 makeShortcutRow(label: "Show settings", shortcuts: [["command", "3"], ["command", ","]]),
             ]),
             makeShortcutsSection(rows: [
+                makeShortcutRow(label: "Theme tab", shortcut: ["command", "1"]),
+                makeShortcutRow(label: "Shortcuts tab", shortcut: ["command", "2"]),
+                makeShortcutRow(label: "Icon tab", shortcut: ["command", "3"]),
+                makeShortcutRow(label: "About tab", shortcut: ["command", "4"]),
+            ]),
+            makeShortcutsSection(rows: [
                 makeShortcutRow(label: "Reset window size", shortcut: ["command", "0"]),
                 makeShortcutRow(label: "Snap window", shortcut: ["control", "option", "arrow"]),
                 makeShortcutRow(label: "Fullscreen", shortcut: ["control", "command", "F"]),
@@ -614,9 +656,102 @@ final class SettingsViewController: NSViewController {
                 greaterThanOrEqualTo: container.leadingAnchor, constant: 24),
             stack.trailingAnchor.constraint(
                 lessThanOrEqualTo: container.trailingAnchor, constant: -24),
-            stack.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            stack.bottomAnchor.constraint(
+                equalTo: container.bottomAnchor,
+                constant: -Metrics.pageContentBottomInset
+            ),
         ])
 
+        return container
+    }
+
+    private func makeIconPage() -> NSView {
+        iconOptionButtons.removeAll()
+        iconDividers.removeAll()
+        iconListContainer.subviews.forEach { $0.removeFromSuperview() }
+        iconListContainer.translatesAutoresizingMaskIntoConstraints = false
+        iconListContainer.wantsLayer = true
+        iconListContainer.layer?.cornerRadius = Metrics.iconListCornerRadius
+        iconListContainer.layer?.borderWidth = 1
+
+        let listStack = NSStackView()
+        listStack.orientation = .vertical
+        listStack.alignment = .leading
+        listStack.spacing = 0
+        listStack.translatesAutoresizingMaskIntoConstraints = false
+        iconListContainer.addSubview(listStack)
+
+        let iconThemes = availableIconThemes
+        for (index, theme) in iconThemes.enumerated() {
+            let button = IconOptionButton(
+                title: iconDisplayName(for: theme),
+                image: iconPreviewImage(for: theme)
+            )
+            button.tag = index
+            button.target = self
+            button.action = #selector(iconThemeSelected(_:))
+            iconOptionButtons[theme] = button
+            listStack.addArrangedSubview(button)
+            button.widthAnchor.constraint(equalTo: listStack.widthAnchor).isActive = true
+
+            if index < iconThemes.count - 1 {
+                let dividerRow = makeIconDividerRow()
+                listStack.addArrangedSubview(dividerRow)
+                dividerRow.widthAnchor.constraint(equalTo: listStack.widthAnchor).isActive = true
+            }
+        }
+
+        let footer = NSStackView(views: [applyIconButton, iconStatusLabel, currentIconThemeBadge])
+        footer.orientation = .horizontal
+        footer.alignment = .centerY
+        footer.spacing = Metrics.iconFooterInlineSpacing
+        footer.setCustomSpacing(Metrics.iconFooterInlineSpacing + 1.5, after: applyIconButton)
+        footer.detachesHiddenViews = true
+        footer.translatesAutoresizingMaskIntoConstraints = false
+
+        let footerContainer = NSView()
+        footerContainer.translatesAutoresizingMaskIntoConstraints = false
+        footerContainer.addSubview(footer)
+
+        NSLayoutConstraint.activate([
+            footer.centerXAnchor.constraint(equalTo: footerContainer.centerXAnchor),
+            footer.topAnchor.constraint(equalTo: footerContainer.topAnchor),
+            footer.bottomAnchor.constraint(equalTo: footerContainer.bottomAnchor),
+            footer.leadingAnchor.constraint(
+                greaterThanOrEqualTo: footerContainer.leadingAnchor
+            ),
+            footer.trailingAnchor.constraint(
+                lessThanOrEqualTo: footerContainer.trailingAnchor
+            ),
+        ])
+
+        let pageStack = NSStackView(views: [iconListContainer, footerContainer])
+        pageStack.orientation = .vertical
+        pageStack.alignment = .centerX
+        pageStack.spacing = Metrics.iconFooterTopInset
+        pageStack.translatesAutoresizingMaskIntoConstraints = false
+
+        NSLayoutConstraint.activate([
+            iconListContainer.widthAnchor.constraint(equalTo: pageStack.widthAnchor),
+            footerContainer.widthAnchor.constraint(equalTo: pageStack.widthAnchor),
+            listStack.leadingAnchor.constraint(equalTo: iconListContainer.leadingAnchor, constant: Metrics.iconListInset),
+            listStack.trailingAnchor.constraint(equalTo: iconListContainer.trailingAnchor, constant: -Metrics.iconListInset),
+            listStack.topAnchor.constraint(equalTo: iconListContainer.topAnchor, constant: Metrics.iconListInset),
+            listStack.bottomAnchor.constraint(equalTo: iconListContainer.bottomAnchor, constant: -Metrics.iconListInset),
+        ])
+
+        let container = NSView()
+        container.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(pageStack)
+
+        NSLayoutConstraint.activate([
+            pageStack.topAnchor.constraint(equalTo: container.topAnchor, constant: Metrics.iconPageTopInset),
+            pageStack.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: Metrics.iconPageHorizontalInset),
+            pageStack.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -Metrics.iconPageHorizontalInset),
+            pageStack.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+        ])
+
+        updateIconOptionSelection()
         return container
     }
 
@@ -716,7 +851,10 @@ final class SettingsViewController: NSViewController {
                 greaterThanOrEqualTo: container.leadingAnchor, constant: 24),
             aboutTextView.trailingAnchor.constraint(
                 lessThanOrEqualTo: container.trailingAnchor, constant: -24),
-            aboutTextView.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            aboutTextView.bottomAnchor.constraint(
+                equalTo: container.bottomAnchor,
+                constant: -Metrics.pageContentBottomInset
+            ),
         ])
 
         return container
@@ -725,7 +863,7 @@ final class SettingsViewController: NSViewController {
     private func configureThemeButtons() {
         themeButtons = BuiltInTheme.allCases.enumerated().map { index, theme in
             let backgroundColor = theme.color.nsColor.resolvedSRGB
-            let contentColor = theme.style.contentColor.nsColor.resolvedSRGB
+            let contentColor = theme.style.foregroundColor.nsColor.resolvedSRGB
             let usesLightText = contentColor.relativeLuminance > backgroundColor.relativeLuminance
             let button = ThemePresetButton(
                 color: backgroundColor,
@@ -754,13 +892,13 @@ final class SettingsViewController: NSViewController {
         iconStatusLabel.alignment = .left
         iconStatusLabel.lineBreakMode = .byTruncatingTail
         iconStatusLabel.translatesAutoresizingMaskIntoConstraints = false
-        iconStatusLabel.widthAnchor.constraint(equalToConstant: Metrics.iconStatusWidth).isActive =
-            true
-        secondaryLabels.append(iconStatusLabel)
 
         applyIconButton.target = self
         applyIconButton.action = #selector(applyIconAndRelaunch(_:))
-        configureResetButton(applyIconButton)
+        applyIconButton.leadingInsetAdjustment = 0.5
+        applyIconButton.trailingInsetAdjustment = -0.5
+        currentIconThemeBadge.isInteractive = false
+        currentIconThemeBadge.isHidden = true
     }
 
     private func configureHotkeyRecorder() {
@@ -883,6 +1021,27 @@ final class SettingsViewController: NSViewController {
         ])
 
         return themeSwatchContainer
+    }
+
+    private func makeIconDividerRow() -> NSView {
+        let divider = NSView()
+        divider.wantsLayer = true
+        divider.translatesAutoresizingMaskIntoConstraints = false
+        divider.heightAnchor.constraint(equalToConstant: 1).isActive = true
+        iconDividers.append(divider)
+
+        let container = NSView()
+        container.translatesAutoresizingMaskIntoConstraints = false
+        container.heightAnchor.constraint(equalToConstant: 1).isActive = true
+        container.addSubview(divider)
+
+        NSLayoutConstraint.activate([
+            divider.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: Metrics.iconDividerLeadingInset),
+            divider.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -16),
+            divider.centerYAnchor.constraint(equalTo: container.centerYAnchor),
+        ])
+
+        return container
     }
 
     private func makeTransparencyAndBlurControl() -> NSView {
@@ -1032,7 +1191,11 @@ final class SettingsViewController: NSViewController {
 
     private func totalWindowHeight(forContentHeight contentHeight: CGFloat) -> CGFloat {
         Metrics.dividerTopInset + 1 + Metrics.contentTopInset + contentHeight
-            + Metrics.outerPadding.bottom
+            + bottomInset(for: selectedTab)
+    }
+
+    private func bottomInset(for tab: SettingsTab) -> CGFloat {
+        Metrics.outerPadding.bottom
     }
 
     private func transitionDisplayedContentHeight(
@@ -1068,7 +1231,7 @@ final class SettingsViewController: NSViewController {
         for (key, page) in pages {
             let isVisible = key == tab
             page.container.alphaValue = isVisible ? 1 : 0
-            page.container.isHidden = false
+            page.container.isHidden = !isVisible
             page.container.allowsHitTesting = isVisible
         }
         displayedTab = tab
@@ -1079,7 +1242,7 @@ final class SettingsViewController: NSViewController {
     ) {
         for (key, page) in pages {
             page.container.layer?.removeAllAnimations()
-            page.container.isHidden = false
+            page.container.isHidden = key != outgoingTab && key != incomingTab
             page.container.allowsHitTesting = false
             switch key {
             case outgoingTab:
@@ -1297,6 +1460,7 @@ final class SettingsViewController: NSViewController {
         borderRadiusSlider.doubleValue = min(
             preferences.cornerRadius, preferences.maximumCornerRadius)
         borderRadiusValueLabel.stringValue = "\(Int(round(borderRadiusSlider.doubleValue))) px"
+        updateIconOptionSelection()
         updateAppIconControls()
         applyThemeAppearance()
     }
@@ -1480,7 +1644,7 @@ final class SettingsViewController: NSViewController {
                 message: "App icon rebuilding is only available from the local project checkout.")
             return
         }
-        guard selectedTheme.supportsPrimaryAppIcon else {
+        guard selectedIconTheme.supportsPrimaryAppIcon else {
             presentIconApplyError(message: "This theme doesn’t have a matching app icon yet.")
             return
         }
@@ -1489,7 +1653,7 @@ final class SettingsViewController: NSViewController {
         updateAppIconControls()
 
         do {
-            let process = try controller.iconApplyProcess(for: selectedTheme)
+            let process = try controller.iconApplyProcess(for: selectedIconTheme)
             try process.run()
 
             DispatchQueue.global(qos: .utility).async {
@@ -1509,38 +1673,50 @@ final class SettingsViewController: NSViewController {
         }
     }
 
-    private var selectedTheme: BuiltInTheme {
-        preferences.theme
-    }
-
     private func updateAppIconControls() {
         let controller = PrimaryAppIconRelaunchController.shared
+        currentIconThemeBadge.isHidden = true
+
         guard controller.canApplyIconChanges() else {
             iconStatusLabel.stringValue = "Local build only."
-            applyIconButton.title = "Relaunch"
+            iconStatusLabel.shimmerEnabled = false
+            applyIconButton.isHidden = true
             applyIconButton.isEnabled = false
             return
         }
 
-        guard selectedTheme.supportsPrimaryAppIcon else {
+        guard selectedIconTheme.supportsPrimaryAppIcon else {
             iconStatusLabel.stringValue = "No matching icon yet."
-            applyIconButton.title = "Unavailable"
+            iconStatusLabel.shimmerEnabled = false
+            applyIconButton.isHidden = true
             applyIconButton.isEnabled = false
             return
         }
 
-        let themeMatchesIcon = selectedTheme == currentAppliedIconTheme
+        let themeMatchesIcon = selectedIconTheme == currentAppliedIconTheme
         if isApplyingPrimaryIconChange {
             iconStatusLabel.stringValue = "Building, then relaunching…"
-            applyIconButton.title = "Rebuilding…"
+            iconStatusLabel.shimmerEnabled = true
+            applyIconButton.isHidden = true
             applyIconButton.isEnabled = false
             return
         }
 
-        iconStatusLabel.stringValue =
-            themeMatchesIcon ? "Icon matches this theme." : "Relaunch to apply current theme."
-        applyIconButton.title = themeMatchesIcon ? "Current" : "Relaunch"
-        applyIconButton.isEnabled = !themeMatchesIcon
+        if themeMatchesIcon {
+            iconStatusLabel.stringValue = "Using"
+            iconStatusLabel.shimmerEnabled = false
+            currentIconThemeBadge.tokenText = iconDisplayName(for: selectedIconTheme)
+            currentIconThemeBadge.isHidden = false
+            applyIconButton.isHidden = true
+            applyIconButton.isEnabled = false
+            return
+        }
+
+        iconStatusLabel.stringValue = "to apply the selected icon."
+        iconStatusLabel.shimmerEnabled = false
+        applyIconButton.tokenText = "Relaunch"
+        applyIconButton.isHidden = false
+        applyIconButton.isEnabled = true
     }
 
     private func presentIconApplyError(message: String) {
@@ -1583,6 +1759,7 @@ final class SettingsViewController: NSViewController {
         shortcutDescriptionLabels.forEach { $0.textColor = boostedShortcutLabelColor }
         shortcutConjunctionLabels.forEach { $0.textColor = boostedShortcutLabelColor }
         keycapLabels.forEach { $0.textColor = preferences.secondaryTextColor }
+        iconStatusLabel.textColor = preferences.secondaryTextColor
         keycapBackgroundViews.forEach {
             $0.layer?.backgroundColor = preferences.activeFillColor.cgColor
         }
@@ -1594,6 +1771,20 @@ final class SettingsViewController: NSViewController {
         }
         themeableButtons.forEach { applyThemeStyle(to: $0) }
         applyThemeStyle(to: fontPopup)
+        iconListContainer.layer?.backgroundColor = preferences.panelBackgroundColor.cgColor
+        iconListContainer.layer?.borderColor = preferences.subtleStrokeColor.cgColor
+        iconDividers.forEach { $0.layer?.backgroundColor = preferences.subtleStrokeColor.cgColor }
+        iconOptionButtons.values.forEach {
+            $0.applyTheme(
+                primaryText: preferences.primaryTextColor,
+                accent: preferences.primaryTextColor,
+                stroke: preferences.subtleStrokeColor
+            )
+        }
+        applyIconButton.fillColor = preferences.primaryTextColor
+        applyIconButton.tokenTextColor = preferences.panelBackgroundColor
+        currentIconThemeBadge.fillColor = preferences.activeFillColor
+        currentIconThemeBadge.tokenTextColor = preferences.primaryTextColor
         updateAboutTextView()
 
         tabButtons.values.forEach {
@@ -1687,6 +1878,89 @@ final class SettingsViewController: NSViewController {
         openAboutURL(link)
     }
 
+    @objc private func iconThemeSelected(_ sender: NSButton) {
+        guard availableIconThemes.indices.contains(sender.tag) else { return }
+        selectedIconTheme = availableIconThemes[sender.tag]
+        updateIconOptionSelection()
+        updateAppIconControls()
+    }
+
+    private func updateIconOptionSelection() {
+        for (theme, button) in iconOptionButtons {
+            button.isOptionSelected = theme == selectedIconTheme
+            button.isCurrentOption = theme == currentAppliedIconTheme
+            button.isPendingOption =
+                theme == selectedIconTheme && selectedIconTheme != currentAppliedIconTheme
+        }
+        for divider in iconDividers {
+            divider.isHidden = false
+        }
+    }
+
+    private var availableIconThemes: [BuiltInTheme] {
+        BuiltInTheme.catalog
+            .filter(\.supportsPrimaryAppIcon)
+            .map(\.theme)
+    }
+
+    private func iconDisplayName(for theme: BuiltInTheme) -> String {
+        switch theme {
+        case .theme1: return "Theme 1"
+        case .theme2: return "Theme 2"
+        case .theme3: return "Theme 3"
+        case .theme4: return "Theme 4"
+        case .theme5: return "Theme 5"
+        case .theme6: return "Theme 6"
+        case .theme7: return "Theme 7"
+        case .theme8: return "Theme 8"
+        }
+    }
+
+    private func iconPreviewImage(for theme: BuiltInTheme) -> NSImage? {
+        if let previewImage = PrimaryAppIconRelaunchController.shared.previewImage(for: theme) {
+            return previewImage
+        }
+
+        guard let symbolImage = NSImage(
+            systemSymbolName: SettingsTab.icon.symbolName,
+            accessibilityDescription: iconDisplayName(for: theme)
+        ) else {
+            return nil
+        }
+
+        let configuration = NSImage.SymbolConfiguration(pointSize: 22, weight: .regular)
+        return symbolImage.withSymbolConfiguration(configuration)
+    }
+
+    func testingTabTitles() -> [String] {
+        SettingsTab.allCases.map(\.title)
+    }
+
+    func testingIconOptionTitles() -> [String] {
+        availableIconThemes.map(iconDisplayName(for:))
+    }
+
+    func testingSelectIconTheme(_ theme: BuiltInTheme) {
+        selectedIconTheme = theme
+        updateIconOptionSelection()
+        updateAppIconControls()
+    }
+
+    func testingIconDisplayName(for theme: BuiltInTheme) -> String {
+        iconDisplayName(for: theme)
+    }
+
+    func testingIconFooterMessage() -> String {
+        if !currentIconThemeBadge.isHidden {
+            return "Using \(currentIconThemeBadge.tokenText)"
+        }
+        return iconStatusLabel.stringValue
+    }
+
+    func testingIconFooterShowsRelaunchButton() -> Bool {
+        !applyIconButton.isHidden
+    }
+
     private func updateAboutTextView() {
         guard isViewLoaded else { return }
 
@@ -1730,6 +2004,10 @@ final class SettingsViewController: NSViewController {
         )
         appendLink("your own", link: "floatydo://theme")
         appendBody(".")
+        appendParagraphBreak()
+        appendBody(
+            "Your list is capped at 10 items to help you avoid planning creep."
+        )
         appendParagraphBreak()
         appendBody("I recommend taking some time to get familiar with the ")
         appendLink("keyboard shortcuts", link: "floatydo://shortcuts")
