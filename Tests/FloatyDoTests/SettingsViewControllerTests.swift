@@ -29,7 +29,7 @@ final class SettingsViewControllerTests: XCTestCase {
 
         XCTAssertEqual(
             controller.testingIconOptionTitles(),
-            ["Theme 1", "Theme 2", "Theme 3", "Theme 4", "Theme 5"]
+            ["Theme 1", "Theme 2", "Theme 3", "Theme 4", "Theme 8"]
         )
     }
 
@@ -90,20 +90,20 @@ final class SettingsViewControllerTests: XCTestCase {
     func testBuiltInThemeCatalogIsSingleSourceOfTruthForOrderAndIconSupport() {
         XCTAssertEqual(
             BuiltInTheme.allCases,
-            [.theme1, .theme2, .theme3, .theme4, .nasaOrange, .barbie, .matcha, .theme5]
+            [.theme1, .theme2, .theme3, .theme4, .theme5, .theme6, .theme7, .theme8]
         )
         XCTAssertEqual(BuiltInTheme.catalog.map(\.theme), BuiltInTheme.allCases)
         XCTAssertTrue(BuiltInTheme.theme1.supportsPrimaryAppIcon)
-        XCTAssertTrue(BuiltInTheme.theme5.supportsPrimaryAppIcon)
-        XCTAssertFalse(BuiltInTheme.barbie.supportsPrimaryAppIcon)
-        XCTAssertFalse(BuiltInTheme.matcha.supportsPrimaryAppIcon)
-        XCTAssertFalse(BuiltInTheme.nasaOrange.supportsPrimaryAppIcon)
+        XCTAssertTrue(BuiltInTheme.theme8.supportsPrimaryAppIcon)
+        XCTAssertFalse(BuiltInTheme.theme6.supportsPrimaryAppIcon)
+        XCTAssertFalse(BuiltInTheme.theme7.supportsPrimaryAppIcon)
+        XCTAssertFalse(BuiltInTheme.theme5.supportsPrimaryAppIcon)
     }
 
     func testBuiltInThemeNearestUsesCatalogColors() {
-        XCTAssertEqual(BuiltInTheme.nearest(to: BuiltInTheme.barbie.color), .barbie)
-        XCTAssertEqual(BuiltInTheme.nearest(to: BuiltInTheme.matcha.color), .matcha)
-        XCTAssertEqual(BuiltInTheme.nearest(to: BuiltInTheme.nasaOrange.color), .nasaOrange)
+        XCTAssertEqual(BuiltInTheme.nearest(to: BuiltInTheme.theme6.color), .theme6)
+        XCTAssertEqual(BuiltInTheme.nearest(to: BuiltInTheme.theme7.color), .theme7)
+        XCTAssertEqual(BuiltInTheme.nearest(to: BuiltInTheme.theme5.color), .theme5)
     }
 
     func testTextVerticalOffsetTablesPreserveCurrentDefaults() {

@@ -863,7 +863,7 @@ final class SettingsViewController: NSViewController {
     private func configureThemeButtons() {
         themeButtons = BuiltInTheme.allCases.enumerated().map { index, theme in
             let backgroundColor = theme.color.nsColor.resolvedSRGB
-            let contentColor = theme.style.contentColor.nsColor.resolvedSRGB
+            let contentColor = theme.style.foregroundColor.nsColor.resolvedSRGB
             let usesLightText = contentColor.relativeLuminance > backgroundColor.relativeLuminance
             let button = ThemePresetButton(
                 color: backgroundColor,
@@ -1910,9 +1910,9 @@ final class SettingsViewController: NSViewController {
         case .theme3: return "Theme 3"
         case .theme4: return "Theme 4"
         case .theme5: return "Theme 5"
-        case .barbie: return "Barbie"
-        case .matcha: return "Matcha"
-        case .nasaOrange: return "NASA Orange"
+        case .theme6: return "Theme 6"
+        case .theme7: return "Theme 7"
+        case .theme8: return "Theme 8"
         }
     }
 

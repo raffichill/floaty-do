@@ -539,7 +539,7 @@ final class TodoStoreTests: XCTestCase {
             hoverHighlightsEnabled: false,
             animationPreset: .snappy,
             snapPadding: 32,
-            theme: .barbie,
+            theme: .theme6,
             fontStyle: .rounded,
             fontSize: 16,
             cornerRadius: 18,
