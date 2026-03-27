@@ -108,7 +108,7 @@
   z-index: 2;
 }
 
-// Input — NO border, fills remaining space
+// Input — NO border, fills remaining space, NO text selection
 .input {
   flex: 1;
   min-width: 0;
@@ -124,6 +124,14 @@
   background: transparent !important;
   padding: 0 !important;
   margin: 0 !important;
+  // Prevent text highlighting — macOS app has no range selection in the editor
+  user-select: none;
+  -webkit-user-select: none;
+
+  &::selection {
+    background: transparent;
+    color: inherit;
+  }
 }
 
 // Wrapper only used during completion for strikethrough positioning

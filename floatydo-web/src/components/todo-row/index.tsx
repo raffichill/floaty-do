@@ -4,6 +4,15 @@ import { useRef, useEffect, useState, useCallback } from "react";
 import { motion, useMotionValue, useSpring, animate } from "motion/react";
 import styles from "./todo-row.module.scss";
 
+// Prevent text selection on inputs — collapse selection to caret end
+function preventSelection(e: React.SyntheticEvent<HTMLInputElement>) {
+  const input = e.currentTarget;
+  if (input.selectionStart !== input.selectionEnd) {
+    const end = input.value.length;
+    input.setSelectionRange(end, end);
+  }
+}
+
 // Balanced motion profile from macOS app
 const MOTION = {
   completionSweep: 0.25,
@@ -31,7 +40,6 @@ export interface TodoRowProps {
   onKeyDown?: (e: React.KeyboardEvent) => void;
   onSelect?: () => void;
   autoFocus?: boolean;
-  onPointerDownOnRow?: (e: React.PointerEvent) => void;
 }
 
 export function TodoRow({
@@ -46,7 +54,6 @@ export function TodoRow({
   onKeyDown,
   onSelect,
   autoFocus,
-  onPointerDownOnRow,
 }: TodoRowProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const rowRef = useRef<HTMLDivElement>(null);
@@ -64,24 +71,13 @@ export function TodoRow({
   const prevSelected = useRef(false);
 
   useEffect(() => {
-    if (isSelected && !prevSelected.current) {
-      animate(bgOpacity, 1, {
-        duration: MOTION.collapse,
-        ease: [0.42, 0, 0.58, 1],
-      });
-    } else if (!isSelected && prevSelected.current) {
-      animate(bgOpacity, 0, {
-        duration: MOTION.hoverFade,
-        ease: "easeOut",
-      });
-    }
-    prevSelected.current = isSelected;
+    // Instant selection — no animated fade, matches macOS
+    bgOpacity.set(isSelected ? 1 : 0);
   }, [isSelected, bgOpacity]);
 
   // --- Boundary shake ---
   const shakeX = useMotionValue(0);
 
-  // Expose shake on the DOM element
   useEffect(() => {
     const el = rowRef.current;
     if (el) {
@@ -107,7 +103,6 @@ export function TodoRow({
     if (kind !== "taskItem" || !onComplete || completing) return;
     setCompleting(true);
 
-    // Step 1: Strikethrough sweep + text fade
     animate(textOpacity, 0.3, {
       duration: MOTION.completionSweep,
       ease: [0.42, 0, 0.58, 1],
@@ -117,7 +112,6 @@ export function TodoRow({
       ease: [0.42, 0, 0.58, 1],
     });
 
-    // Step 2: Circle shrink → swap → grow
     setTimeout(() => {
       circleScale.set(0);
       setTimeout(() => {
@@ -126,19 +120,14 @@ export function TodoRow({
       }, 80);
     }, MOTION.checkSwapDelay * 1000);
 
-    // Step 3: Row fade out
     const removalDelay =
-      (MOTION.completionSweep +
-        MOTION.checkSwapDelay +
-        MOTION.completionSettle * 0.5) *
-      1000;
+      (MOTION.completionSweep + MOTION.checkSwapDelay + MOTION.completionSettle * 0.5) * 1000;
     const removalDuration = MOTION.collapse * 0.75;
     setTimeout(() => {
       animate(rowOpacity, 0, {
         duration: removalDuration,
         ease: "easeOut",
         onComplete: () => {
-          // Step 4: Archive and reflow
           onComplete();
           setCompleting(false);
           textOpacity.set(1);
@@ -149,15 +138,7 @@ export function TodoRow({
         },
       });
     }, removalDelay);
-  }, [
-    kind,
-    onComplete,
-    completing,
-    textOpacity,
-    strikethroughScaleX,
-    circleScale,
-    rowOpacity,
-  ]);
+  }, [kind, onComplete, completing, textOpacity, strikethroughScaleX, circleScale, rowOpacity]);
 
   // ==================== FILLER ====================
   if (kind === "filler") {
@@ -183,14 +164,8 @@ export function TodoRow({
           onPointerUp={onRestore}
         >
           <svg className={styles.checkmarkVisible} viewBox="0 0 10 10">
-            <path
-              d="M2 5.5L4 7.5L8 3"
-              stroke="var(--floaty-text-primary)"
-              strokeWidth="1.8"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              fill="none"
-            />
+            <path d="M2 5.5L4 7.5L8 3" stroke="var(--floaty-text-primary)"
+              strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" fill="none" />
           </svg>
         </motion.div>
         <span className={styles.archiveText}>{text}</span>
@@ -218,6 +193,7 @@ export function TodoRow({
           placeholder=""
           onChange={(e) => onTextChange?.(e.target.value)}
           onKeyDown={onKeyDown}
+          onSelect={preventSelection}
           autoFocus={autoFocus}
         />
       </motion.div>
@@ -235,12 +211,10 @@ export function TodoRow({
       onPointerDown={(e) => {
         if (completing) return;
         onSelect?.();
-        onPointerDownOnRow?.(e);
       }}
     >
       <motion.div style={{ opacity: bgOpacity }} className={styles.rowBackground} />
 
-      {/* Circle */}
       <motion.div
         className={styles.circle}
         style={{
@@ -257,14 +231,8 @@ export function TodoRow({
       >
         {showCheckmark ? (
           <svg className={styles.checkmarkVisible} viewBox="0 0 10 10">
-            <path
-              d="M2 5.5L4 7.5L8 3"
-              stroke="var(--floaty-text-primary)"
-              strokeWidth="1.8"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              fill="none"
-            />
+            <path d="M2 5.5L4 7.5L8 3" stroke="var(--floaty-text-primary)"
+              strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" fill="none" />
           </svg>
         ) : (
           <svg className={styles.checkmark} viewBox="0 0 10 10">
@@ -273,19 +241,12 @@ export function TodoRow({
         )}
       </motion.div>
 
-      {/* Text / Input */}
       {completing ? (
         <div className={styles.completingText}>
-          <motion.span
-            className={styles.text}
-            style={{ opacity: textOpacity }}
-          >
+          <motion.span className={styles.text} style={{ opacity: textOpacity }}>
             {text}
           </motion.span>
-          <motion.div
-            className={styles.strikethroughLine}
-            style={{ scaleX: strikethroughScaleX }}
-          />
+          <motion.div className={styles.strikethroughLine} style={{ scaleX: strikethroughScaleX }} />
         </div>
       ) : isSelected ? (
         <input
@@ -295,6 +256,7 @@ export function TodoRow({
           value={text}
           onChange={(e) => onTextChange?.(e.target.value)}
           onKeyDown={onKeyDown}
+          onSelect={preventSelection}
         />
       ) : (
         <span className={styles.text}>{text}</span>

@@ -1,13 +1,13 @@
 {
   "fill" : {
-    "automatic-gradient" : "display-p3:0.12769,0.15198,0.14172,1.00000"
+    "automatic-gradient" : "display-p3:0.89795,0.87939,0.84326,1.00000"
   },
   "groups" : [
     {
       "layers" : [
         {
-          "image-name" : "theme 3.png",
-          "name" : "theme 3"
+          "image-name" : "theme 6.png",
+          "name" : "theme 6"
         }
       ],
       "shadow" : {

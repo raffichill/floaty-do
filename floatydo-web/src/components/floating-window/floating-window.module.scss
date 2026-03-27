@@ -13,13 +13,14 @@
   user-select: none;
 }
 
-// macOS: traffic lights center at targetCenterX = rowHorizontalInset + circleHitSize/2 = 24pt
-// First dot (12px wide) left edge = 24 - 6 = 18px
+// Traffic lights center-X must align with row circle center-X
+// Row circle center = rowHorizontalInset + circleSize/2 = 12 + 9 = 21px
+// First dot (12px wide) left edge = 21 - 6 = 15px
 .titlebar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 var(--titlebar-trailing-inset) 0 18px;
+  padding: 0 var(--titlebar-trailing-inset) 0 15px;
   height: var(--titlebar-height);
   margin-top: 4px;
 }
