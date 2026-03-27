@@ -51,7 +51,7 @@ final class SettingsViewControllerTests: XCTestCase {
 
         controller.testingSelectIconTheme(alternateTheme ?? currentTheme)
 
-        XCTAssertEqual(controller.testingIconFooterMessage(), "FloatyDo to apply the selected icon.")
+        XCTAssertEqual(controller.testingIconFooterMessage(), "to apply the selected icon.")
         XCTAssertTrue(controller.testingIconFooterShowsRelaunchButton())
     }
 

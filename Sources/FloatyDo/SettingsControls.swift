@@ -173,8 +173,8 @@ final class SettingsTabButton: PressScaleButton {
 
 final class IconOptionButton: PressScaleButton {
     private enum Metrics {
-        static let rowHeight: CGFloat = 92
-        static let previewSize: CGFloat = 52
+        static let rowHeight: CGFloat = 88
+        static let previewSize: CGFloat = 48
         static let previewCornerRadius: CGFloat = previewSize * 0.233
         static let titleToSubtitleSpacing: CGFloat = 3
         static let subtitleBaselineOffset: CGFloat = -4

@@ -39,9 +39,9 @@ final class SettingsViewController: NSViewController {
         static let shortcutsColumnGap: CGFloat = 16
         static let shortcutsRowSpacing: CGFloat = 10
         static let shortcutsSectionGap: CGFloat = 25
-        static let iconPageHorizontalInset: CGFloat = 40
-        static let iconPageTopInset: CGFloat = 4
-        static let iconListCornerRadius: CGFloat = 14
+        static let iconPageHorizontalInset: CGFloat = 36
+        static let iconPageTopInset: CGFloat = 0
+        static let iconListCornerRadius: CGFloat = 8
         static let iconListInset: CGFloat = 12
         static let iconDividerLeadingInset: CGFloat = 54
         static let iconFooterTopInset: CGFloat = outerPadding.bottom
@@ -705,7 +705,7 @@ final class SettingsViewController: NSViewController {
         footer.orientation = .horizontal
         footer.alignment = .centerY
         footer.spacing = Metrics.iconFooterInlineSpacing
-        footer.setCustomSpacing(Metrics.iconFooterInlineSpacing + 0.5, after: applyIconButton)
+        footer.setCustomSpacing(Metrics.iconFooterInlineSpacing + 1.5, after: applyIconButton)
         footer.detachesHiddenViews = true
         footer.translatesAutoresizingMaskIntoConstraints = false
 
@@ -1712,7 +1712,7 @@ final class SettingsViewController: NSViewController {
             return
         }
 
-        iconStatusLabel.stringValue = "FloatyDo to apply the selected icon."
+        iconStatusLabel.stringValue = "to apply the selected icon."
         iconStatusLabel.shimmerEnabled = false
         applyIconButton.tokenText = "Relaunch"
         applyIconButton.isHidden = false
