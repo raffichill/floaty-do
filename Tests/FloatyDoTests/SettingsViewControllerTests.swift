@@ -106,6 +106,22 @@ final class SettingsViewControllerTests: XCTestCase {
         XCTAssertEqual(BuiltInTheme.nearest(to: BuiltInTheme.theme5.color), .theme5)
     }
 
+    func testTextSelectionOverlayUsesForegroundAtFifteenPercentOpacity() {
+        let preferences = AppPreferences.default
+        guard
+            let overlay = preferences.selectionOverlayColor.usingColorSpace(.deviceRGB),
+            let foreground = preferences.palette.foreground.usingColorSpace(.deviceRGB)
+        else {
+            XCTFail("Expected RGB colors for selection overlay regression")
+            return
+        }
+
+        XCTAssertEqual(overlay.redComponent, foreground.redComponent, accuracy: 0.001)
+        XCTAssertEqual(overlay.greenComponent, foreground.greenComponent, accuracy: 0.001)
+        XCTAssertEqual(overlay.blueComponent, foreground.blueComponent, accuracy: 0.001)
+        XCTAssertEqual(overlay.alphaComponent, 0.15, accuracy: 0.001)
+    }
+
     func testTextVerticalOffsetTablesPreserveCurrentDefaults() {
         XCTAssertEqual(LayoutMetrics.manualTextVerticalOffset(fontStyle: .system, fontSize: 14), -0.5)
         XCTAssertEqual(LayoutMetrics.manualTextVerticalOffset(fontStyle: .serif, fontSize: 12), -2.0)

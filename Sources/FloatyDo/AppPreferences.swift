@@ -281,7 +281,7 @@ extension AppPreferences {
     }
 
     var selectionOverlayColor: NSColor {
-        return palette.highlight.withAlphaComponent(0.22)
+        return palette.foreground.withAlphaComponent(0.15)
     }
 
     var caretColor: NSColor {
