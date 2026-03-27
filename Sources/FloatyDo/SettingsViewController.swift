@@ -2,7 +2,7 @@ import AppKit
 
 final class SettingsViewController: NSViewController {
     private enum Metrics {
-        static let outerPadding = NSEdgeInsets(top: 20, left: 34, bottom: 32, right: 34)
+        static let outerPadding = NSEdgeInsets(top: 20, left: 0, bottom: 32, right: 0)
         static let titleTopInset: CGFloat = 10
         static let tabTopInset: CGFloat = 36
         static let dividerTopInset: CGFloat = 104
@@ -39,7 +39,8 @@ final class SettingsViewController: NSViewController {
         static let shortcutsColumnGap: CGFloat = 16
         static let shortcutsRowSpacing: CGFloat = 10
         static let shortcutsSectionGap: CGFloat = 25
-        static let iconListWidth: CGFloat = 520
+        static let iconPageHorizontalInset: CGFloat = 40
+        static let iconPageTopInset: CGFloat = 4
         static let iconListCornerRadius: CGFloat = 14
         static let iconListInset: CGFloat = 12
         static let iconDividerLeadingInset: CGFloat = 54
@@ -56,7 +57,7 @@ final class SettingsViewController: NSViewController {
         static let growCrossfadeDelay: TimeInterval = 0.04
     }
 
-    static let preferredWindowWidth: CGFloat = 680
+    static let preferredWindowWidth: CGFloat = 600
 
     private final class SettingsPageContainerView: NSView {
         var allowsHitTesting = false
@@ -672,13 +673,13 @@ final class SettingsViewController: NSViewController {
         iconListContainer.wantsLayer = true
         iconListContainer.layer?.cornerRadius = Metrics.iconListCornerRadius
         iconListContainer.layer?.borderWidth = 1
-        iconListContainer.widthAnchor.constraint(equalToConstant: Metrics.iconListWidth).isActive = true
 
         let listStack = NSStackView()
         listStack.orientation = .vertical
         listStack.alignment = .leading
         listStack.spacing = 0
         listStack.translatesAutoresizingMaskIntoConstraints = false
+        iconListContainer.addSubview(listStack)
 
         let iconThemes = availableIconThemes
         for (index, theme) in iconThemes.enumerated() {
@@ -686,22 +687,19 @@ final class SettingsViewController: NSViewController {
                 title: iconDisplayName(for: theme),
                 image: iconPreviewImage(for: theme)
             )
-            button.widthAnchor.constraint(
-                equalToConstant: Metrics.iconListWidth - (Metrics.iconListInset * 2)
-            ).isActive = true
             button.tag = index
             button.target = self
             button.action = #selector(iconThemeSelected(_:))
             iconOptionButtons[theme] = button
             listStack.addArrangedSubview(button)
+            button.widthAnchor.constraint(equalTo: listStack.widthAnchor).isActive = true
 
             if index < iconThemes.count - 1 {
                 let dividerRow = makeIconDividerRow()
                 listStack.addArrangedSubview(dividerRow)
+                dividerRow.widthAnchor.constraint(equalTo: listStack.widthAnchor).isActive = true
             }
         }
-
-        iconListContainer.addSubview(listStack)
 
         let footer = NSStackView(views: [applyIconButton, iconStatusLabel, currentIconThemeBadge])
         footer.orientation = .horizontal
@@ -713,7 +711,6 @@ final class SettingsViewController: NSViewController {
 
         let footerContainer = NSView()
         footerContainer.translatesAutoresizingMaskIntoConstraints = false
-        footerContainer.widthAnchor.constraint(equalToConstant: Metrics.iconListWidth).isActive = true
         footerContainer.addSubview(footer)
 
         NSLayoutConstraint.activate([
@@ -735,6 +732,8 @@ final class SettingsViewController: NSViewController {
         pageStack.translatesAutoresizingMaskIntoConstraints = false
 
         NSLayoutConstraint.activate([
+            iconListContainer.widthAnchor.constraint(equalTo: pageStack.widthAnchor),
+            footerContainer.widthAnchor.constraint(equalTo: pageStack.widthAnchor),
             listStack.leadingAnchor.constraint(equalTo: iconListContainer.leadingAnchor, constant: Metrics.iconListInset),
             listStack.trailingAnchor.constraint(equalTo: iconListContainer.trailingAnchor, constant: -Metrics.iconListInset),
             listStack.topAnchor.constraint(equalTo: iconListContainer.topAnchor, constant: Metrics.iconListInset),
@@ -746,10 +745,9 @@ final class SettingsViewController: NSViewController {
         container.addSubview(pageStack)
 
         NSLayoutConstraint.activate([
-            pageStack.topAnchor.constraint(equalTo: container.topAnchor),
-            pageStack.centerXAnchor.constraint(equalTo: container.centerXAnchor),
-            pageStack.leadingAnchor.constraint(greaterThanOrEqualTo: container.leadingAnchor, constant: 24),
-            pageStack.trailingAnchor.constraint(lessThanOrEqualTo: container.trailingAnchor, constant: -24),
+            pageStack.topAnchor.constraint(equalTo: container.topAnchor, constant: Metrics.iconPageTopInset),
+            pageStack.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: Metrics.iconPageHorizontalInset),
+            pageStack.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -Metrics.iconPageHorizontalInset),
             pageStack.bottomAnchor.constraint(equalTo: container.bottomAnchor),
         ])
 
@@ -1034,9 +1032,6 @@ final class SettingsViewController: NSViewController {
 
         let container = NSView()
         container.translatesAutoresizingMaskIntoConstraints = false
-        container.widthAnchor.constraint(
-            equalToConstant: Metrics.iconListWidth - (Metrics.iconListInset * 2)
-        ).isActive = true
         container.heightAnchor.constraint(equalToConstant: 1).isActive = true
         container.addSubview(divider)
 
