@@ -159,8 +159,6 @@ if [[ -x "$LSREGISTER" ]]; then
   register_clean_bundles
 fi
 
-/usr/bin/killall Dock >/dev/null 2>&1 || true
-
 kill_running_instances
 nohup /usr/bin/open -n "$INSTALL_PATH" >>"$LOG_PATH" 2>&1 &
 log "Relaunch triggered for theme: $THEME"

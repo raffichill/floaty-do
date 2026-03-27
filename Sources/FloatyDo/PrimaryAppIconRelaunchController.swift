@@ -39,10 +39,7 @@ final class PrimaryAppIconRelaunchController {
             throw RelaunchError.repositoryNotFound
         }
 
-        let scriptURL = try iconApplyScriptURL(in: repoRootURL)
-        guard fileManager.isExecutableFile(atPath: scriptURL.path) else {
-            throw RelaunchError.scriptNotFound
-        }
+        let scriptURL = iconApplyScriptURL(in: repoRootURL)
 
         let process = Process()
         process.executableURL = URL(fileURLWithPath: bashPath)
@@ -133,14 +130,10 @@ final class PrimaryAppIconRelaunchController {
             && fileManager.fileExists(atPath: projectURL.path)
     }
 
-    private func iconApplyScriptURL(in repositoryRoot: URL) throws -> URL {
-        let scriptURL = repositoryRoot
+    private func iconApplyScriptURL(in repositoryRoot: URL) -> URL {
+        repositoryRoot
             .appendingPathComponent(Constants.scriptsPath)
             .appendingPathComponent(Constants.iconApplyScriptName)
-        guard fileManager.fileExists(atPath: scriptURL.path) else {
-            throw RelaunchError.scriptNotFound
-        }
-        return scriptURL
     }
 
     func previewImage(for theme: BuiltInTheme) -> NSImage? {
@@ -163,14 +156,10 @@ final class PrimaryAppIconRelaunchController {
 extension PrimaryAppIconRelaunchController {
     enum RelaunchError: LocalizedError {
         case repositoryNotFound
-        case scriptNotFound
-
         var errorDescription: String? {
             switch self {
             case .repositoryNotFound:
                 return "FloatyDo couldn’t find its local project files."
-            case .scriptNotFound:
-                return "FloatyDo couldn’t find the icon relaunch script."
             }
         }
     }
