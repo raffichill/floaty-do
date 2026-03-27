@@ -42,6 +42,7 @@ final class SettingsViewController: NSViewController {
         static let iconPageHorizontalInset: CGFloat = 36
         static let iconPageTopInset: CGFloat = 0
         static let iconListCornerRadius: CGFloat = 8
+        static let iconListHeight: CGFloat = 400
         static let iconListInset: CGFloat = 12
         static let iconDividerLeadingInset: CGFloat = 54
         static let iconFooterTopInset: CGFloat = outerPadding.bottom
@@ -674,12 +675,28 @@ final class SettingsViewController: NSViewController {
         iconListContainer.layer?.cornerRadius = Metrics.iconListCornerRadius
         iconListContainer.layer?.borderWidth = 1
 
+        let scrollView = NSScrollView()
+        scrollView.translatesAutoresizingMaskIntoConstraints = false
+        scrollView.drawsBackground = false
+        scrollView.borderType = .noBorder
+        scrollView.hasVerticalScroller = true
+        scrollView.hasHorizontalScroller = false
+        scrollView.autohidesScrollers = true
+        scrollView.scrollerStyle = .overlay
+        scrollView.verticalScrollElasticity = .automatic
+        scrollView.horizontalScrollElasticity = .none
+
         let listStack = NSStackView()
         listStack.orientation = .vertical
         listStack.alignment = .leading
         listStack.spacing = 0
         listStack.translatesAutoresizingMaskIntoConstraints = false
-        iconListContainer.addSubview(listStack)
+
+        let listContentView = NSView()
+        listContentView.translatesAutoresizingMaskIntoConstraints = false
+        listContentView.addSubview(listStack)
+        scrollView.documentView = listContentView
+        iconListContainer.addSubview(scrollView)
 
         let iconThemes = availableIconThemes
         for (index, theme) in iconThemes.enumerated() {
@@ -733,11 +750,20 @@ final class SettingsViewController: NSViewController {
 
         NSLayoutConstraint.activate([
             iconListContainer.widthAnchor.constraint(equalTo: pageStack.widthAnchor),
+            iconListContainer.heightAnchor.constraint(equalToConstant: Metrics.iconListHeight),
             footerContainer.widthAnchor.constraint(equalTo: pageStack.widthAnchor),
-            listStack.leadingAnchor.constraint(equalTo: iconListContainer.leadingAnchor, constant: Metrics.iconListInset),
-            listStack.trailingAnchor.constraint(equalTo: iconListContainer.trailingAnchor, constant: -Metrics.iconListInset),
-            listStack.topAnchor.constraint(equalTo: iconListContainer.topAnchor, constant: Metrics.iconListInset),
-            listStack.bottomAnchor.constraint(equalTo: iconListContainer.bottomAnchor, constant: -Metrics.iconListInset),
+            scrollView.leadingAnchor.constraint(equalTo: iconListContainer.leadingAnchor),
+            scrollView.trailingAnchor.constraint(equalTo: iconListContainer.trailingAnchor),
+            scrollView.topAnchor.constraint(equalTo: iconListContainer.topAnchor),
+            scrollView.bottomAnchor.constraint(equalTo: iconListContainer.bottomAnchor),
+            listContentView.leadingAnchor.constraint(equalTo: scrollView.contentView.leadingAnchor),
+            listContentView.trailingAnchor.constraint(equalTo: scrollView.contentView.trailingAnchor),
+            listContentView.topAnchor.constraint(equalTo: scrollView.contentView.topAnchor),
+            listContentView.widthAnchor.constraint(equalTo: scrollView.contentView.widthAnchor),
+            listStack.leadingAnchor.constraint(equalTo: listContentView.leadingAnchor, constant: Metrics.iconListInset),
+            listStack.trailingAnchor.constraint(equalTo: listContentView.trailingAnchor, constant: -Metrics.iconListInset),
+            listStack.topAnchor.constraint(equalTo: listContentView.topAnchor, constant: Metrics.iconListInset),
+            listStack.bottomAnchor.constraint(equalTo: listContentView.bottomAnchor, constant: -Metrics.iconListInset),
         ])
 
         let container = NSView()

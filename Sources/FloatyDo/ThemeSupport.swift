@@ -76,7 +76,7 @@ public enum BuiltInTheme: String, Codable, CaseIterable {
                 highlightColor: ThemeColor(hex: "#B6D9F0"),
                 foregroundColor: ThemeColor(hex: "#092539")
             ),
-            supportsPrimaryAppIcon: false
+            supportsPrimaryAppIcon: true
         ),
         BuiltInThemeDefinition(
             theme: .theme6,
@@ -85,7 +85,7 @@ public enum BuiltInTheme: String, Codable, CaseIterable {
                 highlightColor: ThemeColor(hex: "#E9B7CF"),
                 foregroundColor: ThemeColor(hex: "#240313")
             ),
-            supportsPrimaryAppIcon: false
+            supportsPrimaryAppIcon: true
         ),
         BuiltInThemeDefinition(
             theme: .theme7,
@@ -94,7 +94,7 @@ public enum BuiltInTheme: String, Codable, CaseIterable {
                 highlightColor: ThemeColor(hex: "#BAC99F"),
                 foregroundColor: ThemeColor(hex: "#1E2E00")
             ),
-            supportsPrimaryAppIcon: false
+            supportsPrimaryAppIcon: true
         ),
         BuiltInThemeDefinition(
             theme: .theme8,
@@ -124,6 +124,23 @@ public enum BuiltInTheme: String, Codable, CaseIterable {
 
     public var supportsPrimaryAppIcon: Bool {
         definition.supportsPrimaryAppIcon
+    }
+
+    public var primaryAppIconAssetName: String {
+        switch self {
+        case .theme1: return "theme1"
+        case .theme2: return "theme2"
+        case .theme3: return "theme3"
+        case .theme4: return "theme4"
+        case .theme5: return "theme5"
+        case .theme6: return "theme6"
+        case .theme7: return "theme7"
+        case .theme8: return "theme8"
+        }
+    }
+
+    public var previewImageAssetName: String {
+        "\(primaryAppIconAssetName)-preview"
     }
 
     public var color: ThemeColor {

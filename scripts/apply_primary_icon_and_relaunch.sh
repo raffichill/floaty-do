@@ -3,7 +3,8 @@ set -euo pipefail
 
 REPO_ROOT="${1:?repo root required}"
 THEME="${2:?theme required}"
-CURRENT_PID="${3:?current pid required}"
+MARKER_THEME="${3:?marker theme required}"
+CURRENT_PID="${4:?current pid required}"
 
 ICONS_DIR="$REPO_ROOT/FloatyDo/FloatyDo/Icons"
 THEME_ICON="$ICONS_DIR/${THEME}.icon"
@@ -40,7 +41,7 @@ verify_file() {
 
 assert_known_theme() {
   case "$THEME" in
-    theme1|theme2|theme3|theme4|theme5)
+    theme1|theme2|theme3|theme4|theme5|theme6|theme7|theme8)
       return 0
       ;;
     *)
@@ -152,7 +153,7 @@ rm -rf "$TMP_INSTALL"
 rm -rf "$INSTALL_PATH"
 mv "$TMP_INSTALL" "$INSTALL_PATH"
 verify_binary "$INSTALL_PATH"
-atomic_write "$THEME" "$THEME_MARKER"
+atomic_write "$MARKER_THEME" "$THEME_MARKER"
 
 if [[ -x "$LSREGISTER" ]]; then
   register_clean_bundles

@@ -49,6 +49,7 @@ final class PrimaryAppIconRelaunchController {
         process.arguments = [
             scriptURL.path,
             repoRootURL.path,
+            theme.primaryAppIconAssetName,
             theme.rawValue,
             "\(ProcessInfo.processInfo.processIdentifier)",
         ]
@@ -143,14 +144,7 @@ final class PrimaryAppIconRelaunchController {
     }
 
     func previewImage(for theme: BuiltInTheme) -> NSImage? {
-        guard let repositoryRootURL = repositoryRootURL() else { return nil }
-        let previewURL = repositoryRootURL
-            .appendingPathComponent("FloatyDo/FloatyDo/Icons")
-            .appendingPathComponent("\(theme.rawValue).icon")
-            .appendingPathComponent("Assets")
-            .appendingPathComponent("\(theme.rawValue).png")
-        guard fileManager.fileExists(atPath: previewURL.path) else { return nil }
-        return NSImage(contentsOf: previewURL)
+        NSImage(named: NSImage.Name(theme.previewImageAssetName))
     }
 
     private func normalizedPersistedPathCandidates(from path: String) -> [String] {

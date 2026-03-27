@@ -29,7 +29,7 @@ final class SettingsViewControllerTests: XCTestCase {
 
         XCTAssertEqual(
             controller.testingIconOptionTitles(),
-            ["Theme 1", "Theme 2", "Theme 3", "Theme 4", "Theme 8"]
+            ["Theme 1", "Theme 2", "Theme 3", "Theme 4", "Theme 5", "Theme 6", "Theme 7", "Theme 8"]
         )
     }
 
@@ -94,10 +94,10 @@ final class SettingsViewControllerTests: XCTestCase {
         )
         XCTAssertEqual(BuiltInTheme.catalog.map(\.theme), BuiltInTheme.allCases)
         XCTAssertTrue(BuiltInTheme.theme1.supportsPrimaryAppIcon)
+        XCTAssertTrue(BuiltInTheme.theme5.supportsPrimaryAppIcon)
+        XCTAssertTrue(BuiltInTheme.theme6.supportsPrimaryAppIcon)
+        XCTAssertTrue(BuiltInTheme.theme7.supportsPrimaryAppIcon)
         XCTAssertTrue(BuiltInTheme.theme8.supportsPrimaryAppIcon)
-        XCTAssertFalse(BuiltInTheme.theme6.supportsPrimaryAppIcon)
-        XCTAssertFalse(BuiltInTheme.theme7.supportsPrimaryAppIcon)
-        XCTAssertFalse(BuiltInTheme.theme5.supportsPrimaryAppIcon)
     }
 
     func testBuiltInThemeNearestUsesCatalogColors() {
