@@ -33,6 +33,25 @@ final class SettingsViewControllerTests: XCTestCase {
         )
     }
 
+    func testThemeDigitShortcutAppliesMatchingThemeOnlyOnAppearanceTab() {
+        let controller = SettingsViewController(preferences: .default)
+        controller.loadViewIfNeeded()
+
+        var updatedTheme: BuiltInTheme?
+        controller.onPreferencesChange = { updated in
+            updatedTheme = updated.theme
+        }
+
+        XCTAssertTrue(controller.handleThemeDigitShortcut(6))
+        XCTAssertEqual(updatedTheme, .theme6)
+
+        controller.showIconTab(animated: false)
+        updatedTheme = nil
+
+        XCTAssertFalse(controller.handleThemeDigitShortcut(2))
+        XCTAssertNil(updatedTheme)
+    }
+
     func testIconFooterShowsCurrentStateOrRelaunchPrompt() {
         let controller = SettingsViewController(preferences: .default)
         controller.loadViewIfNeeded()

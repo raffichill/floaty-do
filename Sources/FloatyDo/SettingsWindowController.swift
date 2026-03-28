@@ -184,6 +184,16 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         settingsViewController.isHotkeyCaptureActive
     }
 
+    var isVisibleAndKey: Bool {
+        guard let window else { return false }
+        return window.isVisible && window.isKeyWindow
+    }
+
+    @discardableResult
+    func handleThemeDigitShortcut(_ digit: Int) -> Bool {
+        settingsViewController.handleThemeDigitShortcut(digit)
+    }
+
     @available(*, unavailable)
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")

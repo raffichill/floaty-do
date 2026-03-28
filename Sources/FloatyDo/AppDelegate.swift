@@ -140,6 +140,11 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 return nil
             }
 
+            if mods.isEmpty, let characters, let digit = Int(characters),
+               self.todoVC.handleSettingsThemeDigitShortcut(digit) {
+                return nil
+            }
+
             if mods == [.control, .option] {
                 switch event.keyCode {
                 case 123:

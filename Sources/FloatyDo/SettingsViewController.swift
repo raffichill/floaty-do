@@ -1972,6 +1972,19 @@ final class SettingsViewController: NSViewController {
         updateAppIconControls()
     }
 
+    @discardableResult
+    func handleThemeDigitShortcut(_ digit: Int) -> Bool {
+        guard selectedTab == .appearance else { return false }
+        let themes = BuiltInTheme.allCases
+        let index = digit - 1
+        guard themes.indices.contains(index) else { return false }
+
+        commitPreferenceChange { updated in
+            updated.theme = themes[index]
+        }
+        return true
+    }
+
     func testingIconDisplayName(for theme: BuiltInTheme) -> String {
         iconDisplayName(for: theme)
     }

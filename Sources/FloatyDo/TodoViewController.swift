@@ -804,6 +804,14 @@ public final class TodoViewController: NSViewController, NSTextFieldDelegate {
     }
 
     @discardableResult
+    func handleSettingsThemeDigitShortcut(_ digit: Int) -> Bool {
+        guard let controller = settingsWindowController, controller.isVisibleAndKey else {
+            return false
+        }
+        return controller.handleThemeDigitShortcut(digit)
+    }
+
+    @discardableResult
     private func dismissSettingsWindowIfVisible() -> Bool {
         guard let window = settingsWindowController?.window, window.isVisible else {
             return false
