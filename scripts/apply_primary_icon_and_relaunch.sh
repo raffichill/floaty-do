@@ -84,6 +84,44 @@ verify_icon_source() {
   verify_file "$icon_path/icon.json"
 }
 
+replace_bundle_icns_with_full_res() {
+  local app_bundle="$1"
+  local source_png="$THEME_ICON/Assets/${THEME}.png"
+  verify_file "$source_png"
+
+  local info_plist="$app_bundle/Contents/Info.plist"
+  verify_file "$info_plist"
+
+  local icon_file
+  icon_file=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIconFile' "$info_plist" 2>/dev/null || true)
+  if [[ -z "$icon_file" ]]; then
+    die "Missing CFBundleIconFile in $info_plist"
+  fi
+  if [[ "$icon_file" != *.icns ]]; then
+    icon_file="${icon_file%.*}.icns"
+  fi
+
+  local destination_icns="$app_bundle/Contents/Resources/$icon_file"
+  local tmp_dir
+  tmp_dir="$(mktemp -d)"
+  local iconset_dir="$tmp_dir/${THEME}.iconset"
+  local generated_icns="$tmp_dir/${THEME}.icns"
+  mkdir -p "$iconset_dir"
+
+  for size in 16 32 128 256 512; do
+    /usr/bin/sips -z "$size" "$size" "$source_png" --out "$iconset_dir/icon_${size}x${size}.png" >/dev/null
+  done
+  /usr/bin/sips -z 32 32 "$source_png" --out "$iconset_dir/icon_16x16@2x.png" >/dev/null
+  /usr/bin/sips -z 64 64 "$source_png" --out "$iconset_dir/icon_32x32@2x.png" >/dev/null
+  /usr/bin/sips -z 256 256 "$source_png" --out "$iconset_dir/icon_128x128@2x.png" >/dev/null
+  /usr/bin/sips -z 512 512 "$source_png" --out "$iconset_dir/icon_256x256@2x.png" >/dev/null
+  /usr/bin/sips -z 1024 1024 "$source_png" --out "$iconset_dir/icon_512x512@2x.png" >/dev/null
+
+  /usr/bin/xcrun iconutil --convert icns "$iconset_dir" -o "$generated_icns"
+  mv "$generated_icns" "$destination_icns"
+  rm -rf "$tmp_dir"
+}
+
 atomic_write() {
   local content="$1"
   local path="$2"
@@ -143,6 +181,8 @@ log "Rebuilding FloatyDo with primary icon theme: $THEME"
 
 verify_binary "$APP_PATH"
 verify_icon_source "$THEME_ICON"
+replace_bundle_icns_with_full_res "$APP_PATH"
+verify_binary "$APP_PATH"
 
 mkdir -p "$APP_SUPPORT_DIR"
 atomic_write "$REPO_ROOT" "$PROJECT_ROOT_FILE"
